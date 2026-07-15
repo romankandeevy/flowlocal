@@ -110,11 +110,45 @@ class App:
         self.root.after(40, self._poll_ui)
 
     # ---------- хоткей ----------
+    # Одна клавиша: press = старт, release = стоп.
+    # Комбинация ("ctrl+shift+space"): add_hotkey = старт (автоповтор гасится
+    # проверкой _recording), отпускание ЛЮБОЙ клавиши комбинации = стоп.
 
-    def _on_press(self, _e) -> None:
+    _GENERIC_KEYS = {
+        "ctrl": ("left ctrl", "right ctrl"),
+        "shift": ("left shift", "right shift"),
+        "alt": ("left alt", "right alt"),
+        "win": ("left windows", "right windows"),
+        "windows": ("left windows", "right windows"),
+    }
+
+    def _hotkey_bind(self) -> None:
+        hk = str(self.cfg.get("hotkey", "ctrl+shift+space"))
+        if "+" in hk:
+            keyboard.add_hotkey(hk, self._start_recording, suppress=False)
+            release_keys: set[str] = set()
+            for part in (p.strip() for p in hk.split("+") if p.strip()):
+                release_keys.update(self._GENERIC_KEYS.get(part, (part,)))
+            for name in release_keys:
+                keyboard.on_release_key(name, self._combo_release, suppress=False)
+        else:
+            keyboard.on_press_key(hk, self._single_press, suppress=False)
+            keyboard.on_release_key(hk, self._single_release, suppress=False)
+
+    def _single_press(self, _e) -> None:
         if self._key_down:  # автоповтор зажатой клавиши
             return
         self._key_down = True
+        self._start_recording()
+
+    def _single_release(self, _e) -> None:
+        self._key_down = False
+        self._finish_recording()
+
+    def _combo_release(self, _e) -> None:
+        self._finish_recording()
+
+    def _start_recording(self) -> None:
         if not self._ready or self._recording:
             return
         self._recording = True
@@ -129,8 +163,7 @@ class App:
         self.ui(self.overlay.show_recording)
         self._set_tray_state("rec")
 
-    def _on_release(self, _e) -> None:
-        self._key_down = False
+    def _finish_recording(self) -> None:
         if not self._recording:
             return
         self._recording = False
@@ -257,9 +290,7 @@ class App:
             self.ui(self.root.quit)
 
     def run(self) -> None:
-        hk = self.cfg.get("hotkey", "right ctrl")
-        keyboard.on_press_key(hk, self._on_press, suppress=False)
-        keyboard.on_release_key(hk, self._on_release, suppress=False)
+        self._hotkey_bind()
         self._start_tray()
         threading.Thread(target=self._load_model_bg, daemon=True).start()
         self.root.after(40, self._poll_ui)
