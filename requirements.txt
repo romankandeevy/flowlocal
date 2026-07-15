@@ -1,0 +1,10 @@
+faster-whisper>=1.2
+sounddevice>=0.5
+keyboard>=0.13
+pystray>=0.19
+pillow>=10
+pywin32>=306
+numpy
+# GPU (NVIDIA): библиотеки CUDA ставятся pip'ом, системный CUDA Toolkit не нужен
+nvidia-cublas-cu12
+nvidia-cudnn-cu12

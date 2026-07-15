@@ -1,0 +1,5 @@
+﻿models/
+__pycache__/
+flow.log
+history.jsonl
+test.wav
