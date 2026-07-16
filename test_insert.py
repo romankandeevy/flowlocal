@@ -5,7 +5,11 @@ EDIT обрабатывает Ctrl+V на уровне класса окна (WM
 теста не годится: его биндинг <Control-v> привязан к латинскому keysym
 и молчит на русской раскладке.
 
-Печатает RESULT и PASS/FAIL. Запуск: python test_insert.py [paste|type]
+Буфер обмена перед проверкой засеивается известным текстом: иначе, если в
+буфере лежала картинка, восстанавливать нечего и проверка «вернули как
+было» врёт (текстом восстанавливается только текст - см. README).
+
+Запуск: python test_insert.py [paste|type|both]
 """
 
 import ctypes
@@ -13,22 +17,126 @@ import sys
 import threading
 import time
 
+import win32api
 import win32con
 import win32gui
 
-from inserter import _get_clipboard_text, insert
+from inserter import (
+    _get_clipboard_text,
+    _set_clipboard_text,
+    _wait_modifiers_released,
+    insert,
+)
 
 EXPECT = "Привет, FlowLocal - проверка вставки 123. "
+SEED = "буфер-до-вставки-42"
 VK_MENU = 0x12
+VK_SHIFT = 0x10
 
 
-def main() -> None:
-    mode = sys.argv[1] if len(sys.argv) > 1 else "paste"
-    before = _get_clipboard_text()
+def _force_foreground(hwnd) -> bool:
+    """Дотащить окно в фокус и дождаться, пока это правда случится.
 
+    Windows защищает активное окно от кражи фокуса, и голый
+    SetForegroundWindow часто молча не срабатывает - тогда Ctrl+V уходит в
+    чужое окно и тест краснеет на ровном месте.
+
+    Классический обход «нажать Alt перед SetForegroundWindow» здесь ЯДОВИТ:
+    отпускание Alt вводит окно в режим меню, и следующее нажатие съедается.
+    Съедается ровно наш Ctrl+V (в режиме paste не вставлялось ничего, в type
+    пропадала первая буква: «ривет» вместо «Привет»). Поэтому фокус берём
+    через AttachThreadInput - он не трогает клавиатуру вообще.
+    """
+    user32 = ctypes.windll.user32
+    k32 = ctypes.windll.kernel32
+    user32.GetForegroundWindow.restype = ctypes.c_void_p
+    user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
+    def try_attach() -> None:
+        fg = user32.GetForegroundWindow()
+        tid_me = k32.GetCurrentThreadId()
+        tid_fg = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+        attached = bool(tid_fg and tid_fg != tid_me
+                        and user32.AttachThreadInput(tid_me, tid_fg, True))
+        try:
+            user32.SetForegroundWindow(hwnd)
+            user32.BringWindowToTop(hwnd)
+            user32.SetActiveWindow(hwnd)
+            user32.SetFocus(hwnd)
+        finally:
+            if attached:
+                user32.AttachThreadInput(tid_me, tid_fg, False)
+
+    def settled() -> bool:
+        for _ in range(20):
+            if win32gui.GetForegroundWindow() == hwnd:
+                return True
+            time.sleep(0.05)
+        return False
+
+    if win32gui.GetForegroundWindow() == hwnd:
+        return True
+    try_attach()
+    if settled():
+        return True
+
+    # Не пустили: право поднять себя в фокус даётся тому, кто получил
+    # последний ввод от пользователя. Кликаем по самому окну - это ровно то,
+    # что сделал бы человек перед диктовкой, и клавиатуру это не портит.
+    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    old = win32api.GetCursorPos()
+    try:
+        win32api.SetCursorPos(((left + right) // 2, (top + bottom) // 2))
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        time.sleep(0.02)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+    finally:
+        win32api.SetCursorPos(old)      # вернуть курсор туда, где он был
+    try_attach()
+    return settled()
+
+
+def _run_modifier_release() -> bool:
+    """Зажатый Shift должен быть отжат принудительно по таймауту.
+
+    Проверяем сам механизм, а не вставку в EDIT: EDIT обрабатывает
+    Ctrl+Shift+V ровно как Ctrl+V, и разницы бы не показал (проверено -
+    тест проходил и со сломанным отжатием). А вот в реальных приложениях
+    Ctrl+Shift+V - совсем другая команда: «вставить без форматирования» в
+    Chrome и VS Code, «специальная вставка» в Word. Поэтому вставлять,
+    пока человек ещё держит модификаторы хоткея, нельзя.
+    """
+    user32 = ctypes.windll.user32
+    user32.keybd_event(VK_SHIFT, 0, 0, 0)
+    try:
+        for _ in range(100):        # keybd_event асинхронный - ждём, пока дойдёт
+            if win32api.GetAsyncKeyState(VK_SHIFT) & 0x8000:
+                break
+            time.sleep(0.01)
+        else:
+            print("--- отжатие модификаторов\n  не удалось зажать Shift\n  FAIL")
+            return False
+        t0 = time.time()
+        _wait_modifiers_released(timeout=0.4)
+        dt = time.time() - t0
+        released = not (win32api.GetAsyncKeyState(VK_SHIFT) & 0x8000)
+    finally:
+        user32.keybd_event(VK_SHIFT, 0, win32con.KEYEVENTF_KEYUP, 0)
+
+    waited = dt >= 0.4          # обязан честно подождать, а не сдаться сразу
+    print("--- отжатие модификаторов")
+    print(f"  ждал {dt:.2f} с (таймаут 0.4)      {waited}")
+    print(f"  Shift отжат принудительно:      {released}")
+    ok = waited and released
+    print(f"  {'PASS' if ok else 'FAIL'}")
+    return ok
+
+
+def _run(mode: str) -> bool:
+    _set_clipboard_text(SEED)
     hwnd = win32gui.CreateWindow(
         "EDIT",
-        "FlowLocal insert test",
+        f"FlowLocal insert test - {mode}",
         win32con.WS_OVERLAPPEDWINDOW | win32con.WS_VISIBLE | win32con.ES_MULTILINE,
         100, 100, 640, 200,
         0, 0, 0, None,
@@ -38,41 +146,69 @@ def main() -> None:
         win32con.SWP_NOMOVE | win32con.SWP_NOSIZE,
     )
     win32gui.SendMessage(hwnd, win32con.WM_SETTEXT, 0, "")
+    _force_foreground(hwnd)
 
-    # обход foreground-lock: короткий Alt перед SetForegroundWindow
-    user32 = ctypes.windll.user32
-    user32.keybd_event(VK_MENU, 0, 0, 0)
-    try:
-        win32gui.SetForegroundWindow(hwnd)
-    finally:
-        user32.keybd_event(VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
-
-    state = {"fg_at_paste": None}
+    state = {"fg": None, "ok": None}
     done = threading.Event()
 
     def go() -> None:
         time.sleep(0.8)
-        state["fg_at_paste"] = win32gui.GetForegroundWindow()
-        insert(EXPECT, mode)
+        state["fg"] = win32gui.GetForegroundWindow()
+        state["ok"] = insert(EXPECT, mode)
         time.sleep(0.8)
         done.set()
 
     threading.Thread(target=go, daemon=True).start()
-
     t0 = time.time()
-    while not done.is_set() and time.time() - t0 < 10:
+    while not done.is_set() and time.time() - t0 < 15:
         win32gui.PumpWaitingMessages()
         time.sleep(0.01)
 
     got = win32gui.GetWindowText(hwnd)
-    print("focus was ours at paste:", state["fg_at_paste"] == hwnd)
-    print("RESULT:", repr(got))
-    print("CLIPBOARD RESTORED:", _get_clipboard_text() == before)
-    print("PASS" if got == EXPECT else "FAIL")
+    clip = _get_clipboard_text()
     try:
         win32gui.DestroyWindow(hwnd)
     except Exception:  # noqa: BLE001 - окно могли закрыть вручную
         pass
+
+    text_ok = got == EXPECT
+    # в режиме type буфер вообще не трогается, в paste - должен вернуться
+    clip_ok = clip == SEED
+    focus_ok = state["fg"] == hwnd
+    print(f"--- {mode}")
+    print(f"  insert() -> {state['ok']}")
+    print(f"  focus was ours:    {focus_ok}")
+    print(f"  text inserted:     {text_ok}  {got!r}")
+    print(f"  clipboard restored:{clip_ok}  {clip!r}")
+    if not text_ok and _intruded(got):
+        # Окно теста топмостовое и в фокусе - в него влезает всё, что печатают
+        # рядом. Дважды тест краснел именно так («оман к…ндее» - куски чужой
+        # диктовки), и каждый раз это выглядело как баг вставки. Отличаем по
+        # простому признаку: наш текст пришёл целиком, но вокруг налипло чужое.
+        print("  ^ похоже на посторонний ввод в тестовое окно, а не на баг "
+              "вставки: наш текст на месте, но окно поймало ещё чужой.\n"
+              "    Во время прогона нельзя печатать и диктовать - перезапустите.")
+        return False
+    ok = text_ok and clip_ok and focus_ok and state["ok"]
+    print(f"  {'PASS' if ok else 'FAIL'}")
+    return ok
+
+
+def _intruded(got: str) -> bool:
+    """Наш текст доехал целиком, но в окне есть и что-то ещё."""
+    return EXPECT.strip() in got and got != EXPECT
+
+
+def main() -> None:
+    arg = sys.argv[1] if len(sys.argv) > 1 else "both"
+    if arg == "both":
+        results = [_run("paste"), _run("type"), _run_modifier_release()]
+    elif arg == "shift":
+        results = [_run_modifier_release()]
+    else:
+        results = [_run(arg)]
+    print("\nИТОГ:", "PASS" if all(results) else "FAIL")
+    sys.exit(0 if all(results) else 1)
 
 
 if __name__ == "__main__":

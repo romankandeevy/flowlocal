@@ -1,48 +1,51 @@
-"""Локальная транскрипция: faster-whisper (CTranslate2).
+"""Локальная транскрипция: onnx-asr.
 
-device=auto: пробуем CUDA (float16), при любой ошибке - CPU (int8).
-Ошибка CUDA может вылезти не при создании модели, а на первом вызове,
-поэтому после загрузки делаем прогрев секундой тишины - он же греет
-кернелы, чтобы первая реальная фраза не ждала инициализации.
+Было: faster-whisper (CTranslate2), 1.6 ГБ модели и обязательная CUDA -
+колёса nvidia-cublas и nvidia-cudnn тянут за собой ещё полгигабайта.
+Стало: onnxruntime и GigaAM v3 RNN-T int8 (226 МБ) на процессоре.
 
-download_root=models/ рядом с приложением: CTranslate2 плохо переносит
-кириллицу в путях, а дефолтный кэш HuggingFace лежит в C:/Users/<имя>.
+Почему (PLAN 0.2):
+
+- GigaAM обучен на 700 000 часах русской речи: WER по доменам 8.4% против
+  25.1% у Whisper. Для русского Whisper ошибается втрое чаще, и мы платили
+  за это гигабайтом CUDA.
+- RNN-T не авторегрессивный - галлюцинировать на тишине ему нечем. Фирменное
+  whisper-овское «Спасибо за просмотр!» на паузах лечится архитектурой, а не
+  порогами.
+- Вариант e2e сам ставит пунктуацию и нормализует числа («в 10:00 утра»).
+- И всё это на процессоре не медленнее, чем Whisper turbo на видеокарте.
+
+Модель качается в models/ рядом с приложением, а не в кэш HuggingFace: кэш
+лежит в C:/Users/<имя>, а имя бывает кириллицей. Папка на модель своя и
+включает квантизацию: int8 и fp32 - разные файлы в одном репозитории, в общей
+папке они бы смешались.
+
+Оговорка про словарь: hotwords из faster-whisper здесь нет и быть не может -
+у onnx-asr нет ни этого параметра, ни initial_prompt (подсказывать нечему,
+декодер не авторегрессивный). Словарь поэтому работает постобработкой, в
+cleaner.py.
 """
 
 import os
+import shutil
 import time
 
 import numpy as np
 
+from app_paths import MODELS_DIR
 from recorder import SAMPLE_RATE
 
-MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+# Модели, которые умеют принимать язык. Остальным (GigaAM) его передавать
+# нельзя: русский там единственный, а лишний kwarg долетит до onnxruntime.
+_LANG_MODELS = ("whisper", "canary")
+
+DEFAULT_MODEL = "gigaam-v3-e2e-rnnt"
 
 
-def _add_cuda_dlls() -> None:
-    """cuBLAS/cuDNN из pip-пакетов nvidia-* должны быть видны до импорта ctranslate2."""
-    import site
-
-    paths = []
-    try:
-        paths = site.getsitepackages() + [site.getusersitepackages()]
-    except Exception:  # noqa: BLE001
-        pass
-    for sp in paths:
-        nv = os.path.join(sp, "nvidia")
-        if not os.path.isdir(nv):
-            continue
-        for pkg in os.listdir(nv):
-            b = os.path.join(nv, pkg, "bin")
-            if os.path.isdir(b):
-                try:
-                    os.add_dll_directory(b)
-                    os.environ["PATH"] = b + os.pathsep + os.environ.get("PATH", "")
-                except OSError:
-                    pass
-
-
-_add_cuda_dlls()
+def model_dir(model: str, quant: str | None) -> str:
+    """Папка модели в models/. Идентификатор бывает вида «org/repo» - слэш
+    в имени папки Windows не переживёт."""
+    return os.path.join(MODELS_DIR, model.replace("/", "--") + ("-" + quant if quant else "-fp32"))
 
 
 class Transcriber:
@@ -51,52 +54,88 @@ class Transcriber:
         self.log = log
         self.model = None
         self.device = "?"
-        self.compute_type = "?"
+        self.compute_type = "?"      # int8 | fp32 - как называется в UI и логах
+
+    # ---------- загрузка ----------
+
+    def _providers(self, device: str) -> list[tuple[str, list[str]]]:
+        """[(имя устройства, providers)] в порядке попыток.
+
+        auto: CUDA только если onnxruntime реально её собрал (это отдельное
+        колесо onnxruntime-gpu). Обычная сборка отдаёт CPU, и это нормальный
+        режим работы, а не деградация: GigaAM на процессоре укладывается в
+        секунду. Спрашиваем сам onnxruntime, а не наличие видеокарты: карта
+        может быть, а провайдера под неё в сборке нет.
+        """
+        import onnxruntime as rt
+
+        have = set(rt.get_available_providers())
+        if device == "cuda":
+            return [("cuda", ["CUDAExecutionProvider", "CPUExecutionProvider"])]
+        if device == "cpu":
+            return [("cpu", ["CPUExecutionProvider"])]
+        attempts = []
+        if "CUDAExecutionProvider" in have:
+            attempts.append(("cuda", ["CUDAExecutionProvider", "CPUExecutionProvider"]))
+        attempts.append(("cpu", ["CPUExecutionProvider"]))
+        return attempts
+
+    def _load_once(self, name: str, quant: str | None, providers: list[str]):
+        """Загрузка с одной попыткой докачки.
+
+        onnx-asr считает существующую папку признаком «работаем офлайн» и
+        качать в неё уже не пойдёт. Оборванная скачка оставляет папку с
+        неполным набором файлов - и приложение после этого не поднимется
+        никогда, пока папку не снести руками. Сносим сами.
+        """
+        import onnx_asr
+        from onnx_asr.utils import ModelFileNotFoundError
+
+        d = model_dir(name, quant)
+        try:
+            return onnx_asr.load_model(name, path=d, quantization=quant, providers=providers)
+        except ModelFileNotFoundError:
+            if not os.path.isdir(d):
+                raise
+            self.log(f"модель в {d} неполная - качаю заново")
+            shutil.rmtree(d, ignore_errors=True)
+            return onnx_asr.load_model(name, path=d, quantization=quant, providers=providers)
 
     def load(self) -> None:
-        from faster_whisper import WhisperModel
+        name = str(self.cfg.get("model") or DEFAULT_MODEL)
+        quant = self.cfg.get("quantization", "int8") or None
+        device = str(self.cfg.get("device", "auto") or "auto")
 
-        name = self.cfg.get("model", "large-v3-turbo")
-        device = self.cfg.get("device", "auto")
-        compute = self.cfg.get("compute_type", "auto")
-
-        if device == "auto":
-            attempts = [
-                ("cuda", "float16" if compute == "auto" else compute),
-                ("cpu", "int8" if compute == "auto" else compute),
-            ]
-        else:
-            ct = compute if compute != "auto" else ("float16" if device == "cuda" else "int8")
-            attempts = [(device, ct)]
-
+        os.makedirs(MODELS_DIR, exist_ok=True)
         last_err: Exception | None = None
-        for dev, ct in attempts:
+        for dev, providers in self._providers(device):
             try:
                 t0 = time.time()
-                model = WhisperModel(name, device=dev, compute_type=ct, download_root=MODELS_DIR)
-                # прогрев и одновременно проверка, что бэкенд реально работает
-                warmup = np.zeros(SAMPLE_RATE, dtype=np.float32)
-                segments, _ = model.transcribe(warmup, beam_size=1, language="ru")
-                list(segments)
+                model = self._load_once(name, quant, providers)
+                # Прогрев - он же проверка, что бэкенд живой: ошибка провайдера
+                # вылезает не на создании сессии, а на первом прогоне. Заодно
+                # первая настоящая фраза не ждёт инициализации кернелов.
+                model.recognize(np.zeros(SAMPLE_RATE, dtype=np.float32))
                 self.model = model
                 self.device = dev
-                self.compute_type = ct
-                self.log(f"model={name} device={dev} compute={ct} load={time.time() - t0:.1f}s")
+                self.compute_type = quant or "fp32"
+                self.log(f"model={name} device={dev} quant={self.compute_type} "
+                         f"load={time.time() - t0:.1f}s")
                 return
             except Exception as e:  # noqa: BLE001 - фолбэк на следующий бэкенд
                 last_err = e
-                self.log(f"backend {dev}/{ct} failed: {e}")
+                self.log(f"backend {dev} failed: {e}")
         raise RuntimeError(f"не удалось загрузить модель: {last_err}")
 
+    # ---------- распознавание ----------
+
     def transcribe(self, audio: np.ndarray) -> str:
-        lang = self.cfg.get("language") or None
-        hotwords = " ".join(self.cfg.get("dictionary", [])) or None
-        segments, _info = self.model.transcribe(
-            audio,
-            language=lang,
-            beam_size=int(self.cfg.get("beam_size", 5)),
-            vad_filter=True,
-            condition_on_previous_text=False,
-            hotwords=hotwords,
-        )
-        return " ".join(s.text.strip() for s in segments).strip()
+        if self.model is None:
+            raise RuntimeError("модель ещё не загружена")
+        if audio.size < SAMPLE_RATE // 20:   # <50 мс: распознавать нечего
+            return ""
+        opts = {}
+        name = str(self.cfg.get("model") or DEFAULT_MODEL).lower()
+        if any(m in name for m in _LANG_MODELS) and self.cfg.get("language"):
+            opts["language"] = self.cfg["language"]
+        return str(self.model.recognize(audio, sample_rate=SAMPLE_RATE, **opts) or "").strip()

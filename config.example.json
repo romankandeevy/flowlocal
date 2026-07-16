@@ -1,0 +1,32 @@
+{
+  "hotkey_hold": "ctrl+shift+space",
+  "hotkey_toggle": "",
+  "undo_hotkey": "",
+  "language": null,
+  "model": "gigaam-v3-e2e-rnnt",
+  "quantization": "int8",
+  "device": "auto",
+  "mic_device": null,
+  "keep_mic_open": true,
+  "pre_buffer_sec": 0.5,
+  "min_record_sec": 0.3,
+  "insert_mode": "paste",
+  "append_space": true,
+  "restore_clipboard": true,
+  "sounds": true,
+  "theme": "system",
+  "remove_fillers": true,
+  "history": true,
+  "dictionary": [
+    "Онест",
+    "Корти"
+  ],
+  "snippets": {},
+  "tone_rules": {},
+  "llm": {
+    "enabled": false,
+    "url": "http://127.0.0.1:11434",
+    "model": "qwen2.5:3b",
+    "timeout_sec": 20
+  }
+}

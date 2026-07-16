@@ -19,6 +19,7 @@ import win32api
 import win32clipboard
 import win32con
 
+VK_BACK = 0x08
 VK_SHIFT = 0x10
 VK_CONTROL = 0x11
 VK_MENU = 0x12  # Alt
@@ -27,19 +28,40 @@ VK_RWIN = 0x5C
 VK_V = 0x56
 
 
-def _wait_modifiers_released(timeout: float = 2.0) -> None:
+_MODS = (VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN)
+# Ctrl/Shift/Alt корёжат вставку, и их безопасно «отжать» программно.
+# Win не трогаем: его одиночный KEYUP открывает меню «Пуск».
+_FORCE_RELEASE = (VK_SHIFT, VK_CONTROL, VK_MENU)
+
+
+def _held(vk: int) -> bool:
+    return bool(win32api.GetAsyncKeyState(vk) & 0x8000)
+
+
+def _wait_modifiers_released(timeout: float = 1.5) -> None:
     """Ждём, пока физически отпущены Ctrl/Shift/Alt/Win: иначе наш Ctrl+V
-    превратится в Ctrl+Shift+V и т.п."""
+    превратится в Ctrl+Shift+V и т.п.
+
+    Если хоткей - комбинация, «отпустил» ловится по первой же клавише, и
+    человек вполне может ещё держать Ctrl+Shift, пока мы распознаём. Ждать
+    его вечно нельзя, вставлять с зажатым Shift - тоже, поэтому по истечении
+    таймаута отжимаем модификаторы сами. Физическое отпускание позже пришлёт
+    ещё один KEYUP - он безвреден.
+    """
     deadline = time.time() + timeout
-    mods = (VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN)
     while time.time() < deadline:
-        if not any(win32api.GetAsyncKeyState(vk) & 0x8000 for vk in mods):
+        if not any(_held(vk) for vk in _MODS):
             return
         time.sleep(0.02)
+    for vk in _FORCE_RELEASE:
+        if _held(vk):
+            win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP, 0)
+    time.sleep(0.03)
 
 
 def _send_ctrl_v() -> None:
     win32api.keybd_event(VK_CONTROL, 0, 0, 0)
+    time.sleep(0.01)
     win32api.keybd_event(VK_V, 0, 0, 0)
     time.sleep(0.02)
     win32api.keybd_event(VK_V, 0, win32con.KEYEVENTF_KEYUP, 0)
@@ -69,22 +91,83 @@ _KEYEVENTF_UNICODE = 0x0004
 _KEYEVENTF_KEYUP = 0x0002
 
 
-def _type_unicode(text: str) -> None:
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
+_user32.SendInput.restype = ctypes.c_uint
+_user32.SendInput.argtypes = [ctypes.c_uint, ctypes.POINTER(_INPUT), ctypes.c_int]
+
+_CHUNK = 400  # событий за один SendInput
+
+
+def _key_event(vk: int, scan: int, flags: int) -> _INPUT:
+    inp = _INPUT()
+    inp.type = _INPUT_KEYBOARD
+    inp.ki = _KEYBDINPUT(vk, scan, flags, 0, None)
+    return inp
+
+
+def _send(events: list[_INPUT]) -> bool:
+    """Отправить события порциями.
+
+    Очередь ввода не резиновая: один гигантский SendInput на несколько тысяч
+    событий часть из них просто теряет.
+    """
+    if not events:
+        return True
+    ok = True
+    for i in range(0, len(events), _CHUNK):
+        part = events[i:i + _CHUNK]
+        arr = (_INPUT * len(part))(*part)
+        sent = _user32.SendInput(len(part), arr, ctypes.sizeof(_INPUT))
+        ok = ok and sent == len(part)
+        if len(events) > _CHUNK:
+            time.sleep(0.005)
+    return ok
+
+
+def _type_unicode(text: str) -> bool:
     """Посимвольный ввод через SendInput KEYEVENTF_UNICODE - любая раскладка,
-    любые символы (кириллица, эмодзи через суррогатные пары)."""
+    любые символы (кириллица, эмодзи через суррогатные пары).
+    """
     raw = text.replace("\n", "\r").encode("utf-16-le")
     units = [int.from_bytes(raw[i:i + 2], "little") for i in range(0, len(raw), 2)]
-    events: list[_INPUT] = []
-    for unit in units:
-        for flags in (_KEYEVENTF_UNICODE, _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP):
-            inp = _INPUT()
-            inp.type = _INPUT_KEYBOARD
-            inp.ki = _KEYBDINPUT(0, unit, flags, 0, None)
-            events.append(inp)
-    if not events:
-        return
-    arr = (_INPUT * len(events))(*events)
-    ctypes.windll.user32.SendInput(len(events), arr, ctypes.sizeof(_INPUT))
+    return _send([_key_event(0, unit, flags)
+                  for unit in units
+                  for flags in (_KEYEVENTF_UNICODE,
+                                _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP)])
+
+
+VK_RETURN = 0x0D
+
+
+def press_enter() -> bool:
+    """Нажать Enter - голосовая команда «нажми энтер» (отправка в чатах).
+
+    Скан-код обязателен, как и везде: с нулём события уходят, но приложения,
+    читающие ввод по скан-кодам, их не видят (HANDOFF.md).
+    """
+    _wait_modifiers_released()
+    scan = win32api.MapVirtualKey(VK_RETURN, 0)
+    return _send([_key_event(VK_RETURN, scan, flags)
+                  for flags in (0, _KEYEVENTF_KEYUP)])
+
+
+def backspace(count: int) -> bool:
+    """Стереть count символов - отмена последней вставки.
+
+    Backspace, а не Ctrl+Z: отмена у каждого приложения своя, где-то её нет
+    вовсе, а где-то она откатит не наш кусок, а весь абзац разом. Backspace
+    предсказуем везде, где вообще есть текстовое поле.
+
+    Скан-код обязателен: с нулём события уходят, но приложения, читающие ввод
+    по скан-кодам, их не видят - те же грабли, что с хоткеями (HANDOFF.md).
+    """
+    if count <= 0:
+        return True
+    _wait_modifiers_released()
+    scan = win32api.MapVirtualKey(VK_BACK, 0)
+    return _send([_key_event(VK_BACK, scan, flags)
+                  for _ in range(count)
+                  for flags in (0, _KEYEVENTF_KEYUP)])
 
 
 def _get_clipboard_text() -> str | None:
@@ -115,19 +198,21 @@ def _set_clipboard_text(text: str) -> bool:
     return False
 
 
-def insert(text: str, mode: str = "paste", restore: bool = True) -> None:
+def insert(text: str, mode: str = "paste", restore: bool = True) -> bool:
+    """Вставить текст в активное окно. True - получилось."""
+    if not text:
+        return True
     _wait_modifiers_released()
     if mode == "type":
-        _type_unicode(text)
-        return
+        return _type_unicode(text)
 
     old = _get_clipboard_text() if restore else None
     if not _set_clipboard_text(text):
-        _type_unicode(text)
-        return
+        return _type_unicode(text)   # буфер занят намертво - хотя бы напечатаем
     time.sleep(0.05)
     _send_ctrl_v()
     if restore and old is not None:
         # дать целевому приложению забрать данные до восстановления буфера
         time.sleep(0.3)
         _set_clipboard_text(old)
+    return True

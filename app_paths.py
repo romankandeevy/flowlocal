@@ -1,0 +1,77 @@
+"""Пути приложения и автозапуск через реестр.
+
+Отдельно от app.py, потому что этим пользуется и окно настроек: тянуть
+ради двух функций весь app.py (а с ним модель и хоткеи) - лишнее.
+"""
+
+import os
+import sys
+import winreg
+
+def _app_dir() -> str:
+    """Папка, рядом с которой живут данные: конфиг, лог, история, модель.
+
+    При обычном запуске это папка с исходниками. В собранном .exe __file__
+    указывает внутрь временной распаковки PyInstaller - она стирается при
+    выходе, и настройки с историей пропадали бы после каждого закрытия.
+    Поэтому там берём папку самого .exe.
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+APP_DIR = _app_dir()
+CONFIG_PATH = os.path.join(APP_DIR, "config.json")
+# Личный конфиг в репозиторий не уезжает (словарь и сниппеты - личное), поэтому
+# у свежего клона его нет: приложение делает свой из примера. См. config.bootstrap.
+#
+# Пример ищем не рядом с конфигом, а рядом с кодом: в собранном .exe он лежит
+# ВНУТРИ, во временной распаковке (sys._MEIPASS), а рядом с .exe его нет -
+# оттуда и копируем наружу при первом запуске.
+EXAMPLE_PATH = os.path.join(
+    getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__)),
+    "config.example.json")
+LOG_PATH = os.path.join(APP_DIR, "flow.log")
+HISTORY_PATH = os.path.join(APP_DIR, "history.jsonl")
+MODELS_DIR = os.path.join(APP_DIR, "models")
+
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_NAME = "FlowLocal"
+
+
+def autostart_command() -> str:
+    """Команда автозапуска для реестра.
+
+    Собранный .exe запускает сам себя - никакого Python рядом нет.
+    Из исходников зовём pythonw, а не python: иначе при каждом входе в систему
+    всплывает и висит чёрное окно консоли.
+    """
+    if getattr(sys, "frozen", False):
+        return f'"{sys.executable}"'
+    pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    if not os.path.exists(pythonw):
+        pythonw = sys.executable
+    return f'"{pythonw}" "{os.path.join(APP_DIR, "app.py")}"'
+
+
+def autostart_enabled() -> bool:
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
+            value, _ = winreg.QueryValueEx(k, RUN_NAME)
+        return bool(value)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return False
+
+
+def set_autostart(enabled: bool) -> None:
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
+        if enabled:
+            winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, autostart_command())
+        else:
+            try:
+                winreg.DeleteValue(k, RUN_NAME)
+            except FileNotFoundError:
+                pass

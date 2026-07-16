@@ -1,12 +1,16 @@
 """Постобработка текста - аналог "AI-полировки" Wispr Flow.
 
+Первый слой - словарь (config.dictionary): чинит свои термины и фамилии.
 Базовый слой - консервативные regex-правила (убрать междометия,
 поправить пробелы/запятые). Опциональный слой - локальная LLM через
 Ollama (config.llm.enabled): чистит слова-паразиты и самоисправления.
-При любой ошибке LLM возвращается исходный текст - диктовка не должна
-ломаться из-за недоступной Ollama.
+Последний слой - сниппеты (config.snippets): подстановка "сказать -> вставить"
+для адресов и реквизитов, которые надоело диктовать по буквам.
+При любой ошибке любого слоя возвращается исходный текст - диктовка не должна
+ломаться из-за недоступной Ollama или битого конфига.
 """
 
+import functools
 import json
 import re
 import urllib.request
@@ -19,6 +23,89 @@ _FILLERS = re.compile(
     r"(?=[\s,.!?;:…-]|$)",
 )
 
+# Слова словаря разбираем по границам слов, кириллица для \w - полноценные буквы.
+_WORD = re.compile(r"\w+", re.UNICODE)
+
+# Насколько сильно распознанное слово может отличаться от словарного, чтобы мы
+# всё-таки признали в нём словарное. Лесенка по длине - не вкусовщина, а цена
+# ошибки: на коротком слове одна правка - это уже другое слово («кости» ->
+# «Корти»), а на длинном одна правка - почти наверняка та самая осечка
+# распознавания («сокалов» -> «Соколов»). Короткие поэтому только
+# капитализируем, а гадать не беремся: не поправить термин - полбеды,
+# подменить верно распознанное слово - потеря текста.
+_DICT_STEPS = ((8, 2), (6, 1), (4, 0))
+
+
+def _levenshtein(a: str, b: str) -> int:
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _dict_match(chunk: str, entry: str) -> bool:
+    """Признать ли в chunk слово entry из словаря."""
+    a = chunk.lower().replace("ё", "е")
+    b = entry.lower().replace("ё", "е")
+    if a == b:
+        return chunk != entry              # тот же термин, поправить только регистр
+    # Русский язык склоняет: «Соколовым» при словарном «Соколов» распознано
+    # ВЕРНО, и замена на именительный падеж сломала бы фразу. Словарное слово
+    # целиком в начале - это словоформа, а не осечка. Не трогаем.
+    if a.startswith(b):
+        return False
+    limit = next((lim for ln, lim in _DICT_STEPS if len(b) >= ln), 0)
+    if not limit or abs(len(a) - len(b)) > limit:
+        return False
+    return _levenshtein(a, b) <= limit
+
+
+def _apply_dictionary(text: str, words) -> str:
+    """Словарь: «сказал термин - получил термин, как записано в настройках».
+
+    В faster-whisper это делалось параметром hotwords - словарь подмешивался в
+    декодер и влиял на само распознавание. У onnx-asr такого параметра нет и
+    быть не может: декодер RNN-T не авторегрессивный, подсказывать ему нечем
+    (см. transcriber.py). Поэтому чиним уже готовый текст.
+
+    Правим по окну в столько слов, сколько их в словарной записи, - запись
+    может быть и из нескольких слов. Длинные записи идут первыми: иначе
+    короткая перехватила бы совпадение раньше длинной и обрезала бы её.
+
+    Чего словарь не умеет и уметь не должен: переводить «гигаам» в «GigaAM».
+    Кириллица и латиница - разные кодпоинты, для меры расстояния это не осечка
+    в один символ, а другое слово целиком. Для таких замен есть сниппеты: там
+    сказано прямо, что на что менять, и гадать не приходится.
+    """
+    entries = sorted({w.strip() for w in (words or [])
+                      if isinstance(w, str) and len(w.strip()) >= _DICT_STEPS[-1][0]},
+                     key=len, reverse=True)
+    if not entries:
+        return text
+    toks = list(_WORD.finditer(text))
+    out: list[str] = []
+    pos = i = 0
+    while i < len(toks):
+        for e in entries:
+            n = len(e.split())
+            if i + n > len(toks):
+                continue
+            start, end = toks[i].start(), toks[i + n - 1].end()
+            if _dict_match(text[start:end], e):
+                out.append(text[pos:start])
+                out.append(e)
+                pos = end
+                i += n
+                break
+        else:
+            i += 1
+    out.append(text[pos:])
+    return "".join(out)
+
+
 _LLM_PROMPT = (
     "Ты - фильтр диктовки. Ниже сырая расшифровка речи. "
     "Убери слова-паразиты и оговорки, учти самоисправления говорящего "
@@ -26,6 +113,14 @@ _LLM_PROMPT = (
     "поправь пунктуацию. Ничего не добавляй и не сокращай по смыслу. "
     "Сохрани язык оригинала. Верни ТОЛЬКО итоговый текст без пояснений.\n\n"
     "Расшифровка: {text}"
+)
+
+_TONE_PROMPT = (
+    "Перепиши текст в заданном тоне. Тон: {tone}. "
+    "Ничего не добавляй и не выбрасывай по смыслу, не сокращай. "
+    "Имена, числа, адреса и ссылки оставь дословно. "
+    "Сохрани язык оригинала. Верни ТОЛЬКО итоговый текст без пояснений.\n\n"
+    "Текст: {text}"
 )
 
 
@@ -43,32 +138,201 @@ def _strip_fillers(text: str) -> str:
     return text
 
 
-def _llm_polish(text: str, llm_cfg: dict, log) -> str:
-    req = urllib.request.Request(
-        llm_cfg["url"].rstrip("/") + "/api/generate",
-        data=json.dumps(
-            {
-                "model": llm_cfg["model"],
-                "prompt": _LLM_PROMPT.format(text=text),
-                "stream": False,
-                "options": {"temperature": 0.1},
-            }
-        ).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-    )
+def _ollama(prompt: str, llm_cfg: dict, log, what: str) -> str:
+    """Один запрос к локальной Ollama. Пустая строка - не получилось.
+
+    Всё, включая сборку запроса, внутри try: раньше Request() стоял снаружи,
+    и пустой/битый url в конфиге (KeyError, ValueError) убивал clean() целиком -
+    то есть терялась уже распознанная фраза. LLM опциональна, диктовка - нет.
+    """
     try:
+        req = urllib.request.Request(
+            llm_cfg["url"].rstrip("/") + "/api/generate",
+            data=json.dumps(
+                {
+                    "model": llm_cfg["model"],
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {"temperature": 0.1},
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
         with urllib.request.urlopen(req, timeout=llm_cfg.get("timeout_sec", 20)) as resp:
-            out = json.loads(resp.read().decode("utf-8")).get("response", "").strip()
-        return out or text
+            return json.loads(resp.read().decode("utf-8")).get("response", "").strip()
     except Exception as e:  # noqa: BLE001 - LLM опциональна, диктовка важнее
-        log(f"ollama polish failed: {e}")
+        log(f"ollama {what} failed: {e}")
+        return ""
+
+
+def _llm_polish(text: str, llm_cfg: dict, log) -> str:
+    return _ollama(_LLM_PROMPT.format(text=text), llm_cfg, log, "polish") or text
+
+
+def _llm_tone(text: str, tone: str, llm_cfg: dict, log) -> str:
+    return _ollama(_TONE_PROMPT.format(text=text, tone=tone), llm_cfg, log, "tone") or text
+
+
+def tone_for(process: str, cfg: dict) -> str:
+    """Тон, заданный для этого приложения. Пусто - правила нет, не трогаем.
+
+    Ключ - имя exe активного окна ('outlook.exe'), значение - тон словами
+    ('формально'), он же уходит в промпт как есть. Словами, а не списком из
+    двух вариантов: LLM всё равно читает это как текст, а человеку не надо
+    подбирать формулировку под наш enum.
+    """
+    rules = cfg.get("tone_rules")
+    if not process or not isinstance(rules, dict):
+        return ""
+    return str(rules.get(process.lower()) or "")
+
+
+@functools.lru_cache(maxsize=1)
+def _compile_snippets(items: tuple) -> tuple:
+    """Собирает ОДИН regex-alternation на все сниппеты сразу.
+
+    Почему не N отдельных re.sub подряд: значение одного сниппета может само
+    содержать ключ другого (в задаче это буквально показано на примере ключа
+    "почта" и значения "ПОЧТА"). Если гонять re.sub по кругу, после подстановки
+    первого сниппета в тексте появляется чужой ключ, и следующий re.sub в
+    цепочке заменит уже подставленное значение - самоподмена. Pattern.sub()
+    ищет совпадения только в ИСХОДНОЙ строке за один проход и не пересматривает
+    то, что сам только что вставил, поэтому один общий вызов от такой цепочки
+    застрахован.
+
+    Длинные ключи в alternation идут первыми: re перебирает варианты слева
+    направо и берёт первый подошедший, а не самый длинный (это не POSIX-regex) -
+    без сортировки по длине короткий ключ ("почта") перехватил бы совпадение
+    раньше длинного ("моя почта") и обрезал бы его.
+
+    items - уже отсортированный tuple(dict.items()) из _apply_snippets: dict
+    нельзя ни хранить в качестве ключа кэша, ни передать в lru_cache напрямую
+    (нехешируем), а clean() дёргается на каждую диктовку - пересобирать этот
+    regex заново на каждую фразу незачем, если сниппеты в настройках не менялись.
+    """
+    # Пустой ключ - отдельная ловушка: пустая строка совпадает нулевой длины
+    # на каждой границе слова, и такой сниппет распылил бы своё значение по
+    # всему тексту. Опечатка в конфиге не должна съедать распознанную фразу.
+    keys_by_len = sorted((k for k, _ in items if k), key=len, reverse=True)
+    pattern = re.compile(
+        r"\b(?:" + "|".join(re.escape(k) for k in keys_by_len) + r")\b",
+        re.IGNORECASE,
+    )
+    by_lower = {k.lower(): v for k, v in items}
+    return pattern, by_lower
+
+
+def _apply_snippets(text: str, snippets: dict) -> str:
+    """Подстановка "сказать -> вставить" (PLAN 4.1: "моя почта" -> адрес).
+
+    Сравнение без учёта регистра и по границам слов - в Python и \\b, и
+    re.IGNORECASE юникодные по умолчанию для обычных строк, кириллица для них
+    полноценные "буквы слова". Поэтому короткий ключ "почта" не сработает
+    внутри "почтальонша": сразу после совпадения там идёт буква "л", а не
+    граница слова. Ключ может быть из нескольких слов и содержать
+    regex-метасимволы - экранируется в _compile_snippets через re.escape().
+    Регистр ЗНАЧЕНИЯ не трогаем: это адрес или реквизиты из конфига как есть,
+    капитализировать их нельзя.
+    """
+    if not snippets or not isinstance(snippets, dict):
         return text
+    items = tuple(sorted((k, v) for k, v in snippets.items() if k))
+    if not items:
+        return text
+    pattern, by_lower = _compile_snippets(items)
+    return pattern.sub(lambda m: by_lower[m.group(0).lower()], text)
 
 
-def clean(text: str, cfg: dict, log) -> str:
-    if cfg.get("remove_fillers", True):
-        text = _strip_fillers(text)
-    llm = cfg.get("llm", {})
-    if text and llm.get("enabled"):
-        text = _llm_polish(text, llm, log)
+# --- Голосовые команды (аналог dictation commands Wispr Flow) ---------------
+#
+# Ровно три команды, и все три - про то, чего голосом иначе не сделать:
+# перевод строки, абзац и Enter в конце (отправка сообщения в чатах).
+# Пунктуацию командами не делаем - GigaAM ставит её сам.
+#
+# Список нарочно короткий и фразы нарочно "канцелярские": цена ложного
+# срабатывания - испорченный текст, а надиктовать "с новой строки" в обычной
+# речи почти невозможно. Модель может обернуть команду пунктуацией и заглавной
+# («. С новой строки, ») - поэтому вокруг фразы съедаются знаки и пробелы.
+
+# Только формы с предлогом: «новая строка» и «новый абзац» без него - обычная
+# речь («новая строка кода начинается с отступа»), и команда из них стирала бы
+# настоящий текст - проверено тестом-ловушкой.
+#
+# Перед фразой съедается только запятая («привет, с новой строки») - точка
+# перед ней принадлежит предыдущему предложению и должна остаться. После -
+# любой знак: он артефакт самой команды («С новой строки.»).
+_CMD_NEWLINE = re.compile(
+    r"[ \t]*,?[ \t]*\b(?:с\s+новой\s+строки|перенос\s+строки)\b[ \t]*[,.;:]?[ \t]*",
+    re.IGNORECASE)
+_CMD_PARAGRAPH = re.compile(
+    r"[ \t]*,?[ \t]*\bс\s+нового\s+абзаца\b[ \t]*[,.;:]?[ \t]*",
+    re.IGNORECASE)
+# Только в САМОМ конце фразы: «нажми энтер» посреди текста - это цитата или
+# инструкция кому-то, а не команда нам.
+_CMD_ENTER = re.compile(
+    r"[\s,.;:!?…]*\b(?:нажми|нажать)\s+(?:энтер|интер|enter)\b[\s.!]*$",
+    re.IGNORECASE)
+
+
+def extract_commands(text: str, cfg: dict) -> tuple[str, bool]:
+    """(текст с применёнными командами, нажать ли Enter после вставки).
+
+    Зовётся ПОСЛЕ clean(): полировка LLM не должна видеть команды - перепишет
+    или послушается, оба исхода хуже. И никогда не бросает - как и clean():
+    исключение здесь потеряло бы уже распознанную фразу.
+    """
+    try:
+        if not text or not cfg.get("voice_commands", True):
+            return text, False
+        press_enter = False
+        m = _CMD_ENTER.search(text)
+        if m and m.start() > 0:          # фраза не может состоять из одной команды
+            text = text[:m.start()]
+            press_enter = True
+        text = _CMD_PARAGRAPH.sub("\n\n", text)
+        text = _CMD_NEWLINE.sub("\n", text)
+        # После перевода строки модельная «строчная после запятой» смотрится
+        # ошибкой: новая строка читается как новое предложение.
+        text = re.sub(r"\n([а-яёa-z])", lambda m: "\n" + m.group(1).upper(), text)
+        return text.strip(), press_enter
+    except Exception:  # noqa: BLE001
+        return text, False
+
+
+def clean(text: str, cfg: dict, log, process: str = "") -> str:
+    """Никогда не бросает: на любой ошибке возвращает то, что пришло.
+
+    Вызывается между распознаванием и вставкой, и исключение здесь означало бы
+    молча проглоченную фразу - худшее, что может сделать диктовка.
+
+    process - имя exe окна, куда поедет текст ('outlook.exe'): по нему
+    подбирается тон. Пусто - тон не трогаем.
+    """
+    try:
+        # Словарь - первым: он чинит осечки распознавания, а все слои ниже
+        # (и промпты LLM, и сниппеты) рассчитывают на верные слова.
+        text = _apply_dictionary(text, cfg.get("dictionary"))
+        if cfg.get("remove_fillers", True):
+            text = _strip_fillers(text)
+        llm = cfg.get("llm") or {}
+        if text and llm.get("enabled"):
+            text = _llm_polish(text, llm, log)
+        # Сниппеты - после полировки, но ДО тона. После полировки: её промпт
+        # видит только фразу-триггер («моя почта»), а не подставленный адрес, и
+        # переписать его не может. До тона: тон переписывает текст целиком и
+        # запросто перефразировал бы сам триггер («моя почта» -> «мой адрес»),
+        # и тогда подстановка уже не сработала бы. Подставляем раньше - тону
+        # достаётся готовый адрес, а его промпт велит оставлять адреса дословно.
+        text = _apply_snippets(text, cfg.get("snippets"))
+        # Тон - второй проход той же LLM, и только вместе с полировкой. Не
+        # потому, что иначе нельзя, а потому, что переписывать нечем: тон делает
+        # Ollama. Дёргать её ради одного тона, когда полировку выключили,
+        # значило бы тайком включить выключенное - и добавить ещё секунды к
+        # задержке, которая сейчас вся ~0.7 с.
+        if text and llm.get("enabled"):
+            tone = tone_for(process, cfg)
+            if tone:
+                text = _llm_tone(text, tone, llm, log)
+    except Exception as e:  # noqa: BLE001
+        log(f"clean failed: {e}")
     return text

@@ -1,0 +1,107 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flowlocal"
+version = "0.1.0"
+description = "Private local dictation for Windows: hold a hotkey, speak, release - the text is typed. Nothing leaves the machine."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Roman Kandeev" }]
+# Описание и метаданные по-английски: их читают на pypi.org, где русский
+# сузил бы аудиторию до тех, кто и так знает про проект. Интерфейс самого
+# приложения остаётся русским.
+keywords = ["dictation", "speech-to-text", "whisper", "windows", "offline", "privacy"]
+
+# `str | None` в аннотациях (PEP 604) вычисляется на месте, а не откладывается,
+# поэтому 3.9 упадёт на импорте. Проверено по коду, а не взято наугад.
+requires-python = ">=3.10"
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    # Windows-only не для красоты: проект стоит на Win32 (реестр, SendInput,
+    # UpdateLayeredWindow, DWM) и на Linux/macOS не запустится вообще.
+    "Operating System :: Microsoft :: Windows",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Text Processing :: Linguistic",
+    "Natural Language :: Russian",
+]
+
+dependencies = [
+    # Распознавание: onnx-asr вместо faster-whisper (PLAN, этап 2). Уходит
+    # CTranslate2, а с ним и обязательная CUDA: GigaAM v3 на процессоре
+    # укладывается в секунду.
+    "onnx-asr>=0.12",
+    "onnxruntime>=1.20",
+    # Качает модели и сам сверяет их целостность по sha-адресуемым блобам.
+    "huggingface_hub>=0.30",
+    # Интерфейс (PLAN, этап 6-7). LGPLv3 - коммерческая лицензия не нужна, но
+    # раздавать только onedir: в onefile Qt запечатан, и §4(d) о перелинковке
+    # нарушается. Qt Graphs, Quick 3D и Quick Timeline - GPL-only, не трогать.
+    "PySide6>=6.9",
+    "sounddevice>=0.5",
+    "keyboard>=0.13",
+    # Кнопки мыши как хоткей (ctrl+mouse4). Была библиотека mouse - выброшена
+    # (PLAN 0.4): архивирована автором, и подавлять события не умела, из-за чего
+    # боковая кнопка долетала до чужого окна (X1 в Chromium - «Назад»).
+    "pynput>=1.7",
+    # pystray ушёл вместе с этапом 7: трей теперь QSystemTrayIcon.
+    # Pillow остаётся - на нём иконка трея (icons.py).
+    "pillow>=10",
+    "pywin32>=306",
+    "numpy",
+]
+
+[project.optional-dependencies]
+# Видеокарта не нужна: GigaAM живёт на процессоре. Экстра - для тех, кто хочет
+# гонять на GPU Whisper: device=auto подхватит CUDA, как только onnxruntime
+# окажется собран с ней. Ставится ВМЕСТО onnxruntime, отсюда и отдельный экстра.
+cuda = ["onnxruntime-gpu>=1.20"]
+
+[project.urls]
+Homepage = "https://github.com/romankandeevy/flow-local"
+Issues = "https://github.com/romankandeevy/flow-local/issues"
+
+# Обычный запуск - gui-script: он делает лаунчер на базе pythonw, и при старте
+# не всплывает чёрное окно консоли. Приложение оконное, ему консоль ни к чему.
+[project.gui-scripts]
+flowlocal = "app:main"
+
+# Тот же вход, но с консолью: `flowlocal --autostart on|off` печатает результат,
+# а при отладке видно лог. Через gui-script этого не увидеть - stdout там в никуда.
+[project.scripts]
+flowlocal-console = "app:main"
+
+[tool.setuptools]
+# Плоская раскладка: модули лежат в корне, пакета нет. Тесты и tools/ в
+# дистрибутив не берём - это не часть приложения.
+py-modules = [
+    "app", "app_paths", "cleaner", "config", "icons", "inputspec", "inserter",
+    "layered", "overlay", "recorder", "settings", "stats", "theme",
+    "transcriber", "util", "widgets",
+]
+
+[tool.setuptools.data-files]
+# ВНИМАНИЕ, известное ограничение: шрифты сюда кладутся ради sdist, но в
+# колесе data-files уезжают в sys.prefix, а theme._assets_dir() ищет их рядом
+# с модулем. То есть `pip install flowlocal` из колеса оставит интерфейс без
+# шрифтов.
+#
+# Чинится это не здесь: плоская раскладка в принципе не умеет возить данные
+# рядом с модулями - для этого модули должны лежать в пакете (flowlocal/), и
+# тогда шрифты кладутся через [tool.setuptools.package-data]. Переезд в пакет
+# ломает `python app.py`, тесты, flowlocal.spec и команду автозапуска, поэтому
+# сделан отдельно и осознанно, а не по дороге. См. PLAN.md, пункт 8.
+"share/flowlocal/fonts" = ["assets/fonts/Onest-Variable.ttf",
+                           "assets/fonts/JetBrainsMono-Variable.ttf",
+                           "assets/fonts/OFL-Onest.txt",
+                           "assets/fonts/OFL-JetBrainsMono.txt"]

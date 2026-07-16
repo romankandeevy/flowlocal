@@ -10,6 +10,7 @@ import wave
 
 import numpy as np
 
+import config
 from cleaner import clean
 from transcriber import Transcriber
 
@@ -26,10 +27,7 @@ def read_wav(path: str) -> np.ndarray:
 
 def main() -> None:
     path = sys.argv[1] if len(sys.argv) > 1 else "test.wav"
-    import json
-
-    with open("config.json", encoding="utf-8") as f:
-        cfg = json.load(f)
+    cfg = config.load()
 
     audio = read_wav(path)
     print(f"audio: {audio.size / 16000:.1f}s")
