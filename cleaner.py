@@ -208,6 +208,93 @@ def _strip_fillers(text: str) -> str:
     return text
 
 
+# Кого предпочесть, если у человека стоит несколько моделей. Порядок - по
+# пригодности к нашей работе, а не по силе: чистка диктовки не требует ума, она
+# требует послушности и скорости. 3-4B хватает (замер PLAN 2.6-бис: 1.7B уже
+# слишком глупа, 8B будет думать дольше, чем человек готов ждать вставку).
+_LLM_PREFER = ("qwen2.5:3b", "qwen3:4b", "qwen2.5:7b", "llama3.2:3b",
+               "llama3.1:8b", "gemma2:2b", "phi3.5", "mistral")
+
+
+def probe_ollama(url: str, timeout: float = 1.5) -> list[str]:
+    """Какие модели у локальной Ollama. Пустой список - её нет.
+
+    Таймаут маленький: это проверка на старте, и ждать её человек не должен.
+    Не отвечает за полторы секунды - считаем, что нет, и работаем без неё.
+    """
+    try:
+        req = urllib.request.Request(url.rstrip("/") + "/api/tags")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return [str(m.get("name", "")) for m in data.get("models", []) if m.get("name")]
+    except Exception:  # noqa: BLE001 - нет так нет, это не ошибка
+        return []
+
+
+def pick_llm_model(available: list[str], want: str = "") -> str:
+    """Какую из установленных моделей взять. Пусто - брать нечего.
+
+    Сначала то, что уже выбрано в конфиге: человек мог поставить осознанно.
+    Потом наш список предпочтений. Потом - хоть что-нибудь, кроме моделей,
+    которые для текста не годятся: embed-модели вернут вектор вместо ответа,
+    а vision-модели ждут картинку.
+    """
+    if not available:
+        return ""
+    if want and any(a == want or a.startswith(want + ":") for a in available):
+        return want
+    for p in _LLM_PREFER:
+        for a in available:
+            if a == p or a.startswith(p.split(":")[0] + ":"):
+                return a
+    # Список запретов заведомо неполон - имена моделей никто не стандартизовал,
+    # и завтра выйдет очередная. Это не страшно: если сюда всё-таки просочится
+    # что-то, отвечающее вектором или описанием картинки, ответ не пройдёт
+    # _sane() и человек получит сырой текст. Здесь мы экономим лишний запрос,
+    # а не защищаемся - защита ниже по конвейеру.
+    for a in available:
+        low = a.lower()
+        if not any(bad in low for bad in ("embed", "vision", "-vl", "clip", "rerank",
+                                          "llava", "moondream", "minicpm-v", "bakllava")):
+            return a
+    return ""
+
+
+def autoconfig_llm(cfg: dict, log) -> str:
+    """Нашли Ollama - включили полировку. Не нашли - работаем без неё.
+
+    Возвращает имя выбранной модели или пустую строку. Конфиг правит на месте.
+
+    Трогаем только llm.enabled = None («человек не решал»). Если он поставил
+    true или false руками - это его решение, и переигрывать его мы не будем:
+    самое противное в программах - когда они сами себе включают то, что ты
+    выключил.
+
+    Зовётся из потока, не из главного: probe_ollama ходит по сети, и полторы
+    секунды ожидания на старте - это полторы секунды, когда хоткей не работает.
+    """
+    llm = cfg.get("llm")
+    if not isinstance(llm, dict):
+        return ""
+
+    have = probe_ollama(str(llm.get("url") or ""))
+    if not have:
+        if llm.get("enabled"):
+            log("ollama не отвечает - полировка не сработает, чистим запятыми")
+        return ""
+
+    model = pick_llm_model(have, str(llm.get("model") or ""))
+    if not model:
+        log(f"ollama есть, но подходящей модели нет: {', '.join(have)}")
+        return ""
+
+    llm["model"] = model
+    if llm.get("enabled") is None:
+        llm["enabled"] = True
+        log(f"нашли ollama, полировка включена: {model}")
+    return model
+
+
 def _ollama(prompt: str, llm_cfg: dict, log, what: str) -> str:
     """Один запрос к локальной Ollama. Пустая строка - не получилось.
 
@@ -235,12 +322,44 @@ def _ollama(prompt: str, llm_cfg: dict, log, what: str) -> str:
         return ""
 
 
+def _sane(before: str, after: str, log, what: str, floor: float = 0.5) -> bool:
+    """Не слишком ли вольно LLM обошлась с текстом.
+
+    Не вкусовщина, а вывод из замера (PLAN 2.6-бис). Qwen3-0.6B на «Вот дом, в
+    котором я живу» вернула «дом»; 1.7B на «Выручка выросла на 15% за квартал»
+    вернула «Выручка выросла за квартал». Генератор по устройству может вернуть
+    что угодно - хоть пересказ, хоть пустоту, хоть ответ на вопрос из текста.
+    Полагаться на то, что модель послушная, нельзя: послушность не гарантия, а
+    надежда.
+
+    Меряем длиной в словах. Полировка убирает сор - текст обязан похудеть, но не
+    вдвое: диктовка из одних паразитов не бывает. Раздулся - модель дописала от
+    себя, тоже брак.
+
+    Порог для тона мягче: перефразировать - его работа.
+    """
+    nb, na = len(before.split()), len(after.split())
+    if not na:
+        log(f"llm {what}: пустой ответ, отдаём сырой текст")
+        return False
+    if na < nb * floor:
+        log(f"llm {what}: съедено {nb - na} слов из {nb}, отдаём сырой текст")
+        return False
+    if na > nb * 1.6 + 5:
+        log(f"llm {what}: дописано {na - nb} слов, отдаём сырой текст")
+        return False
+    return True
+
+
 def _llm_polish(text: str, llm_cfg: dict, log) -> str:
-    return _ollama(_LLM_PROMPT.format(text=text), llm_cfg, log, "polish") or text
+    got = _ollama(_LLM_PROMPT.format(text=text), llm_cfg, log, "polish")
+    return got if _sane(text, got, log, "polish") else text
 
 
 def _llm_tone(text: str, tone: str, llm_cfg: dict, log) -> str:
-    return _ollama(_TONE_PROMPT.format(text=text, tone=tone), llm_cfg, log, "tone") or text
+    got = _ollama(_TONE_PROMPT.format(text=text, tone=tone), llm_cfg, log, "tone")
+    # Тону позволено больше: он для того и зван, чтобы переписать фразу.
+    return got if _sane(text, got, log, "tone", floor=0.4) else text
 
 
 def tone_for(process: str, cfg: dict) -> str:

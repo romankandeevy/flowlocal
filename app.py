@@ -55,6 +55,7 @@ import config as C  # noqa: E402
 import inputspec  # noqa: E402
 import overlay_qt as OV  # noqa: E402
 import theme as T  # noqa: E402
+import cleaner  # noqa: E402
 from cleaner import clean, extract_commands  # noqa: E402
 from inserter import backspace, insert, press_enter  # noqa: E402
 from overlay_qt import Overlay  # noqa: E402
@@ -140,6 +141,7 @@ class App:
         self._mouse_listener = None
         self._work_lock = threading.Lock()
         self._ready = False
+        self._llm_note = ""          # модель Ollama, найденная автоопределением
         self._hk_handles: list = []
         self._hook_handles: list = []
         self._capturing = False
@@ -828,16 +830,22 @@ class App:
         else:
             mic = next((f"{n} · {a}" for i, n, a in list_input_devices() if i == dev),
                        f"устройство {dev}")
-        return {
+        info = {
             "состояние": self._status(),
             "модель": str(self.cfg.get("model")),
             "устройство": f"{self.transcriber.device} / {self.transcriber.compute_type}",
             "микрофон": mic,
             "удержание": inputspec.pretty(str(self.cfg.get("hotkey_hold") or "")),
             "переключение": inputspec.pretty(str(self.cfg.get("hotkey_toggle") or "")),
-            "python": sys.version.split()[0],
-            "папка": APP_DIR,
         }
+        # Полировку мы включаем сами, молча - значит обязаны сказать, что она
+        # включена и чем. Иначе человек не поймёт, почему текст стал другим, а
+        # это худший сорт сюрприза.
+        if self._llm_note:
+            info["полировка"] = f"ollama · {self._llm_note}"
+        info["python"] = sys.version.split()[0]
+        info["папка"] = APP_DIR
+        return info
 
     def _status(self) -> str:
         if not self._ready:
@@ -938,6 +946,29 @@ class App:
             die(f"не удалось загрузить модель.\n\n{e}")
             self.ui(self._shutdown)
 
+    def _autoconfig_llm_bg(self) -> None:
+        """Есть ли у человека Ollama - выясняем сами, а не спрашиваем.
+
+        Полировка (самоисправления, тон) - это то, чем мы отличаемся от простого
+        распознавателя. Но она требует Ollama, и раньше умолчанием было
+        «выключено»: у постороннего человека наша главная функция не работала ни
+        разу, и он о ней даже не узнавал. Кто поставил Ollama - тот согласен на
+        локальную модель по определению.
+
+        Своим потоком: probe_ollama ждёт ответа до полутора секунд, а в главном
+        потоке это полторы секунды без хоткея. Конфиг на диск не пишем -
+        автоопределение делается на каждом старте заново, иначе выбранная
+        сегодня модель осталась бы в файле навсегда и человек, удалив её,
+        получил бы вечные ошибки в логе.
+        """
+        try:
+            model = cleaner.autoconfig_llm(self.cfg, log)
+        except Exception as e:  # noqa: BLE001 - полировка опциональна, диктовка нет
+            log(f"autoconfig llm failed: {e}")
+            return
+        if model:
+            self._llm_note = model
+
     def _loading_done(self) -> None:
         if self.overlay.state == OV.LOADING:
             self.overlay.hide()
@@ -979,6 +1010,7 @@ class App:
         self._start_tray()
         self._start_ipc()
         threading.Thread(target=self._load_model_bg, daemon=True).start()
+        threading.Thread(target=self._autoconfig_llm_bg, daemon=True).start()
         if not self.cfg.get("onboarded"):
             # Первый запуск: без мастера человек видит только иконку в трее и
             # не понимает ничего. Небольшая задержка - дать трею показаться.

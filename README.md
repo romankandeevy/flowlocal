@@ -103,12 +103,29 @@ mouse unusable, and you'd have nothing left to undo the setting with.
 | **Retry** | The last recording stays in memory; re-run it from the tray if something went wrong. |
 | **History & stats** | Every dictation, click to copy, plus a per-day chart of how much you've saved. |
 | **Mic failover** | Chosen microphone dies → record from the system default, with a note on the pill. |
-| **Tone per app** | `outlook.exe` → formal, chat → loose. *Requires the LLM polish below.* |
-| **LLM polish** | Removes filler, applies self-corrections ("Friday — no, Saturday" → "Saturday"). *Optional, off by default, needs [Ollama](https://ollama.com) running locally.* |
+| **Filler removal** | "Ну вот, короче, я думаю, типа, надо сделать" → "Я думаю, надо сделать." No model, no download, no latency — see below. |
+| **Tone per app** | `outlook.exe` → formal, chat → loose. *Needs Ollama.* |
+| **LLM polish** | Applies self-corrections ("Friday — no, Saturday" → "Saturday"). *Needs Ollama — but you don't have to configure anything: if it's running, FlowLocal finds it and switches polish on by itself.* |
 
-The last two are the honest weak spot: they're the features that separate
-FlowLocal from a plain transcriber, and today they ask you to install a second
-program first. Putting a small LLM in the box is the next thing being built.
+### Filler removal without a model
+
+A filler isn't given away by the word — it's given away by the **commas around
+it**. You can't just delete "вот": *"вот дом"* is an ordinary sentence. But
+GigaAM puts a comma wherever the speaker hesitated, which means the hesitations
+are **already marked up in the text**. Read the punctuation instead of guessing
+the meaning, and *"И вот, короче, я"* gives itself away while *"Вот дом"* stays
+untouched.
+
+This costs zero megabytes, zero milliseconds, and — crucially — **cannot lose
+your words**: nothing is generated, only marked-up tokens are struck out.
+
+We tried the obvious thing first and it failed. Qwen3-0.6B int4 (1 GB, in-app,
+via onnxruntime-genai) turned *"Вот дом, в котором я живу"* into **"дом"**.
+Qwen3-1.7B with reasoning spent 53 seconds and turned *"Выручка выросла на 15%
+за квартал"* into *"Выручка выросла за квартал"* — it deleted the number the
+sentence existed for. A generator can return anything by construction; a
+deleter cannot. Self-corrections and tone genuinely do need a model, and that's
+what Ollama is for.
 
 ## How it works
 
