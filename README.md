@@ -58,6 +58,24 @@ check, and a "say something" trial that shows the text without inserting it.
 Run it in the background with `pythonw app.py`. Start with Windows: a checkbox
 in Settings, or `python app.py --autostart on`.
 
+## Settings
+
+Nine pages, both themes, everything applies as you change it.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="tools/preview_settings_qt_dark.png">
+    <img src="tools/preview_settings_qt_light.png" alt="All nine settings pages: general, recognition, models, input, dictionary, replacements, history, stats, about">
+  </picture>
+</p>
+
+The look is a design system called Korti, ported by hand rather than eyeballed:
+two inks (paper and ink, everything else is ink over paper at some opacity),
+hairlines instead of fills, blue accent reserved for the genuinely special,
+green and red for status only, motion at 120/180/280 ms on one curve and no
+springs. Tokens live in `theme.py` as a single source of truth and are bridged
+into QML, so switching themes repaints the window live instead of rebuilding it.
+
 ## Use it
 
 Hold **Ctrl+Shift+Space**, talk, let go. The pill at the bottom of the screen
