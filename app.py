@@ -33,6 +33,7 @@ import time
 # Рабочая папка - та, где живут конфиг, лог, история и модель. Своим
 # os.path.dirname(__file__) тут не обойтись: в собранном .exe он указывает во
 # временную распаковку, которая исчезает при выходе. app_paths это уже знает.
+import app_paths  # noqa: E402
 from app_paths import (APP_DIR, CONFIG_PATH, HISTORY_PATH,  # noqa: E402
                        LOG_PATH, set_autostart)
 
@@ -999,27 +1000,60 @@ class App:
             return
         self._ipc.newConnection.connect(self._on_ipc)
 
+    def _heal_autostart(self) -> None:
+        """Команда автозапуска в реестре устарела - перезаписать.
+
+        Записывается она один раз, галочкой в настройках, и после этого живёт
+        своей жизнью: папку перенесли, Python обновили, у нас появился флаг
+        `--silent`. Пока запись старая, вход в систему будет открывать окно
+        настроек - ровно то, чего мы избегаем.
+        """
+        try:
+            if app_paths.autostart_command_stale():
+                set_autostart(True)
+                log("автозапуск: команда в реестре обновлена")
+        except Exception as e:  # noqa: BLE001 - реестр не должен ронять запуск
+            log(f"autostart heal failed: {e}")
+
     def _on_ipc(self) -> None:
         conn = self._ipc.nextPendingConnection()
         if conn is not None:
             conn.disconnectFromServer()
-        self._open_settings()
+        # Под pythonw stderr мёртв, и исключение внутри Qt-слота уходит в
+        # никуда: снаружи это выглядит как «кликнул по ярлыку - ничего не
+        # произошло», и отладить нечем. Это единственный путь, которым человек
+        # добирается до окна, - он обязан оставлять улику.
+        try:
+            self._open_settings()
+        except Exception:  # noqa: BLE001
+            import traceback
+            log("не смог открыть настройки по ярлыку:\n" + traceback.format_exc())
 
-    def run(self) -> None:
+    def run(self, silent: bool = False) -> None:
         self._hotkey_bind()
         self._start_tray()
         self._start_ipc()
+        self._heal_autostart()
         threading.Thread(target=self._load_model_bg, daemon=True).start()
         threading.Thread(target=self._autoconfig_llm_bg, daemon=True).start()
         if not self.cfg.get("onboarded"):
             # Первый запуск: без мастера человек видит только иконку в трее и
             # не понимает ничего. Небольшая задержка - дать трею показаться.
             QTimer.singleShot(600, self._open_onboarding)
-        else:
-            # Иконку в трее может быть не видно вовсе: Windows прячет новые
-            # значки под шеврон, а панель задач бывает с автоскрытием. Шарик -
-            # единственный способ сказать «я здесь и вот чем меня звать».
+        elif silent:
+            # Вход в систему: молча в трей. Окно, всплывающее при каждой
+            # загрузке Windows, - это не забота, а навязчивость.
+            #
+            # Шарик всё же показываем: иконку в трее может быть не видно вовсе -
+            # Windows прячет новые значки под шеврон, а панель задач бывает с
+            # автоскрытием, и тогда запуск выглядит как «ничего не произошло».
             QTimer.singleShot(900, self._greet)
+        else:
+            # Человек кликнул по ярлыку - значит хочет увидеть программу, а не
+            # догадываться, запустилась ли она. Раньше здесь был только шарик, и
+            # клик по ярлыку выглядел как «ничего не открывается»: живого
+            # экземпляра ещё нет, будить некого, а новый молча садился в трей.
+            QTimer.singleShot(400, self._open_settings)
         log("started")
         try:
             self.qapp.exec()
@@ -1119,7 +1153,9 @@ def main() -> None:
                 None, "FlowLocal уже запущен - иконка в трее.", "FlowLocal", 0x40)
         return
     C.bootstrap()      # свежий клон: config.json ещё нет, делаем из примера
-    App().run()
+    # --silent ставит себе автозапуск (app_paths.autostart_command): вход в
+    # систему молчит, клик по ярлыку показывает окно.
+    App().run(silent="--silent" in sys.argv)
 
 
 if __name__ == "__main__":

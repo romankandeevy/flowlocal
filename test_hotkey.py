@@ -225,7 +225,10 @@ def main() -> None:
         keyboard.unhook_all()
         app.recorder.close()
         app.overlay.destroy()
-        app.root.destroy()
+        # Был app.root.destroy() - корень tkinter, которого нет с этапа 7
+        # (переезд на Qt). Тест из-за этого падал в уборке: проверки проходили,
+        # но процесс валился с AttributeError и итог не печатался никогда.
+        app.qapp.quit()
 
     print("\nИТОГ:", "PASS" if all(results) else "FAIL")
     sys.exit(0 if all(results) else 1)
