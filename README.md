@@ -1,251 +1,154 @@
 # FlowLocal
 
-Приватный локальный аналог Wispr Flow для Windows. Зажал клавишу - говоришь,
-отпустил - распознанный текст вставился в активное окно. Аудио и текст не
-покидают машину: распознавание - [GigaAM v3](https://huggingface.co/ai-sage/GigaAM-v3)
-через [onnx-asr](https://github.com/istupakov/onnx-asr), **на процессоре**.
+**Hold a key. Speak. Release. Your words land in the window you were already typing in.**
 
-Модель выбрана не по популярности: GigaAM обучен на 700 000 часах русской речи и
-ошибается на нём втрое реже Whisper (8.4% против 25.1% WER по доменам), весит
-226 МБ вместо 1.6 ГБ, сам ставит пунктуацию и не выдумывает текст на тишине.
-Видеокарта не нужна.
+A free, local, open-source alternative to [Wispr Flow](https://wisprflow.ai) for Windows.
+Audio and text never leave your machine — no account, no cloud, no subscription.
 
-Оформление - дизайн-система **Korti**: две краски (бумага и чернила), волосяные
-линии вместо заливок, синий акцент только для особенного, зелёный и красный
-только для статуса, движение без пружин. Тема светлая или тёмная - следом за
-Windows.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="tools/preview_overlay_qt.png">
+    <img src="tools/preview_overlay_qt_light.png" width="300" alt="The FlowLocal pill: loading, recording with a live waveform, transcribing, done">
+  </picture>
+</p>
 
-## Запуск
+## Why another dictation app
+
+Because every local dictation tool runs Whisper, and Whisper only got good at
+*some* languages.
+
+FlowLocal defaults to **[GigaAM v3](https://huggingface.co/ai-sage/GigaAM-v3)**
+(MIT, by SberDevices) — a 240M Conformer trained on 700,000 hours of Russian
+speech. Per its model card it averages **8.4% WER across domains where Whisper
+averages 25.1%**. It is 226 MB instead of 1.6 GB, it punctuates and normalises
+numbers on its own, and — because RNN-T has no autoregressive decoder — it
+**cannot hallucinate on silence**. No "Thanks for watching!" during your pauses.
+
+It also runs faster on a CPU than Whisper-large-v3-turbo does on an RTX 4090.
+No GPU required. On this machine, 8 seconds of speech becomes text in ~0.7 s.
+
+Speak something else? The model catalogue also carries **Parakeet TDT** (25
+European languages, auto-detect), **Whisper large-v3-turbo** and **base** (99+
+languages), and **Vosk** — all through [onnx-asr](https://github.com/istupakov/onnx-asr),
+all downloadable from inside the app, all swappable without a restart.
+
+> **Honest caveat:** the WER figures above are the model card's, not ours. Our
+> own benchmark harness is in `tools/bench_asr.py` and its verdict on real
+> speech isn't in yet. Believe the direction, not the decimal.
+
+## Install
+
+No installer yet — that's next on the roadmap. From source:
 
 ```powershell
+git clone https://github.com/romankandeevy/flowlocal
+cd flowlocal
 pip install -r requirements.txt
-python app.py            # первый запуск скачает модель (226 МБ) в models/
+python app.py           # first run downloads GigaAM (226 MB) into models/
 ```
 
-Первый запуск создаст `config.json` из `config.example.json`.
-Фоново без консоли: `pythonw app.py`.
-Автозапуск с Windows: галочка в настройках или `python app.py --autostart on`.
+Python 3.14 or 3.13, Windows 10/11. First launch opens a six-screen setup:
+language and model, microphone with a live waveform, your hotkey, a paste
+check, and a "say something" trial that shows the text without inserting it.
 
-## Использование
+<p align="center">
+  <img src="tools/preview_onboarding.png" width="620" alt="The six setup screens">
+</p>
 
-- Зажать **Ctrl+Shift+Space**, говорить, отпустить - текст вставится.
-- Внизу экрана пилюля: живая осциллограмма и таймер во время записи,
-  затем `распознаю`, затем `N слов` - и текст на месте.
-- Иконка микрофона в трее: серая - готов, зелёная - пишем, синяя -
-  распознаём. Клик по иконке открывает настройки.
-- Нажатие короче `min_record_sec` (0.3 с) игнорируется - защита от случайных
-  касаний.
+Run it in the background with `pythonw app.py`. Start with Windows: a checkbox
+in Settings, or `python app.py --autostart on`.
 
-### Два бинда, а не режим
+## Use it
 
-Настройки -> Основное. Это **два независимых сочетания**, а не переключатель:
-можно держать оба сразу и выбирать жест по ситуации, а можно стереть любое
-крестиком рядом с полем.
+Hold **Ctrl+Shift+Space**, talk, let go. The pill at the bottom of the screen
+shows a live waveform and a timer while you speak, then `распознаю`, then the
+word count — and the text is in place.
 
-- **Удерживать и говорить** (по умолчанию `Ctrl+Shift+Space`): зажал -
-  говоришь, отпустил - вставилось.
-- **Нажать и говорить** (по умолчанию не задано): нажал - пишем, нажал ещё раз -
-  остановились. Руки свободны, удобно для длинной диктовки. **Esc** отменяет
-  запись: она выбрасывается, ничего не вставляется. Пилюля в этом режиме
-  подписывает, чем остановить.
+Two independent bindings, not a mode switch — keep both and pick per situation:
 
-### Кнопки мыши
+- **Hold and talk** — press, speak, release, it's inserted.
+- **Press and talk** — press once to start, again to stop. Hands free for long
+  dictation; **Esc** throws the recording away.
 
-Любой бинд может быть кнопкой мыши, в том числе с модификатором: `Ctrl+Мышь 4`.
-Ловятся колесо-кнопка и обе боковые (`mouse3`, `mouse4`, `mouse5` в конфиге).
+Either binding can be a mouse button, modifiers included (`Ctrl+Mouse 4`).
+Left and right buttons are refused on purpose: dictation on LMB would make the
+mouse unusable, and you'd have nothing left to undo the setting with.
 
-Левая и правая кнопки не поддерживаются намеренно: диктовка на ЛКМ сделала бы
-мышь неработоспособной, а отменить настройку было бы уже нечем.
+## What's in it
 
-## Настройки
-
-Клик по иконке в трее -> окно настроек. Меняется на лету, сохраняется сразу:
-
-| Раздел | Что там |
+| | |
 |---|---|
-| Основное | два бинда диктовки, отмена, оформление, микрофон, автозапуск, звуки |
-| Распознавание | модель, язык, CPU/GPU, фильтр «э-э», полировка LLM |
-| Ввод | способ вставки, буфер обмена, пре-буфер, минимальная длина нажатия |
-| Словарь | имена и термины - чинятся в распознанном тексте |
-| Замены | подстановки «сказать -> вставить» и правила тона под приложение |
-| История | все диктовки, поиск глазами, очистка |
-| Статистика | сколько надиктовано и сколько времени это сэкономило |
+| **Dictionary** | Names and terms, fixed by Levenshtein distance with a threshold ladder. Won't touch your inflections. |
+| **Snippets** | Say a phrase, get a block of text. Whole words, case-insensitive. |
+| **Voice commands** | "с новой строки", "нажми энтер" — line breaks and Enter, spoken. |
+| **Undo** | Its own hotkey. Backspaces exactly what was inserted — and only if you haven't typed since. |
+| **Retry** | The last recording stays in memory; re-run it from the tray if something went wrong. |
+| **History & stats** | Every dictation, click to copy, plus a per-day chart of how much you've saved. |
+| **Mic failover** | Chosen microphone dies → record from the system default, with a note on the pill. |
+| **Tone per app** | `outlook.exe` → formal, chat → loose. *Requires the LLM polish below.* |
+| **LLM polish** | Removes filler, applies self-corrections ("Friday — no, Saturday" → "Saturday"). *Optional, off by default, needs [Ollama](https://ollama.com) running locally.* |
 
-Смена модели и устройства применяется после перезапуска - остальное сразу.
-Кто предпочитает текст, `config.json` рядом с приложением никуда не делся:
-откройте настройки (они перечитают файл) и закройте - изменения уедут в
-приложение.
+The last two are the honest weak spot: they're the features that separate
+FlowLocal from a plain transcriber, and today they ask you to install a second
+program first. Putting a small LLM in the box is the next thing being built.
 
-### Отмена последней диктовки
+## How it works
 
-Настройки -> Основное -> «Отменить последнюю диктовку», назначьте сочетание
-(например `Ctrl+Shift+Z`). Уберёт ровно то, что вставило приложение.
+| File | Job |
+|---|---|
+| `app.py` | The glue: hotkey, threads, tray, the record → text → insert pipeline |
+| `recorder.py` | Microphone, ring pre-buffer, levels for the waveform |
+| `transcriber.py` | onnx-asr: model loading, CPU/GPU with fallback, warm-up |
+| `models.py` | Catalogue: sizes, languages, licences, pick-by-language |
+| `cleaner.py` | Dictionary, filler removal, optional Ollama polish and tone |
+| `inserter.py` | Insertion: clipboard + Ctrl+V, or character by character |
+| `overlay_qt.py`, `qml/Overlay.qml` | The pill |
+| `settings_qt.py`, `qml/Settings.qml` | Settings: data in Python, layout in QML |
+| `theme.py`, `theme_qt.py` | Design tokens — one source of truth, bridged into QML |
 
-Отмена - это Backspace по числу вставленных символов, а не Ctrl+Z: отмена у
-каждого приложения своя, где-то её нет вовсе, где-то она откатит не наш кусок,
-а весь абзац. Поэтому же отмена работает, **только если после вставки вы ничего
-не печатали**: иначе Backspace съел бы ваш текст, а не наш. Стоит нажать любую
-клавишу - и отмена молча снимается.
+The pill must never steal focus: if it did, your Ctrl+V would go to the wrong
+window. Qt gives us that with `WindowDoesNotAcceptFocus`, which becomes
+`WS_EX_NOACTIVATE` on Windows. Waveform data travels as a C++ signal inside the
+process — no IPC, no serialisation, so 60 fps costs nothing.
 
-### Замены
+## Limitations
 
-Настройки -> Замены. Слева - что говорите, справа - что вставится: сказали
-«моя почта» - вставился адрес. Целыми словами, без учёта регистра; «почта» не
-сработает внутри «почтальонши».
+- **Windows only.** macOS is on the roadmap and is a genuine 10–15 weeks, not a weekend.
+- `paste` mode overwrites non-text clipboard content (files, images); only text is restored.
+- Insertion fails into apps running as administrator unless FlowLocal is too (Windows UIPI).
+- The pill isn't visible over exclusive-fullscreen games.
+- Undo won't fire if you typed after inserting — that's a guard, not a bug.
 
-Замены личные по природе (адрес, реквизиты), поэтому `config.json` лежит в
-`.gitignore` и на GitHub не уезжает.
-
-## Полировка через Ollama (опционально)
+## Tests
 
 ```powershell
-ollama pull qwen2.5:3b
+$env:PYTHONIOENCODING="utf-8"   # or Cyrillic in the console is mojibake
+python test_e2e.py          # WAV → transcribe → clean (no microphone needed)
+python test_insert.py both  # insertion into a real EDIT control
+python test_hotkey.py       # binding, rebinding, capture, rollback of a broken one
 ```
 
-Включается в настройках -> Распознавание -> «Полировка локальной LLM». Убирает
-слова-паразиты и учитывает самоисправления («в пятницу, нет, в субботу» ->
-«в субботу»). Недоступна Ollama - вставится обычная расшифровка: диктовка из-за
-LLM не ломается.
+Tests send real keystrokes and move the mouse — don't touch the keyboard while
+they run, and close a running instance first or it will eat the test's hotkeys.
 
-### Тон под приложение
+## Roadmap
 
-Настройки -> Замены -> «Тон под приложение». Слева имя программы
-(`outlook.exe`), справа тон словами (`формально`, `дружелюбно`) - он уходит в
-промпт как есть. В почте формально, в чате свободно.
+1. Benchmark GigaAM against real speech, not one synthetic phrase.
+2. Ship a small LLM in the box so polish and tone work on first launch.
+3. Command mode — select text, say what to do with it.
+4. Installer, code signing, a demo GIF.
+5. `platform/` abstraction, then macOS.
 
-Работает **только при включённой полировке LLM**: тон переписывает Ollama,
-больше нечем. Это второй проход модели, то есть плюс секунды к задержке - вся
-диктовка сейчас укладывается в ~0.7 с, и тон это заметно удлинит. Без правила
-для активного окна ничего не происходит.
+## Licence
 
-## Оформление
+[MIT](LICENSE). Fonts under the OFL, in `assets/fonts/`. PySide6 is LGPLv3 —
+builds ship as onedir with Qt as replaceable libraries, licence texts included.
+Parakeet is CC-BY-4.0 and requires attribution if you use it.
 
-Токены Korti живут в `theme.py` - один источник правды: цвет, метрика,
-типографика, кривые движения. Компоненты (`widgets.py`, `overlay.py`) собраны
-по спецификациям системы, а не на глаз.
+Interface fonts are Onest and JetBrains Mono, loaded per-process with
+`AddFontResourceEx(FR_PRIVATE)` — nothing is installed into your system, and a
+desktop app has no business calling a CDN to draw itself.
 
-**Обе темы почти даром.** В Korti цветов ровно два - бумага и чернила, а всё
-остальное это чернила поверх бумаги с прозрачностью. Тёмная тема - та же
-система с переставленными красками, а не второй набор токенов: `set_theme()`
-меняет две константы и пересчитывает производные. Настройки -> Основное ->
-«Оформление»: система / светлая / тёмная.
+---
 
-**Карточки и поля рисуются в PIL.** tkinter умеет рамку только прямоугольную, а
-система требует 12px у карточек и 6px у полей. Поэтому `Card` и `Input` рисуют
-скруглённый контур сами и кладут внутрь настоящий tk-виджет.
-
-Два осознанных отступления, оба вынужденные:
-
-- **Шрифт интерфейса - Onest, а не Hanken Grotesk.** В фирменном нет кириллицы
-  (проверено по таблице cmap: U+0420 отсутствует), и весь русский интерфейс
-  превращался в ряды ▯▯▯. Onest повторяет геометрию, круглость и высоту
-  строчных Hanken Grotesk, но умеет кириллицу и держит всю ось весов 100-900.
-  Моноширинный - JetBrains Mono, как и задумано системой.
-- **Точка записи зелёная, а не красная.** В Korti зелёный - «успех/в эфире», а
-  красный - «ошибка/разрушительное». Мигать красным во время нормальной
-  диктовки значило бы врать пользователю.
-
-Шрифты (OFL) лежат в `assets/fonts/` и отдаются Windows только для своего
-процесса (`AddFontResourceEx` + `FR_PRIVATE`): в систему ничего не ставится, а
-на CDN настольному приложению рассчитывать нечего - оно должно рисовать себя
-без сети.
-
-## Как это устроено
-
-| Файл | Зачем |
-|---|---|
-| `app.py` | склейка: хоткей, потоки, трей, конвейер запись -> текст -> вставка |
-| `recorder.py` | микрофон, кольцевой пре-буфер, замер громкости для волны |
-| `transcriber.py` | onnx-asr: GigaAM v3 RNN-T int8, выбор CPU/CUDA с фолбэком и прогревом |
-| `models.py` | каталог моделей: размеры, языки, лицензии, автовыбор по языку |
-| `cleaner.py` | словарь + вырезание междометий + опциональная полировка через Ollama |
-| `overlay_qt.py`, `qml/Overlay.qml` | пилюля-индикатор поверх окон |
-| `settings_qt.py`, `qml/Settings.qml` | окно настроек: данные в Python, вёрстка в QML |
-| `theme_qt.py` | мост токенов Korti в QML |
-| `inserter.py` | вставка в активное окно (буфер+Ctrl+V либо посимвольно) |
-| `layered.py` | win32-хвост: имя exe активного окна для правил тона |
-| `theme.py` | токены Korti: палитра, метрика, шрифты, кривые движения, темы |
-| `icons.py` | иконка микрофона для трея |
-| `config.py` | конфиг с умолчаниями и атомарной записью |
-| `stats.py` | арифметика статистики поверх `history.jsonl` |
-| `inputspec.py` | разбор сочетаний: клавиши и кнопки мыши в одной строке |
-| `app_paths.py` | пути и автозапуск в реестре |
-| `util.py` | `plural()` - русское согласование числительных |
-
-Оверлей рисуется в PIL и отдаётся в layered-окно (`UpdateLayeredWindow`):
-tkinter умеет только прямоугольник и цветовой ключ, а это значит рваные углы
-и никакой тени. Окно ещё и `WS_EX_NOACTIVATE` - иначе пилюля украла бы фокус
-у окна, в которое диктуют, и Ctrl+V ушёл бы не туда.
-
-## Тесты
-
-```powershell
-$env:PYTHONIOENCODING="utf-8"   # иначе кириллица в консоли - мусор
-python test_e2e.py          # WAV -> распознавание -> чистка (микрофон не нужен)
-python test_insert.py both  # вставка в настоящий EDIT: paste, type, отжатие модификаторов
-python test_hotkey.py       # хоткей: привязка, смена, захват, откат битого,
-                            # оба режима, Esc, автоповтор (модель не грузится)
-```
-
-Тесты шлют настоящие нажатия и двигают мышь - на время прогона лучше не трогать
-клавиатуру. Приложение на время прогона лучше закрыть: живой экземпляр перехватит
-хоткеи у теста.
-
-Превью интерфейса (обе темы, все состояния пилюли, все страницы настроек):
-
-```powershell
-python tools/preview_overlay.py
-python tools/preview_settings.py
-```
-
-## Ограничения
-
-- Вставка в режиме `paste` перезаписывает не-текстовое содержимое буфера
-  (файлы, картинки) - восстанавливается только текст.
-- В приложениях, запущенных от администратора, вставка не сработает, если
-  FlowLocal запущен без прав администратора (ограничение Windows, UIPI).
-- Оверлей не виден поверх игр в полноэкранном эксклюзивном режиме.
-- Отмена диктовки не сработает, если после вставки вы успели что-то напечатать -
-  это не баг, а защита: иначе Backspace съел бы ваш текст.
-
-## Лицензия
-
-FlowLocal - [MIT](LICENSE).
-
-Зависимости (сверено по метаданным установленных пакетов, а не по памяти):
-
-| Пакет | Лицензия |
-|---|---|
-| onnx-asr, onnxruntime, keyboard, mouse, sounddevice | MIT |
-| Pillow | MIT-CMU |
-| numpy | BSD-3-Clause |
-| huggingface-hub | Apache-2.0 |
-| pywin32 | PSF |
-| **pystray** | **LGPLv3** |
-
-Шрифты - OFL, лежат рядом с `assets/fonts/OFL-*.txt`. Модели качаются при первом
-запуске и в репозиторий не попадают: **GigaAM v3 - MIT** от SberDevices, Whisper -
-MIT от OpenAI, Parakeet - **CC-BY-4.0** от NVIDIA (требует указания авторства,
-если вы его включите).
-
-### pystray и сборка .exe - требует внимания
-
-При раздаче **исходников** LGPLv3 у pystray ни к чему не обязывает: он ставится
-отдельным пакетом через pip и остаётся отдельной библиотекой.
-
-При раздаче **собранного `.exe`** это уже не так: PyInstaller кладёт pystray
-внутрь, и получается «combined work» в смысле LGPLv3 §4. Тогда лицензия требует
-дать пользователю возможность подменить pystray своей версией - например,
-приложив исходники и способ пересобрать, - и приложить текст LGPL с указанием,
-что pystray использован.
-
-Это не мнение, а условие лицензии, и решать тут владельцу: приложить к релизу
-LGPL + ссылку на исходники pystray, либо отказаться от pystray в пользу своей
-иконки в трее на Win32 API. До этого решения `.exe` лучше не выкладывать
-публично. Раздача исходников этим не затронута.
-
-PyInstaller сам под GPLv2, но у него особое исключение для собранных приложений:
-на лицензию вашей программы он не влияет.
-
-«Аналог Wispr Flow» здесь - сравнение для понятности, не более: проект не связан
-с Wispr AI и ничего у них не заимствует.
+Русская версия — [README.ru.md](README.ru.md).
