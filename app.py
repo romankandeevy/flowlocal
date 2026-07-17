@@ -30,6 +30,42 @@ import sys
 import threading
 import time
 
+
+class _NullStream:
+    """Заглушка для sys.stdout/sys.stderr, когда их нет.
+
+    У приложения без консоли (собранный .exe с windowed=True, а также pythonw)
+    sys.stdout и sys.stderr равны None. Наш print это переживает - он молча
+    ничего не делает. А чужая библиотека - нет.
+
+    Дорого добытое, найдено на собранной сборке при первом запуске: модель
+    качает huggingface_hub, он рисует прогресс-бар через tqdm, tqdm делает
+    sys.stderr.write() - и приложение умирает с «'NoneType' object has no
+    attribute 'write'». В разработке этого не увидеть: модель уже лежит на
+    диске, скачивать нечего. То есть падало ровно у того, у кого запуск первый,
+    - у нового человека, и только у него.
+
+    Затыкаем в самом начале, до любых импортов, которые могут писать в вывод.
+    """
+
+    def write(self, _s):
+        return 0
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return False
+
+    def fileno(self):
+        raise OSError("нет файлового дескриптора")
+
+
+if sys.stdout is None:
+    sys.stdout = _NullStream()
+if sys.stderr is None:
+    sys.stderr = _NullStream()
+
 # Рабочая папка - та, где живут конфиг, лог, история и модель. Своим
 # os.path.dirname(__file__) тут не обойтись: в собранном .exe он указывает во
 # временную распаковку, которая исчезает при выходе. app_paths это уже знает.
