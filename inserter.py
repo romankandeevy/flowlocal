@@ -25,6 +25,7 @@ VK_CONTROL = 0x11
 VK_MENU = 0x12  # Alt
 VK_LWIN = 0x5B
 VK_RWIN = 0x5C
+VK_C = 0x43
 VK_V = 0x56
 
 
@@ -65,6 +66,15 @@ def _send_ctrl_v() -> None:
     win32api.keybd_event(VK_V, 0, 0, 0)
     time.sleep(0.02)
     win32api.keybd_event(VK_V, 0, win32con.KEYEVENTF_KEYUP, 0)
+    win32api.keybd_event(VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+
+
+def _send_ctrl_c() -> None:
+    win32api.keybd_event(VK_CONTROL, 0, 0, 0)
+    time.sleep(0.01)
+    win32api.keybd_event(VK_C, 0, 0, 0)
+    time.sleep(0.02)
+    win32api.keybd_event(VK_C, 0, win32con.KEYEVENTF_KEYUP, 0)
     win32api.keybd_event(VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
 
 
@@ -196,6 +206,43 @@ def _set_clipboard_text(text: str) -> bool:
         except Exception:
             time.sleep(0.05)  # буфер бывает занят другим процессом
     return False
+
+
+def copy_selection(timeout: float = 0.6) -> tuple[str | None, str | None]:
+    """Забрать выделенное в активном окне. Возвращает (выделение, прежний буфер).
+
+    Выделение - None, если не выделено ничего. Прежний буфер отдаём наружу,
+    чтобы вызвавший вернул его на место, когда закончит.
+
+    Ловушка, ради которой всё и написано так: если ничего не выделено, Ctrl+C
+    НЕ ОЧИЩАЕТ буфер - в нём останется то, что человек копировал час назад. Без
+    проверки мы приняли бы это за выделение и молча переписали бы Ollama чужой
+    текст, а результат вставили бы поверх пустого места. Поэтому: чистим буфер
+    сами, жмём Ctrl+C, ждём - и если пусто, значит выделения не было.
+
+    Метка вместо пустой строки: EmptyClipboard() оставляет буфер вовсе без
+    формата CF_UNICODETEXT, и _get_clipboard_text вернёт None и на «пусто», и
+    на «в буфере картинка». Своя метка отличает «мы вычистили, и Ctrl+C ничего
+    не дал» от всего остального.
+    """
+    _wait_modifiers_released()
+    old = _get_clipboard_text()
+    mark = "\x00flowlocal-selection-probe\x00"
+    if not _set_clipboard_text(mark):
+        return None, old
+    _send_ctrl_c()
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        cur = _get_clipboard_text()
+        if cur is not None and cur != mark:
+            return cur, old
+        time.sleep(0.03)
+    # Метка на месте - Ctrl+C ничего не положил, выделения не было.
+    if old is not None:
+        _set_clipboard_text(old)
+    else:
+        _set_clipboard_text("")
+    return None, old
 
 
 def insert(text: str, mode: str = "paste", restore: bool = True) -> bool:

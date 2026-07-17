@@ -24,6 +24,11 @@ DEFAULTS: dict = {
     # («ctrl+mouse4») - разбор в inputspec.py.
     "hotkey_hold": "ctrl+shift+space",
     "hotkey_toggle": "",
+    # Command mode: выделил текст, зажал, сказал «сделай короче» - выделенное
+    # заменилось результатом. Требует Ollama: правка по произвольному указанию -
+    # это понимание смысла, регэкспом не берётся. Пусто = выключено; умолчание
+    # пустое намеренно, потому что без Ollama функция немая.
+    "hotkey_command": "",
     "undo_hotkey": "",           # пусто = отмена последней вставки выключена
     "theme": "system",           # system | light | dark
     "language": None,            # только для Whisper/Canary; GigaAM - русский и точка

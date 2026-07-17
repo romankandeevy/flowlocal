@@ -93,8 +93,9 @@ import inputspec  # noqa: E402
 import overlay_qt as OV  # noqa: E402
 import theme as T  # noqa: E402
 import cleaner  # noqa: E402
-from cleaner import clean, extract_commands  # noqa: E402
-from inserter import backspace, insert, press_enter  # noqa: E402
+from cleaner import _strip_fillers, clean, extract_commands, llm_command  # noqa: E402
+from inserter import (_set_clipboard_text, backspace,  # noqa: E402
+                      copy_selection, insert, press_enter)
 from overlay_qt import Overlay  # noqa: E402
 from recorder import Recorder  # noqa: E402
 from transcriber import Transcriber  # noqa: E402
@@ -173,7 +174,7 @@ class App:
         self._recording = False
         self._rec_started_at = 0.0
         self._rec_mode = "hold"        # каким биндом начата текущая запись
-        self._held = {"hold": False, "toggle": False}
+        self._held = {"hold": False, "toggle": False, "command": False}
         self._mouse_binds: list[tuple[str, tuple, str]] = []
         self._mouse_listener = None
         self._work_lock = threading.Lock()
@@ -261,7 +262,7 @@ class App:
 
     def _hotkey_bind(self) -> None:
         self._hotkey_unbind()
-        for mode in ("hold", "toggle"):
+        for mode in ("hold", "toggle", "command"):
             spec = str(self.cfg.get(f"hotkey_{mode}") or "").strip()
             if not spec:
                 continue
@@ -483,7 +484,7 @@ class App:
                 pass
             self._mouse_listener = None
         self._mouse_binds.clear()
-        self._held = {"hold": False, "toggle": False}
+        self._held = {"hold": False, "toggle": False, "command": False}
 
     def _dictation_press(self, mode: str) -> None:
         if self._held.get(mode):      # автоповтор зажатого сочетания
@@ -496,14 +497,16 @@ class App:
                 self._start_recording("toggle")
             # идёт запись от удержания - не перехватываем её переключателем
         else:
-            self._start_recording("hold")
+            # command держится и отпускается так же, как hold: разница не в
+            # жесте, а в том, что делать с распознанным (см. _finish_recording).
+            self._start_recording(mode)
 
     def _dictation_release(self, mode: str) -> None:
         # не взводились - значит и старта от нас не было: чужую запись не трогаем
         if not self._held.get(mode):
             return
         self._held[mode] = False
-        if mode == "hold" and self._recording and self._rec_mode == "hold":
+        if mode in ("hold", "command") and self._recording and self._rec_mode == mode:
             self._finish_recording()
 
     def _esc(self, _e) -> None:
@@ -557,11 +560,95 @@ class App:
             return
         self.ui(self.overlay.show_processing)
         self._set_tray_state("proc")
+        if self._rec_mode == "command":
+            # Команду в «Повторить последнюю» не кладём: повтор вслепую прогнал
+            # бы правку ещё раз - по другому выделению или вовсе без него.
+            threading.Thread(target=self._process_command, args=(audio,),
+                             daemon=True).start()
+            return
         # Запись держим до следующей: если распознавание или вставка упадут,
         # фраза не потеряна - «Повторить последнюю» в трее прогонит её заново.
         # Память дешёвая: минута речи в float32 - ~4 МБ.
         self._last_audio, self._last_dur = audio, dur
         threading.Thread(target=self._process, args=(audio, dur), daemon=True).start()
+
+    def _process_command(self, audio) -> None:
+        """Command mode: выделил текст, сказал что сделать - выделенное заменилось.
+
+        Порядок шагов не случаен. Выделение забираем ПЕРВЫМ, до распознавания:
+        человек только отпустил хоткей и ещё стоит в своём документе, а на
+        распознавание уходит секунда - за неё он успеет кликнуть куда угодно, и
+        Ctrl+C уедет в чужое окно.
+
+        Отдельный риск, которого нет у диктовки: мы вставляем ПОВЕРХ выделения,
+        то есть стираем его. Поэтому на каждом сомнении - выходим, ничего не
+        тронув. Вставить сюда мусор - значит уничтожить кусок чужого документа,
+        а Ctrl+Z у каждого приложения свой, и вернуть мы не поможем.
+        """
+        try:
+            with self._work_lock:
+                llm = self.cfg.get("llm") or {}
+                if not llm.get("enabled"):
+                    log("command: полировка выключена, править нечем")
+                    self.ui(self.overlay.show_error, "нужна Ollama")
+                    return
+
+                self._inserting = True
+                try:
+                    sel, old_clip = copy_selection()
+                finally:
+                    self._insert_window_closes()
+                if not sel or not sel.strip():
+                    log("command: ничего не выделено")
+                    self.ui(self.overlay.show_error, "ничего не выделено")
+                    return
+
+                instruction = self.transcriber.transcribe(audio)
+                # Паразитов из указания убираем, а полировку LLM не зовём: это
+                # был бы второй проход модели ради фразы в три слова, и лишняя
+                # секунда к задержке.
+                instruction = _strip_fillers(instruction)
+                if not instruction.strip():
+                    log("command: указание пустое")
+                    self.ui(self.overlay.show_error, "не расслышал команду")
+                    return
+                log(f"command: {instruction!r} над {len(sel)} символами")
+
+                t0 = time.time()
+                result = llm_command(sel, instruction, llm, log)
+                if not result:
+                    self.ui(self.overlay.show_error, "не смог выполнить")
+                    return
+
+                self._inserting = True
+                try:
+                    # restore=False: insert вернул бы в буфер выделение, которое
+                    # сам же туда и положил Ctrl+C. Прежний буфер человека
+                    # возвращаем ниже, сами.
+                    ok = insert(result, mode=self.cfg.get("insert_mode", "paste"),
+                                restore=False)
+                finally:
+                    self._insert_window_closes()
+                if self.cfg.get("restore_clipboard", True) and old_clip is not None:
+                    time.sleep(0.3)      # дать окну забрать вставленное
+                    _set_clipboard_text(old_clip)
+
+                # Отмену НЕ взводим намеренно. Она стирает вставленное
+                # Backspace'ом, а вернуть выделение, поверх которого мы
+                # вставили, ей нечем: получилась бы дыра вместо текста.
+                self._undo_text, self._undo_armed = None, False
+
+            if ok:
+                log(f"command ok: {len(sel)} -> {len(result)} символов "
+                    f"за {time.time() - t0:.2f}с")
+                self.ui(self.overlay.show_done, "готово")
+            else:
+                self.ui(self.overlay.show_error, "не удалось вставить")
+        except Exception as e:  # noqa: BLE001
+            log(f"command error: {e}")
+            self.ui(self.overlay.show_error, "ошибка команды")
+        finally:
+            self._set_tray_state("idle")
 
     def _retry_last(self) -> None:
         """Прогнать последнюю запись заново - аналог retry у Wispr Flow.
