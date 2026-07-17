@@ -17,7 +17,13 @@
 ; текстами лицензий внутри. Подробности - licenses/README.txt.
 
 #define AppName "FlowLocal"
-#define AppVersion "0.1.0"
+; Версию передаёт tools/build.py из version.py - там единственный источник
+; правды. Значение ниже - запасное, на случай ручного вызова ISCC: разъедься
+; оно с приложением, и обновлятор начнёт предлагать поставить то, что и так
+; стоит.
+#ifndef AppVersion
+  #define AppVersion "0.0.0"
+#endif
 #define AppPublisher "romankandeevy"
 #define AppURL "https://github.com/romankandeevy/flowlocal"
 #define AppExe "FlowLocal.exe"

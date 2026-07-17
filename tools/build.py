@@ -17,7 +17,10 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
 SPEC = os.path.join(ROOT, "flowlocal.spec")
+
+from version import __version__  # noqa: E402
 
 # Без этих файлов сборку раздавать нельзя - см. licenses/README.txt.
 REQUIRED_LICENSES = ("LICENSE", "licenses/README.txt", "licenses/Qt-LGPLv3.txt",
@@ -48,10 +51,46 @@ def size_of(path: str) -> str:
     return f"{total / 1024 / 1024:.0f} МБ"
 
 
+def find_iscc() -> str:
+    """Компилятор Inno Setup. Пусто - не установлен.
+
+    winget кладёт его в профиль, а не в Program Files, и на PATH не выводит -
+    поэтому ищем сами, а не надеемся на which.
+    """
+    for p in (os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                           "Programs", "Inno Setup 6", "ISCC.exe"),
+              r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+              r"C:\Program Files\Inno Setup 6\ISCC.exe"):
+        if os.path.exists(p):
+            return p
+    return shutil.which("iscc") or ""
+
+
+def build_installer(app_dir: str) -> str:
+    """Собрать setup.exe. Версия - из version.py, руками её нигде не писать.
+
+    Разъедься версия приложения и установщика - обновлятор начнёт предлагать
+    поставить то, что и так стоит, а человек будет ставить это по кругу.
+    """
+    iscc = find_iscc()
+    if not iscc:
+        print("\nInno Setup не найден - установщик не собран.")
+        print("  winget install JRSoftware.InnoSetup")
+        return ""
+    iss = os.path.join(ROOT, "tools", "installer.iss")
+    rc = subprocess.call([iscc, f"/DAppVersion={__version__}", iss], cwd=ROOT)
+    if rc != 0:
+        print(f"\nПРОВАЛ: ISCC вернул {rc}")
+        return ""
+    out = os.path.join(ROOT, "dist", f"FlowLocal-{__version__}-setup.exe")
+    return out if os.path.exists(out) else ""
+
+
 def main() -> int:
-    variant = (sys.argv[1] if len(sys.argv) > 1 else "cpu").lower()
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    variant = (args[0] if args else "cpu").lower()
     if variant not in ("cpu", "cuda"):
-        print("использование: python tools/build.py cpu|cuda")
+        print("использование: python tools/build.py cpu|cuda [--installer]")
         return 2
     if not check_licenses():
         return 2
@@ -104,6 +143,18 @@ def main() -> int:
         print("Модель качается при первом запуске в models/ рядом с .exe.")
     print("Раздавать — папку целиком, а не один .exe: см. licenses/README.txt.")
     print("Проверять — на машине БЕЗ Python: см. tools/BUILD.md.")
+
+    if "--installer" in sys.argv:
+        if variant != "cpu":
+            print("\nУстановщик собираем только из cpu: его и раздаём.")
+            return 0
+        setup = build_installer(app_dir)
+        if not setup:
+            return 1
+        print(f"\nустановщик: {setup}")
+        print(f"  версия {__version__} (из version.py), размер "
+              f"{os.path.getsize(setup) / 1e6:.0f} МБ")
+        print(f"  выложить: python tools/release.py")
     return 0
 
 

@@ -92,6 +92,8 @@ import config as C  # noqa: E402
 import inputspec  # noqa: E402
 import overlay_qt as OV  # noqa: E402
 import theme as T  # noqa: E402
+import updater  # noqa: E402
+from version import __version__  # noqa: E402
 import cleaner  # noqa: E402
 from cleaner import _strip_fillers, clean, extract_commands, llm_command  # noqa: E402
 from inserter import (_set_clipboard_text, backspace,  # noqa: E402
@@ -180,6 +182,7 @@ class App:
         self._work_lock = threading.Lock()
         self._ready = False
         self._llm_note = ""          # модель Ollama, найденная автоопределением
+        self._update: dict | None = None   # свежая версия с GitHub, если нашлась
         self._hk_handles: list = []
         self._hook_handles: list = []
         self._capturing = False
@@ -956,6 +959,8 @@ class App:
                        f"устройство {dev}")
         info = {
             "состояние": self._status(),
+            "версия": __version__ + ("" if not self._update
+                                     else f"  ->  есть {self._update['version']}"),
             "модель": str(self.cfg.get("model")),
             "устройство": f"{self.transcriber.device} / {self.transcriber.compute_type}",
             "микрофон": mic,
@@ -1029,6 +1034,11 @@ class App:
         self._tray_status = menu.addAction("FlowLocal")
         self._tray_status.setEnabled(False)
         menu.addSeparator()
+        # Первым и заметным: если обновление есть, человек пришёл в меню скорее
+        # всего за ним. Прячется, пока обновлять нечего.
+        self._act_update = menu.addAction("Обновить")
+        self._act_update.triggered.connect(self._do_update)
+        self._act_update.setVisible(False)
         act_settings = menu.addAction("Настройки…")
         act_settings.triggered.connect(self._open_settings)
         self._act_retry = menu.addAction("Повторить последнюю диктовку")
@@ -1044,6 +1054,11 @@ class App:
             self._act_retry.setEnabled(
                 getattr(self, "_last_audio", None) is not None
                 and self._ready and not self._recording)
+            upd = self._update
+            self._act_update.setVisible(bool(upd))
+            if upd:
+                self._act_update.setText(
+                    f"Обновить до {upd['version']}  ({upd['size_mb']} МБ)")
         menu.aboutToShow.connect(_refresh_menu)
         self.tray.setContextMenu(menu)
         # Двойной клик - настройки: у pystray это был default=True.
@@ -1069,6 +1084,52 @@ class App:
         except Exception as e:  # noqa: BLE001
             die(f"не удалось загрузить модель.\n\n{e}")
             self.ui(self._shutdown)
+
+    def _check_update_bg(self) -> None:
+        """Есть ли версия свежее. Своим потоком, молча, один раз за запуск.
+
+        Молча - это принцип, а не лень. Приложение висит в трее сутками; всплыть
+        поверх чужой работы с новостью «вышла версия 0.2.1» - это ровно то, за
+        что ненавидят программы. Нашли - пишем в трей и в «О программе», человек
+        увидит, когда сам туда посмотрит.
+
+        Из исходников не проверяем вовсе: там обновляются git pull, а не
+        установщиком поверх рабочей копии.
+        """
+        if not updater.can_update():
+            return
+        try:
+            found = updater.check()
+        except Exception as e:  # noqa: BLE001 - обновление не должно мешать диктовке
+            log(f"проверка обновлений не удалась: {e}")
+            return
+        if not found:
+            return
+        self._update = found
+        log(f"есть обновление: {found['version']} ({found['size_mb']} МБ)")
+        # Меню трея само перечитает self._update при открытии (_refresh_menu),
+        # трогать его отсюда, из чужого потока, не надо и нельзя.
+
+    def _do_update(self) -> None:
+        """Скачать и поставить. Зовётся из трея, работает своим потоком."""
+        if not self._update:
+            return
+        info = self._update
+
+        def work():
+            try:
+                self.ui(self.overlay.show_processing)
+                self.ui(self.overlay.set_hint, f"обновление {info['version']}")
+                path = updater.download(info["url"])
+                log(f"обновление скачано: {path}")
+                updater.install(path)
+                # Уходим сами: пока мы живы, установщик не заменит наш .exe.
+                self.ui(self._shutdown)
+            except Exception as e:  # noqa: BLE001
+                log(f"обновление не удалось: {e}")
+                self.ui(self.overlay.show_error, "не удалось обновить")
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _autoconfig_llm_bg(self) -> None:
         """Есть ли у человека Ollama - выясняем сами, а не спрашиваем.
@@ -1159,6 +1220,7 @@ class App:
         self._heal_autostart()
         threading.Thread(target=self._load_model_bg, daemon=True).start()
         threading.Thread(target=self._autoconfig_llm_bg, daemon=True).start()
+        threading.Thread(target=self._check_update_bg, daemon=True).start()
         if not self.cfg.get("onboarded"):
             # Первый запуск: без мастера человек видит только иконку в трее и
             # не понимает ничего. Небольшая задержка - дать трею показаться.
