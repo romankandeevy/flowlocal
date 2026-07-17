@@ -5,8 +5,25 @@
 Настоящие нажатия шлются через keyboard, как это делает человек.
 
 Запуск: python test_hotkey.py
+
+    РУЧНОЙ. НЕДЕТЕРМИНИРОВАН ПО ПРИРОДЕ. Красный сам по себе ничего не значит.
+
+Он шлёт нажатия в живую Windows: любая смена фокуса, любой чужой хук, любая
+заминка планировщика - и событие съедено. Прогоны 17.07.2026 дали 10, потом 6,
+потом 11 провалов на одном и том же коде, и у каждого провала событие просто не
+приходило.
+
+Прежде чем чинить по нему приложение - проверьте пробами, они однозначны:
+
+    python tools/probe_keyboard_rebind.py             # библиотека: 6/6
+    python tools/probe_keyboard_rebind.py --with-app  # она же под нагрузкой: 6/6
+    python tools/probe_capture_rebind.py              # захват и возврат: проходит
+
+Все три зелёные - значит красный здесь свой, а не приложения (PLAN 9.1-бис).
+Гонять на свободной машине, руки убрать: тест двигает мышь и жмёт клавиши.
 """
 
+import os
 import sys
 import time
 
@@ -26,8 +43,8 @@ NEW = "ctrl+alt+f9"
 # Скан-код обязателен. keybd_event(vk, 0, ...) хук ещё увидит, но add_hotkey
 # сопоставляет сочетания именно по скан-кодам, и с нулём не срабатывает:
 # сырые события идут, а хоткей - нет.
-_VK = {"ctrl": 0x11, "shift": 0x10, "alt": 0x12, "space": 0x20, "f9": 0x78,
-       "esc": 0x1B}
+_VK = {"ctrl": 0x11, "shift": 0x10, "alt": 0x12, "space": 0x20, "f8": 0x77,
+       "f9": 0x78, "esc": 0x1B}
 
 
 def _down(vk: int) -> None:
@@ -39,6 +56,22 @@ def _up(vk: int) -> None:
     win32api.keybd_event(vk, win32api.MapVirtualKey(vk, 0),
                          win32con.KEYEVENTF_KEYUP, 0)
     time.sleep(0.01)
+
+
+def settle() -> None:
+    """Дать библиотеке keyboard поднять свой хук после привязки.
+
+    _hotkey_unbind() снимает ВСЕ хуки, и keyboard на этом останавливает свой
+    поток-слушатель. Обратная привязка поднимает его заново - ставит системный
+    хук, заводит поток, - и это не мгновенно. Тест жмёт клавиши через
+    микросекунды после привязки и попадает ровно в эту щель: лог печатает
+    «hotkeys: ...», а нажатие уже потеряно.
+
+    Человеку эта щель не видна: между «сохранил настройку» и «нажал хоткей» у
+    него уходят секунды. Поэтому здесь пауза - не костыль, а признание того, что
+    тест быстрее человека, и мерить надо то, что бывает.
+    """
+    time.sleep(0.35)
 
 
 def tap(hotkey: str, hold: float = 0.12) -> None:
@@ -110,9 +143,20 @@ def main() -> None:
     def check(name: str, cond: bool) -> None:
         results.append(cond)
         print(f"  {'PASS' if cond else 'FAIL'}  {name}")
+        if not cond:
+            # Провал обязан объяснять себя сам. Без этого «FAIL хоткей не
+            # сработал» одинаково выглядит и когда событие потерялось, и когда
+            # оно пришло дважды, и когда его съел ранний выход заглушки по
+            # _recording - а лечится каждый случай по-своему.
+            print(f"        calls={calls}  _recording={app._recording} "
+                  f"_rec_mode={app._rec_mode!r} _held={app._held}")
+            print(f"        cfg: hold={app.cfg.get('hotkey_hold')!r} "
+                  f"toggle={app.cfg.get('hotkey_toggle')!r} "
+                  f"undo={app.cfg.get('undo_hotkey')!r}")
 
     try:
         app._hotkey_bind()
+        settle()
         print("--- привязка")
         calls.clear()
         tap(OLD)
@@ -123,6 +167,7 @@ def main() -> None:
         new_cfg = dict(app.cfg)
         new_cfg["hotkey_hold"] = NEW
         app._on_config_change(new_cfg)
+        settle()
         calls.clear()
         tap(OLD)
         check("старый хоткей больше не срабатывает", calls.count("start") == 0)
@@ -136,6 +181,7 @@ def main() -> None:
         tap(NEW)
         check("на время захвата хоткей снят", calls.count("start") == 0)
         app._on_hotkey_capture(False)
+        settle()
         calls.clear()
         tap(NEW)
         check("после захвата хоткей вернулся", calls.count("start") == 1)
@@ -144,6 +190,7 @@ def main() -> None:
         bad = dict(app.cfg)
         bad["hotkey_hold"] = "нетакойклавиши"
         app._on_config_change(bad)
+        settle()
         check("откат на умолчание", app.cfg["hotkey_hold"] == "ctrl+shift+space")
         calls.clear()
         tap("ctrl+shift+space")
@@ -154,6 +201,7 @@ def main() -> None:
         tog["hotkey_hold"] = ""        # оставляем только переключатель
         tog["hotkey_toggle"] = NEW
         app._on_config_change(tog)
+        settle()
         calls.clear()
         tap(NEW)
         check("первое нажатие - старт", calls == ["start"])
@@ -178,6 +226,7 @@ def main() -> None:
         none_cfg["hotkey_hold"] = ""
         none_cfg["hotkey_toggle"] = ""
         app._on_config_change(none_cfg)
+        settle()
         calls.clear()
         tap(NEW)
         tap(OLD)
@@ -188,6 +237,7 @@ def main() -> None:
         both["hotkey_hold"] = OLD
         both["hotkey_toggle"] = NEW
         app._on_config_change(both)
+        settle()
         calls.clear()
         tap(OLD)
         check("удержание: старт+стоп за одно нажатие", calls == ["start", "finish"])
@@ -204,19 +254,39 @@ def main() -> None:
         print("--- удержание не отменяется по Esc")
         # Esc-хук висит, пока есть бинд-переключатель, но отменять он обязан
         # только запись, начатую переключателем.
+        #
+        # Бинд удержания на эту проверку - голая F8, и это не прихоть. Раньше
+        # здесь зажимался ctrl+shift+space, и Esc летел при зажатых Ctrl+Shift -
+        # а Ctrl+Shift+Esc для Windows значит «открыть диспетчер задач». Каждый
+        # прогон вскидывал его поверх всех окон, диспетчер элевирован - и пока
+        # он в фокусе, низкоуровневый хук неэлевированного процесса вообще не
+        # видит клавиш (UIPI): тест и сам мог развалиться следом. Проверяемой
+        # логике модификаторы не нужны - важно лишь, что запись начата
+        # удержанием, а Esc пришёл во время неё.
+        esc_cfg = dict(app.cfg)
+        esc_cfg["hotkey_hold"] = "f8"
+        esc_cfg["hotkey_toggle"] = NEW     # хук Esc жив, пока есть переключатель
+        app._on_config_change(esc_cfg)
+        settle()
         calls.clear()
-        _down(_VK["ctrl"]); _down(_VK["shift"]); _down(_VK["space"])
+        _down(_VK["f8"])
         time.sleep(0.15)
         tap("esc")
         check("Esc не трогает запись от удержания", calls == ["start"])
-        _up(_VK["space"]); _up(_VK["shift"]); _up(_VK["ctrl"])
+        _up(_VK["f8"])
         time.sleep(0.2)
         check("удержание закончилось отпусканием", calls == ["start", "finish"])
+        back = dict(app.cfg)               # вернуть бинды: следующий шаг жмёт OLD
+        back["hotkey_hold"] = OLD
+        back["hotkey_toggle"] = NEW
+        app._on_config_change(back)
+        settle()
 
         print("--- битый хоткей отмены")
         bad_undo = dict(app.cfg)
         bad_undo["undo_hotkey"] = "нетакойклавиши"
         app._on_config_change(bad_undo)
+        settle()
         calls.clear()
         tap(OLD)                       # OLD - бинд удержания: старт и стоп
         check("битая отмена не сломала диктовку", calls == ["start", "finish"])
@@ -231,7 +301,14 @@ def main() -> None:
         app.qapp.quit()
 
     print("\nИТОГ:", "PASS" if all(results) else "FAIL")
-    sys.exit(0 if all(results) else 1)
+    # os._exit, а не sys.exit: на обычном выходе Python сносит контекст QML
+    # раньше самого окна оверлея, и тот на прощание пересчитывает свои привязки
+    # к уже удалённым токенам темы - полторы сотни строк «TypeError: Cannot read
+    # property 'pillH' of null» поверх результата теста. Ошибками они не
+    # являются, но топят вывод и прячут настоящие. Уборка уже сделана выше, в
+    # finally: держать нечего, выходим сразу.
+    sys.stdout.flush()
+    os._exit(0 if all(results) else 1)
 
 
 if __name__ == "__main__":
