@@ -171,6 +171,13 @@ Rectangle {
                         HotkeyField { field: "hotkey_toggle"; allowClear: true }
                     }
                     SettingRow {
+                        title: "Править выделенное голосом"
+                        subtitle: B.get("llm.enabled")
+                            ? "Выделите текст, зажмите, скажите «сделай короче», «переведи на английский», «исправь ошибки» - выделенное заменится"
+                            : "Нужна Ollama: правка по указанию - это понимание смысла. Включите полировку на вкладке «Распознавание»"
+                        HotkeyField { field: "hotkey_command"; allowClear: true }
+                    }
+                    SettingRow {
                         title: "Микрофон"
                         subtitle: "Применится при следующей записи"
                         Select {
