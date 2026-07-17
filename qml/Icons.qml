@@ -10,6 +10,13 @@
 import QtQuick
 
 QtObject {
+    // layout-dashboard - ею же помечен Overview в каркасе системы
+    // (templates/app-shell), а наша «Главная» - это он и есть.
+    readonly property string home:
+        "M3 5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"
+        + "M13 5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2Z"
+        + "M13 13a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2Z"
+        + "M3 17a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"
     // sliders-horizontal
     readonly property string general:
         "M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"
@@ -51,6 +58,7 @@ QtObject {
     // список страниц и так один, а перебирать имена в вёрстке - шум.
     function forPage(name) {
         switch (name) {
+        case "Главная":       return home;
         case "Основное":      return general;
         case "Распознавание": return asr;
         case "Модели":        return models;

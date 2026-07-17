@@ -90,6 +90,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import config as C  # noqa: E402
 import inputspec  # noqa: E402
+import models  # noqa: E402
 import overlay_qt as OV  # noqa: E402
 import theme as T  # noqa: E402
 import updater  # noqa: E402
@@ -957,34 +958,44 @@ class App:
         else:
             mic = next((f"{n} · {a}" for i, n, a in list_input_devices() if i == dev),
                        f"устройство {dev}")
+        # Страница «О программе», а не дамп для отладки. Раньше здесь стояли
+        # «устройство: cpu / int8», «модель: gigaam-v3-e2e-rnnt» и версия
+        # Python - человеку, который просто пишет письма, это не говорит
+        # ничего, а на вопрос «всё ли хорошо?» не отвечает вовсе.
+        #
+        # Оставлено ровно то, что он может проверить глазами и о чём может
+        # спросить: слышу ли я вас, чем диктовать, всё ли готово. Служебное
+        # (имя модели, версия Python, точный путь) никуда не делось - оно в
+        # flow.log, и кнопка рядом.
+        m = models.get(str(self.cfg.get("model") or ""))
         info = {
             "состояние": self._status(),
-            "версия": __version__ + ("" if not self._update
-                                     else f"  ->  есть {self._update['version']}"),
-            "модель": str(self.cfg.get("model")),
-            "устройство": f"{self.transcriber.device} / {self.transcriber.compute_type}",
-            "микрофон": mic,
-            "удержание": inputspec.pretty(str(self.cfg.get("hotkey_hold") or "")),
-            "переключение": inputspec.pretty(str(self.cfg.get("hotkey_toggle") or "")),
+            "версия": __version__ + ("" if not self._update else
+                                     f"  ·  есть новая: {self._update['version']}"),
+            "распознаёт": (f"{m.title} · {m.langs}" if m
+                           else str(self.cfg.get("model"))),
+            "слушает": mic,
+            "диктовать": " · ".join(
+                p for p in (inputspec.pretty(str(self.cfg.get("hotkey_hold") or "")),
+                            inputspec.pretty(str(self.cfg.get("hotkey_toggle") or "")))
+                if p) or "сочетание не назначено",
         }
         # Полировку мы включаем сами, молча - значит обязаны сказать, что она
-        # включена и чем. Иначе человек не поймёт, почему текст стал другим, а
-        # это худший сорт сюрприза.
+        # включена. Иначе человек не поймёт, почему текст стал другим, а это
+        # худший сорт сюрприза.
         if self._llm_note:
-            info["полировка"] = f"ollama · {self._llm_note}"
-        info["python"] = sys.version.split()[0]
-        info["папка"] = APP_DIR
+            info["понимает поправки"] = "да"
         return info
 
     def _status(self) -> str:
         if not self._ready:
-            return "загрузка модели…"
+            return "просыпаюсь…"
         # Без единого бинда приложение немое, и снаружи это неотличимо от
         # «оно не запустилось»: человек жмёт хоткей, ничего не происходит, и он
         # идёт запускать приложение снова. Так и было - четыре раза подряд.
         if not self._binds_pretty():
-            return "хоткей не назначен · откройте настройки"
-        return f"{self.cfg.get('model')} · {self._binds_pretty()}"
+            return "не назначено сочетание · откройте настройки"
+        return f"готов · {self._binds_pretty()}"
 
     def _binds_pretty(self) -> str:
         parts = [inputspec.pretty(str(self.cfg.get(k) or ""))

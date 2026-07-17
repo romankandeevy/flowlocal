@@ -15,10 +15,10 @@ Rectangle {
     // Плоская заливка - не то, чем Korti предлагает заполнять поверхность.
     Backdrop { anchors.fill: parent }
 
-    property string page: "Основное"
-    readonly property var pages: ["Основное", "Распознавание", "Модели", "Ввод",
-                                  "Словарь", "Замены", "История", "Статистика",
-                                  "О программе"]
+    property string page: "Главная"
+    readonly property var pages: ["Главная", "Основное", "Распознавание", "Модели",
+                                  "Ввод", "Словарь", "Замены", "История",
+                                  "Статистика", "О программе"]
 
     // Esc: во время захвата отменяет захват, иначе закрывает окно.
     Keys.onEscapePressed: B.cancelCapture()
@@ -148,7 +148,203 @@ Rectangle {
             width: scroll.width - 52
             spacing: 16
 
-            PageTitle { text: win.page }
+            PageTitle { text: win.page === "Главная" ? home.greeting : win.page }
+
+            // ===== Главная =====
+            // Экрана не было вовсе: приложение открывалось сразу в настройки,
+            // и человек первым делом видел «пре-буфер» и «квантизацию» вместо
+            // того, ради чего всё затевалось.
+            //
+            // Канон Korti (templates/app-shell, Overview): крупный заголовок,
+            // ряд карточек-метрик, ниже список последних событий. Здесь то же
+            // самое, только события - ваши диктовки.
+            Column {
+                id: home
+                visible: win.page === "Главная"
+                width: parent.width
+                spacing: 16
+
+                property var st: ({})
+                property var recent: []
+                property string greeting: "Главная"
+
+                function reload() {
+                    st = B.stats();
+                    recent = B.history().slice(0, 5);
+                    var h = new Date().getHours();
+                    greeting = h < 5 ? "Доброй ночи" : h < 12 ? "Доброе утро"
+                             : h < 18 ? "Добрый день" : "Добрый вечер";
+                }
+                Component.onCompleted: reload()
+                onVisibleChanged: if (visible) reload()
+
+                // Первое, что человек должен узнать: как этим пользоваться.
+                // Не «состояние системы», а одна фраза действием.
+                Card {
+                    width: parent.width
+                    Item {
+                        width: parent.width
+                        implicitHeight: hero.implicitHeight + 36
+                        Column {
+                            id: hero
+                            anchors { left: parent.left; right: parent.right; top: parent.top
+                                      leftMargin: 18; rightMargin: 18; topMargin: 18 }
+                            spacing: 10
+
+                            Row {
+                                spacing: 9
+                                Rectangle {
+                                    width: 8; height: 8; radius: 4
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: B.ready ? T.success : T.textMuted
+                                }
+                                Text {
+                                    text: B.ready ? "Готов записывать" : "Просыпаюсь…"
+                                    font.family: T.sans
+                                    font.pixelSize: T.tSm
+                                    font.weight: Font.Medium
+                                    color: T.textSecondary
+                                }
+                            }
+                            Text {
+                                width: hero.width
+                                wrapMode: Text.WordWrap
+                                text: B.pretty(B.get("hotkey_hold") || "")
+                                      ? "Зажмите " + B.pretty(B.get("hotkey_hold"))
+                                        + " и говорите. Отпустили — текст на месте."
+                                      : B.pretty(B.get("hotkey_toggle") || "")
+                                      ? "Нажмите " + B.pretty(B.get("hotkey_toggle"))
+                                        + " и говорите. Нажмите ещё раз — текст на месте."
+                                      : "Сочетание не назначено — задайте его в «Основном»."
+                                font.family: T.sans
+                                font.pixelSize: T.tXl
+                                font.weight: Font.Bold
+                                font.letterSpacing: -0.2
+                                color: T.text
+                                lineHeight: 1.3
+                            }
+                            Text {
+                                width: hero.width
+                                wrapMode: Text.WordWrap
+                                text: "Работает в любом окне: письмо, чат, документ. "
+                                      + "Голос никуда не отправляется — всё считается здесь."
+                                font.family: T.sans
+                                font.pixelSize: T.tSm
+                                color: T.textMuted
+                                lineHeight: 1.5
+                            }
+                        }
+                    }
+                }
+
+                // Числа, а не прилагательные - так говорит система.
+                Row {
+                    width: parent.width
+                    spacing: 12
+                    property real cw: (width - 24) / 3
+                    Metric {
+                        width: parent.cw
+                        label: "надиктовано"
+                        value: home.st.words || "0"
+                        hint: "слов всего"
+                    }
+                    Metric {
+                        width: parent.cw
+                        label: "сэкономлено"
+                        value: home.st.saved_sec || "0 с"
+                        hint: "против набора руками"
+                    }
+                    Metric {
+                        width: parent.cw
+                        label: "диктовок"
+                        value: home.st.dictations || "0"
+                        hint: "за всё время"
+                    }
+                }
+
+                SectionHeader { text: "ПОСЛЕДНЕЕ" }
+
+                // Пусто - не прячем экран, а зовём попробовать. Пустой список
+                // без объяснения выглядит как поломка.
+                Card {
+                    width: parent.width
+                    visible: home.recent.length === 0
+                    Item {
+                        width: parent.width
+                        implicitHeight: 92
+                        Text {
+                            anchors.centerIn: parent
+                            width: parent.width - 36
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.WordWrap
+                            text: "Здесь появится то, что вы надиктуете.\nПопробуйте прямо сейчас — скажите что-нибудь."
+                            font.family: T.sans
+                            font.pixelSize: T.tSm
+                            color: T.textMuted
+                            lineHeight: 1.5
+                        }
+                    }
+                }
+
+                Column {
+                    width: parent.width
+                    spacing: 8
+                    Repeater {
+                        model: home.recent
+                        Card {
+                            width: home.width
+                            Item {
+                                width: parent.width
+                                implicitHeight: Math.max(52, line.implicitHeight + 26)
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: B.copyText(modelData.text)
+                                }
+                                Rectangle {
+                                    id: dot
+                                    x: 16
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 7; height: 7; radius: 3.5
+                                    color: T.success
+                                }
+                                Column {
+                                    id: line
+                                    anchors { left: dot.right; right: when_.left; top: parent.top
+                                              leftMargin: 12; rightMargin: 12; topMargin: 13 }
+                                    spacing: 3
+                                    Text {
+                                        width: parent.width
+                                        elide: Text.ElideRight
+                                        maximumLineCount: 2
+                                        wrapMode: Text.WordWrap
+                                        text: modelData.text
+                                        font.family: T.sans
+                                        font.pixelSize: T.tBase
+                                        font.weight: Font.DemiBold
+                                        color: T.text
+                                    }
+                                    Text {
+                                        text: "нажмите, чтобы скопировать"
+                                        font.family: T.sans
+                                        font.pixelSize: T.t2xs
+                                        color: T.textMuted
+                                    }
+                                }
+                                Text {
+                                    id: when_
+                                    anchors { right: parent.right; rightMargin: 16
+                                              verticalCenter: parent.verticalCenter }
+                                    text: String(modelData.ts).slice(11, 16)
+                                    font.family: T.mono
+                                    font.pixelSize: T.t2xs
+                                    color: T.textMuted
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // ===== Основное =====
             Column {
@@ -162,12 +358,12 @@ Rectangle {
                     SettingRow {
                         first: true
                         title: "Удерживать и говорить"
-                        subtitle: "Зажали - говорите, отпустили - текст вставился. Можно назначить и боковую кнопку мыши"
+                        subtitle: "Самый простой способ. Можно назначить и боковую кнопку мыши"
                         HotkeyField { field: "hotkey_hold" }
                     }
                     SettingRow {
                         title: "Нажать и говорить"
-                        subtitle: "Нажали - пишем, нажали ещё раз - стоп. Руки свободны, Esc отменяет запись"
+                        subtitle: "Если диктуете долго и не хотите держать клавишу. Esc — отменить"
                         HotkeyField { field: "hotkey_toggle"; allowClear: true }
                     }
                     SettingRow {
@@ -179,7 +375,7 @@ Rectangle {
                     }
                     SettingRow {
                         title: "Микрофон"
-                        subtitle: "Применится при следующей записи"
+                        subtitle: "Какой микрофон слушать"
                         Select {
                             options: B.micOptions
                             value: B.get("mic_device")
@@ -188,7 +384,7 @@ Rectangle {
                     }
                     SettingRow {
                         title: "Отменить последнюю диктовку"
-                        subtitle: "Уберёт ровно то, что вставило приложение - и только если после вставки вы ничего не печатали"
+                        subtitle: "Уберёт вставленный текст, если вы после этого ничего не печатали"
                         HotkeyField { field: "undo_hotkey"; allowClear: true }
                     }
                 }
@@ -199,7 +395,7 @@ Rectangle {
                     SettingRow {
                         first: true
                         title: "Оформление"
-                        subtitle: "«система» - как настроено в Windows"
+                        subtitle: "«Система» — как в Windows"
                         Segmented {
                             options: B.themeOptions
                             value: B.get("theme")
@@ -214,18 +410,18 @@ Rectangle {
                     SettingRow {
                         first: true
                         title: "Запускать вместе с Windows"
-                        subtitle: "FlowLocal свернётся в трей при входе в систему"
+                        subtitle: "Будет ждать в углу экрана, готовый к работе"
                         // Автозапуск живёт в реестре, а не в config.json.
                         Toggle { value: B.autostart; onToggled: (v) => B.setAutostart(v) }
                     }
                     ToggleRow {
                         title: "Звуковые сигналы"
-                        subtitle: "Короткий тон на старте и в конце записи"
+                        subtitle: "Тихий сигнал, когда запись началась и закончилась"
                         path: "sounds"
                     }
                     ToggleRow {
                         title: "Вести историю"
-                        subtitle: "Записывать распознанный текст в history.jsonl"
+                        subtitle: "Хранить, что вы надиктовали, — чтобы можно было найти и скопировать"
                         path: "history"
                     }
                 }
@@ -243,7 +439,7 @@ Rectangle {
                     SettingRow {
                         first: true
                         title: "Модель"
-                        subtitle: "GigaAM - для русского, процессора хватает. Скачивание, размеры и удаление - на странице «Модели»"
+                        subtitle: "Кто именно распознаёт вашу речь. Выбрать другую — на странице «Модели»"
                         FlowButton {
                             label: (B.get("model") || "").split("/").pop()
                             onClicked: win.page = "Модели"
@@ -251,7 +447,7 @@ Rectangle {
                     }
                     SettingRow {
                         title: "Язык"
-                        subtitle: "Только для Whisper и Parakeet. GigaAM знает один язык - русский"
+                        subtitle: "GigaAM понимает только русский. Для других языков нужна другая модель"
                         Segmented {
                             options: B.langOptions
                             value: B.get("language")
@@ -260,7 +456,7 @@ Rectangle {
                     }
                     SettingRow {
                         title: "Устройство"
-                        subtitle: "«авто»: видеокарта, если onnxruntime собран с CUDA, иначе процессор. Для GigaAM разницы почти нет"
+                        subtitle: "Оставьте «авто» — программа выберет сама"
                         Segmented {
                             options: B.deviceOptions
                             value: B.get("device")
@@ -274,19 +470,19 @@ Rectangle {
                     width: parent.width
                     ToggleRow {
                         first: true
-                        title: "Убирать «э-э» и «ммм»"
-                        subtitle: "Консервативные правила: только однозначные междометия"
+                        title: "Убирать слова-паразиты"
+                        subtitle: "«Ну вот, короче, я думаю, надо сделать» → «Я думаю, надо сделать»"
                         path: "remove_fillers"
                     }
                     ToggleRow {
                         title: "Голосовые команды"
-                        subtitle: "«с новой строки», «с нового абзаца» - перевод строки; «нажми энтер» в конце фразы - отправка сообщения"
+                        subtitle: "Скажите «с новой строки» — и будет новая строка. Скажите «нажми энтер» в конце — сообщение отправится"
                         path: "voice_commands"
                     }
                     ToggleRow {
                         id: llmToggle
-                        title: "Полировка локальной LLM"
-                        subtitle: "Через Ollama: убирает слова-паразиты, учитывает самоисправления"
+                        title: "Понимать поправки на ходу"
+                        subtitle: "Сказали «в пятницу, нет, в субботу» — останется суббота. Нужна Ollama"
                         path: "llm.enabled"
                     }
                     // Адрес и модель показываем только когда полировка включена:
@@ -303,7 +499,7 @@ Rectangle {
                     SettingRow {
                         visible: llmToggle.value
                         title: "Модель Ollama"
-                        subtitle: "Например qwen2.5:3b - быстрая и достаточная"
+                        subtitle: "Оставьте пусто — найдём подходящую сами"
                         FlowInput {
                             width: 220
                             text: B.get("llm.model") || ""
@@ -330,7 +526,7 @@ Rectangle {
 
                 Text {
                     width: parent.width
-                    text: "Модели живут в models/ рядом с приложением. Выбранная применяется без перезапуска: старая работает, пока грузится новая."
+                    text: "Кто распознаёт вашу речь. Переключить можно на ходу — старая работает, пока грузится новая."
                     wrapMode: Text.WordWrap
                     font.family: T.sans; font.pixelSize: T.tBase
                     color: T.textSecondary
@@ -385,10 +581,32 @@ Rectangle {
                                 }
                                 Text {
                                     // Метаданные моноширинным - голос терминала.
+                                    //
+                                    // Раньше здесь стояло «226 МБ · русский · CPU ·
+                                    // MIT». Человеку, который просто пишет письма,
+                                    // «CPU» и «MIT» не говорят ничего: первое он
+                                    // прочтёт как ошибку, второе примет за опечатку.
+                                    // Размер и языки - это выбор («поместится?
+                                    // поймёт меня?»), железо - ответ на «а у меня
+                                    // пойдёт?». Лицензия - обязательство перед
+                                    // авторами модели, и её место ниже, в сноске,
+                                    // а не в строке выбора.
                                     text: modelData.sizeMb + " МБ · " + modelData.langs
-                                          + " · " + modelData.device + " · " + modelData.license
+                                          + " · " + (modelData.device === "GPU"
+                                                     ? "нужна видеокарта"
+                                                     : "видеокарта не нужна")
                                     font.family: T.mono; font.pixelSize: T.t2xs
                                     color: T.textMuted
+                                }
+                                Text {
+                                    // Parakeet под CC-BY-4.0 - она требует указать
+                                    // авторство, и молчать об этом нельзя. Но и
+                                    // кричать незачем: это про нас и авторов модели,
+                                    // а не про выбор человека.
+                                    text: "лицензия " + modelData.license
+                                    visible: modelData.license !== "MIT"
+                                    font.family: T.mono; font.pixelSize: T.t2xs
+                                    color: T.textFaint
                                 }
                                 // Прогресс скачивания: линия, не спиннер -
                                 // видно, сколько осталось от сотен мегабайт.
@@ -455,8 +673,8 @@ Rectangle {
                     width: parent.width
                     SettingRow {
                         first: true
-                        title: "Способ"
-                        subtitle: "«вставка» - через буфер и Ctrl+V, мгновенно. «посимвольно» - для окон, где Ctrl+V не срабатывает"
+                        title: "Как вставлять текст"
+                        subtitle: "Обычно «вставка» — это мгновенно. Если текст не появляется — попробуйте «посимвольно»"
                         Segmented {
                             options: B.insertOptions
                             value: B.get("insert_mode")
@@ -465,12 +683,12 @@ Rectangle {
                     }
                     ToggleRow {
                         title: "Пробел в конце"
-                        subtitle: "Чтобы следующая фраза не слиплась с предыдущей"
+                        subtitle: "Чтобы следующая фраза не слиплась с этой"
                         path: "append_space"
                     }
                     ToggleRow {
-                        title: "Возвращать буфер обмена"
-                        subtitle: "После вставки вернуть то, что лежало в буфере до неё"
+                        title: "Не трогать скопированное"
+                        subtitle: "Вернём в буфер то, что вы копировали до диктовки"
                         path: "restore_clipboard"
                     }
                 }
@@ -480,13 +698,13 @@ Rectangle {
                     width: parent.width
                     ToggleRow {
                         first: true
-                        title: "Держать микрофон открытым"
-                        subtitle: "Не режет первое слово: поток пишет всегда, начало берётся из пре-буфера"
+                        title: "Не терять первое слово"
+                        subtitle: "Микрофон наготове, поэтому начало фразы не обрежется"
                         path: "keep_mic_open"
                     }
                     SettingRow {
-                        title: "Пре-буфер"
-                        subtitle: "Сколько секунд звука до нажатия попадёт в запись"
+                        title: "Слышать начало заранее"
+                        subtitle: "На случай, если начали говорить чуть раньше, чем нажали"
                         Slider {
                             from: 0; to: 1.5; stepSize: 0.1
                             value: B.get("pre_buffer_sec")
@@ -494,8 +712,8 @@ Rectangle {
                         }
                     }
                     SettingRow {
-                        title: "Игнорировать нажатия короче"
-                        subtitle: "Защита от случайных касаний хоткея"
+                        title: "Не реагировать на случайные касания"
+                        subtitle: "Задели клавишу мимоходом — записи не будет"
                         Slider {
                             from: 0.1; to: 1.5; stepSize: 0.1
                             value: B.get("min_record_sec")
@@ -513,7 +731,7 @@ Rectangle {
 
                 Text {
                     width: parent.width
-                    text: "Имена, термины и названия. Похожее слово в распознанном тексте починится по этому написанию. По одному на строку."
+                    text: "Фамилии, названия, редкие слова — то, что программа слышит, но пишет неправильно. Напишите как надо, по одному на строку, и она исправится сама."
                     wrapMode: Text.WordWrap
                     font.family: T.sans; font.pixelSize: T.tBase
                     color: T.textSecondary
@@ -565,7 +783,7 @@ Rectangle {
                     rightPlaceholder: "roman@example.com"
                 }
                 Note {
-                    text: "Сказали «моя почта» - вставился адрес. Подстановка идёт после распознавания, целыми словами, без учёта регистра. Слева - что говорите, справа - что вставится."
+                    text: "Чтобы не диктовать одно и то же по буквам. Скажете «моя почта» — вставится адрес. Слева что говорите, справа что появится."
                           + (snips.blanks > 0 ? "  Строк без фразы: " + snips.blanks + " - они не сохранятся." : "")
                 }
 
@@ -662,13 +880,13 @@ Rectangle {
                 Card {
                     width: parent.width
                     StatRow { first: true; title: "Диктовок"
-                        subtitle: "Сколько раз вы нажимали хоткей"
+                        subtitle: "Сколько раз вы говорили вместо того, чтобы печатать"
                         value: statsPage.s.dictations || "—" }
-                    StatRow { title: "Слов надиктовано"; subtitle: "По всей истории"
+                    StatRow { title: "Слов надиктовано"; subtitle: "За всё время"
                         value: statsPage.s.words || "—" }
-                    StatRow { title: "Средняя длина"; subtitle: "Слов за одну диктовку"
+                    StatRow { title: "Средняя длина"; subtitle: "Слов за один раз"
                         value: statsPage.s.avg_words || "—" }
-                    StatRow { title: "Под запись"; subtitle: "Сколько всего звучал микрофон"
+                    StatRow { title: "Под запись"; subtitle: "Столько вы говорили"
                         value: statsPage.s.seconds || "—" }
                     StatRow { title: "Сэкономлено против набора"
                         subtitle: "Оценка: речь ~" + (statsPage.s.speechWpm || 0)
@@ -714,7 +932,8 @@ Rectangle {
                     color: T.text
                 }
                 Text {
-                    text: "Приватная диктовка. Звук и текст не покидают компьютер."
+                    text: "Диктовка, которая работает без интернета.
+Ваш голос никуда не отправляется."
                     font.family: T.sans; font.pixelSize: T.tMd
                     color: T.textSecondary
                 }
