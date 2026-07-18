@@ -128,8 +128,13 @@ mouse unusable, and you'd have nothing left to undo the setting with.
 | **History & stats** | Every dictation, click to copy, plus a per-day chart of how much you've saved. |
 | **Mic failover** | Chosen microphone dies → record from the system default, with a note on the pill. |
 | **Filler removal** | "Ну вот, короче, я думаю, типа, надо сделать" → "Я думаю, надо сделать." No model, no download, no latency — see below. |
+| **Snippets that write themselves** | It watches what you repeat and offers to give it a short phrase. You supply the name — a machine can find the repetition, but only you know whether that address is "my email" or "the billing one". |
+| **Auto-submit** | List the apps where a dictation ends in Enter (`telegram.exe`). Saying "нажми энтер" still works everywhere. |
+| **Continuing a thought** | Dictate a second sentence right after the first and it joins properly — a space, and no capital letter mid-sentence. Not after a full stop, not in another window, not half an hour later. |
+| **Backup** | Save your dictionary, snippets, tone rules and hotkeys to a file, and load them back on another machine. Loading **adds** — it never overwrites what you already have. |
+| **Forgetting** | History can be kept forever, or for a year, six months, or a month. |
 | **Tone per app** | `outlook.exe` → formal, chat → loose. *Needs Ollama.* |
-| **LLM polish** | Applies self-corrections ("Friday — no, Saturday" → "Saturday"). *Needs Ollama — but you don't have to configure anything: if it's running, FlowLocal finds it and switches polish on by itself.* |
+| **LLM polish** | Applies self-corrections ("Friday — no, Saturday" → "Saturday"). *Needs Ollama — and installing it is one button now: FlowLocal downloads it, installs it, fetches the model and switches polish on.* |
 
 ### Filler removal without a model
 
@@ -180,9 +185,22 @@ process — no IPC, no serialisation, so 60 fps costs nothing.
 
 ## Tests
 
+Eight fast tests run on every push (`.github/workflows/tests.yml`). They touch
+nothing: no microphone, no keyboard, no network, no model.
+
 ```powershell
 $env:PYTHONIOENCODING="utf-8"   # or Cyrillic in the console is mojibake
-python test_e2e.py          # WAV → transcribe → clean (no microphone needed)
+python test_clean.py        # filler removal and the dictionary — half the cases are traps
+python test_suggest.py      # snippets found in history — 8 of 12 cases are traps
+python test_join.py         # joining dictations and auto-submit — 9 of 16 are traps
+python test_backup.py       # backup, restore, and that restoring never overwrites
+python test_inputspec.py    # hotkey parsing — the deterministic half of test_hotkey
+```
+
+These two send real keystrokes and move the mouse, so they stay out of CI and
+off a machine you are using:
+
+```powershell
 python test_insert.py both  # insertion into a real EDIT control
 python test_hotkey.py       # binding, rebinding, capture, rollback of a broken one
 ```
@@ -192,18 +210,22 @@ they run, and close a running instance first or it will eat the test's hotkeys.
 
 ## Roadmap
 
-Done since this list was first written: the move to onnx-asr and GigaAM,
-filler removal without a model, command mode, the installer, in-app updates.
-Shipping a small LLM in the box was **tried and rejected** — Qwen3-0.6B int4
-failed the gate loudly enough to be worth the paragraph above.
+Done: the move to onnx-asr and GigaAM, filler removal without a model, command
+mode, the installer, in-app updates, one-button Ollama, snippets found in your
+own history, backup and restore, auto-submit, smart joining.
+
+Shipping a small LLM in the box was **tried and rejected twice** — the second
+time on the full 20-case harness, where Qwen3-1.7B scored 10/20 against
+Ollama's 18/20 and *lost words in two cases*. The measurement is the reason,
+not the taste.
 
 What is left:
 
-1. Auto-submit per app, and not gluing two dictations into one word.
-2. Export and import of your dictionary, replacements and snippets — today they
-   exist in exactly one copy, on one disk.
-3. macOS. The honest cost is 10–15 weeks; before spending it, three evenings of
-   probes on a real Mac decide whether it is possible at all.
+1. Pausing music while you dictate.
+2. macOS. The honest cost is 10–15 weeks; before spending it, three evenings of
+   probes on a real Mac decide whether it is possible at all. The $99/year
+   Apple fee turns out **not** to be required — it buys distribution by
+   download, which this project does not do.
 
 This is a tool its author uses every day, not a product chasing stars. Features
 land when they are worth the day they cost.
