@@ -23,8 +23,20 @@ Rectangle {
     property string page: "Главная"
     // Новая страница - с начала: прокрутка одной не должна доставаться другой.
     onPageChanged: scroll.contentY = 0
-    readonly property var pages: ["Главная", "Диктовка", "Слова", "История",
-                                  "Статистика", "О программе"]
+    // Программа и настройки разведены.
+    //
+    // Раньше всё лежало в одном списке: «Главная» рядом с «Диктовкой», история
+    // рядом с микрофоном. Человек, открывший окно посмотреть надиктованное,
+    // видел вперемешку своё и служебное - а это разные вещи, и заходят за ними
+    // в разное время. Настройки трогают раз в месяц, историю - каждый день.
+    //
+    // Теперь два набора и переключение между ними. Шестерёнка внизу панели
+    // уводит в настройки, «Назад» возвращает. Окно то же самое: заводить второе
+    // значило бы решать заново и положение, и тему, и закрытие по Esc.
+    property bool inSettings: false
+    readonly property var mainPages: ["Главная", "История", "Статистика"]
+    readonly property var settingsPages: ["Диктовка", "Слова", "О программе"]
+    readonly property var pages: inSettings ? settingsPages : mainPages
 
     // Одна строка под заголовком отвечает на «что мне это даст» - правило
     // голоса бренда. У «Главной» вместо подписи говорит сама страница.
@@ -80,6 +92,19 @@ Rectangle {
                 bottomPadding: 18
             }
 
+            // Возврат из настроек - первой строкой, там же, где обычно первый
+            // пункт: глазу не надо искать выход в новом месте.
+            NavItem {
+                visible: win.inSettings
+                label: "Назад"
+                icon: ic.forPage("Назад")
+                active: false
+                onClicked: {
+                    win.inSettings = false;
+                    win.page = win.mainPages[0];
+                }
+            }
+
             Repeater {
                 model: win.pages
                 NavItem {
@@ -88,6 +113,19 @@ Rectangle {
                     active: win.page === modelData
 
                     onClicked: win.page = modelData
+                }
+            }
+
+            Item { width: 1; height: 10; visible: !win.inSettings }
+
+            NavItem {
+                visible: !win.inSettings
+                label: "Настройки"
+                icon: ic.forPage("Настройки")
+                active: false
+                onClicked: {
+                    win.inSettings = true;
+                    win.page = win.settingsPages[0];
                 }
             }
         }

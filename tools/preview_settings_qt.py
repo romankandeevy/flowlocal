@@ -125,7 +125,11 @@ def shoot(mode: str, out: str, tmp: str) -> None:
     root = win.view.rootObject()
     # pages в QML - обычный JS-массив, из Python он приезжает QJSValue,
     # а не списком: разворачиваем.
-    pages = root.property("pages").toVariant()
+    # Страниц теперь два набора: своё и настройки. Снимаем оба - витрина должна
+    # показывать всю программу, а не половину, до которой дошла первой.
+    main = root.property("mainPages").toVariant()
+    settings = root.property("settingsPages").toVariant()
+    pages = [("main", x) for x in main] + [("settings", x) for x in settings]
 
     def settle(ms: int) -> None:
         """Дать Qt отрисоваться. grabWindow() снимает то, что уже нарисовано, а
@@ -136,7 +140,8 @@ def shoot(mode: str, out: str, tmp: str) -> None:
 
     settle(700)                       # первый кадр: шрифты, QML, титул
     shots = []
-    for page in pages:
+    for i, (где, page) in enumerate(pages):
+        root.setProperty("inSettings", где == "settings")
         root.setProperty("page", page)
         # Ждём не переход между страницами (280 мс хватало), а анимации
         # появления: count-up чисел на Главной (~520 мс) и волну столбцов на
@@ -144,7 +149,7 @@ def shoot(mode: str, out: str, tmp: str) -> None:
         # застать графику на полпути.
         settle(950)
         img = win.view.grabWindow()
-        p = os.path.join(tmp, f"_pg_{pages.index(page)}.png")
+        p = os.path.join(tmp, f"_pg_{i}.png")
         img.save(p)
         shots.append((page, p))
 
