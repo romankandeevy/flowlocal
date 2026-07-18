@@ -63,6 +63,9 @@ jobs:
       - name: длинная запись
         run: python test_long.py
 
+      - name: разбор речи на ходу
+        run: python test_stream.py
+
       - name: вопрос по интонации
         run: python test_intonation.py
 

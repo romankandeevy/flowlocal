@@ -95,6 +95,7 @@ import overlay_qt as OV  # noqa: E402
 import theme as T  # noqa: E402
 import updater  # noqa: E402
 import recordings  # noqa: E402
+import streaming  # noqa: E402
 import transforms  # noqa: E402
 import wakeup  # noqa: E402
 from version import __version__  # noqa: E402
@@ -204,6 +205,8 @@ class App:
         self._tf_text = ""           # что преобразуем
         self._tf_clip = None         # буфер человека, вернуть после вставки
         self._tf_hwnd = 0            # окно, куда возвращать фокус
+        self._stream = None          # разбор речи на ходу, пока идёт запись
+        self._stream_thread = None
         self._deaf_told = ""         # про какую глухоту уже сказали
         self._hk_handles: list = []
         self._hook_handles: list = []
@@ -693,6 +696,52 @@ class App:
         self.ui(self.overlay.set_hint, "")
         self.ui(self.overlay.show_recording)
         self._set_tray_state("rec")
+        self._stream_start()
+
+    def _stream_start(self) -> None:
+        """Разбирать речь, пока человек ещё говорит.
+
+        Смысл в том, что сказанное минуту назад уже не изменится, и ждать конца
+        фразы, чтобы начать работу, незачем. К отпусканию клавиши остаётся
+        хвост в пару секунд - и ожидание перестаёт зависеть от длины речи.
+
+        Командный режим не трогаем: там записывается короткое указание вроде
+        «сделай короче», резать нечего.
+        """
+        self._stream = None
+        if not self.cfg.get("stream_asr", True) or self._rec_mode == "command":
+            return
+        if not self._ready or not self.transcriber.loaded:
+            return
+        self._stream = streaming.Stream(self.transcriber.transcribe, log)
+        self._stream_thread = threading.Thread(target=self._stream_work, daemon=True)
+        self._stream_thread.start()
+
+    def _stream_work(self) -> None:
+        """Рабочий поток разбора на ходу.
+
+        Осторожность здесь дороже скорости. Пока крутится модель, микрофону
+        нужен процессор, чтобы не потерять звук, а хуку клавиатуры - чтобы
+        уложиться в свои 300 мс. Поэтому: просыпаемся раз в полсекунды, а не
+        крутимся в цикле, и берёмся за работу, только когда накопилось
+        достаточно и нашлась настоящая пауза.
+
+        Ошибку глотаем и молча выключаем разбор на ходу: конец диктовки после
+        этого просто распознает всё целиком, как раньше. Потерять текст из-за
+        ускорения нельзя.
+        """
+        st = self._stream
+        try:
+            while self._recording and st is self._stream:
+                time.sleep(0.5)
+                if not self._recording:
+                    break
+                audio, total = self.recorder.since(st.consumed)
+                st.feed(audio, total)
+        except Exception as e:  # noqa: BLE001
+            log(f"разбор на ходу отключён: {type(e).__name__}: {e}")
+            if st is self._stream:
+                self._stream = None
 
     def _finish_recording(self) -> None:
         if not self._recording:
@@ -830,6 +879,9 @@ class App:
         if not self._recording:
             return
         self._recording = False
+        # Разобранное на ходу выбрасываем вместе с записью: человек передумал,
+        # и держать половину его фразы незачем.
+        self._stream = None
         try:
             self.recorder.stop()
         except Exception as e:  # noqa: BLE001 - отмена не должна падать
@@ -867,9 +919,20 @@ class App:
                     self.transcriber.load()
                     self.ui(self.overlay.show_processing)
                 self._last_use = time.time()
-                text = self.transcriber.transcribe(
-                    audio, on_part=lambda i, n: self.ui(
-                        self.overlay.show_downloading, f"часть {i} из {n}"))
+                # Разбор на ходу: пока человек говорил, начало речи уже
+                # разобрано. Остаётся хвост - те секунды, что он произнёс
+                # последними. Отсюда и вся выгода: ожидание больше не зависит
+                # от длины речи.
+                st, self._stream = self._stream, None
+                if st is not None and st.runs:
+                    tail = audio[st.consumed:]
+                    log(f"на ходу разобрано {st.consumed / 16000:.0f} с за "
+                        f"{st.runs} захода, хвост {tail.size / 16000:.0f} с")
+                    text = st.finish(tail)
+                else:
+                    text = self.transcriber.transcribe(
+                        audio, on_part=lambda i, n: self.ui(
+                            self.overlay.show_downloading, f"часть {i} из {n}"))
                 # Что услышала модель ДО чистки. Нужно, чтобы потом показать,
                 # что программа за вас исправила, и какое слово она путает чаще
                 # прочих, - без этого такой счёт не восстановить задним числом.

@@ -617,6 +617,33 @@ def extract_commands(text: str, cfg: dict) -> tuple[str, bool]:
         return text, False
 
 
+_ENDS = ".!?…"
+
+
+def basic_punctuation(text: str) -> str:
+    """Заглавная в начале и точка в конце - для моделей, которые их не ставят.
+
+    Нужно потому, что знаки препинания ставит только вариант e2e нашей модели.
+    Все остальные - GigaAM v2, Vosk, T-one - отдают сплошную строчную строку.
+    У человека с Ollama её приберёт полировка, а у человека без Ollama текст
+    так и уедет в письмо без единой заглавной.
+
+    Правило проекта «чистка не добавляет ни слова от себя» не нарушается: слов
+    здесь не появляется, меняется только регистр и добавляется точка.
+
+    Работает по признаку самого текста, а не по имени модели: если заглавные и
+    знаки в тексте уже есть, не трогаем ничего. Так эта правка не может
+    сработать дважды и не зависит от того, помним ли мы, какая модель что умеет.
+    """
+    t = (text or "").strip()
+    if not t:
+        return text
+    if any(c.isupper() for c in t) or any(c in t for c in _ENDS):
+        return text          # модель справилась сама
+    out = t[0].upper() + t[1:]
+    return out + "."
+
+
 def clean(text: str, cfg: dict, log, process: str = "") -> str:
     """Никогда не бросает: на любой ошибке возвращает то, что пришло.
 
@@ -632,6 +659,9 @@ def clean(text: str, cfg: dict, log, process: str = "") -> str:
         text = _apply_dictionary(text, cfg.get("dictionary"))
         if cfg.get("remove_fillers", True):
             text = _strip_fillers(text)
+        # До полировки: ей проще работать с текстом, который уже похож на
+        # предложение, чем с потоком строчных букв.
+        text = basic_punctuation(text)
         llm = cfg.get("llm") or {}
         if text and llm.get("enabled"):
             text = _llm_polish(text, llm, log)

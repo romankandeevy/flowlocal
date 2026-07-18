@@ -59,6 +59,7 @@ class Recorder:
         self._lock = threading.Lock()
         self._recording = False
         self._chunks: list[np.ndarray] = []
+        self._total = 0          # сколько образцов записано - счётчик, а не len()
         maxlen = max(1, int(pre_buffer_sec * SAMPLE_RATE / BLOCK))
         self._pre: collections.deque = collections.deque(maxlen=maxlen)
         self._keep_open = keep_open
@@ -136,6 +137,7 @@ class Recorder:
         with self._lock:
             if self._recording:
                 self._chunks.append(data)
+                self._total += len(data)
             else:
                 self._pre.append(data)
             for lv in levels:
@@ -151,8 +153,36 @@ class Recorder:
             self._open()
         with self._lock:
             self._chunks = list(self._pre)
+            self._total = sum(len(c) for c in self._chunks)
             self._pre.clear()
             self._recording = True
+
+    def since(self, start: int) -> tuple[np.ndarray, int]:
+        """Записанное начиная с образца start, НЕ останавливая запись.
+
+        Возвращает (кусок, сколько записано всего). Нужно потоковому
+        распознаванию: оно разбирает речь, пока человек ещё говорит, и должно
+        забирать только то, чего ещё не видело.
+
+        Собираем хвост, а не всю запись целиком: за пятнадцать минут набегает
+        57 МБ, и склеивать их заново каждую секунду - пустая работа и мусор
+        для сборщика.
+
+        Счётчик _total ведём в колбэке, а не считаем len() по всем блокам: на
+        длинной записи блоков десятки тысяч, а колбэк - самое горячее место в
+        программе, ему нельзя мешать.
+        """
+        with self._lock:
+            total = self._total
+            if start >= total or not self._chunks:
+                return np.zeros(0, dtype=np.float32), total
+            out, pos = [], 0
+            for c in self._chunks:
+                end = pos + len(c)
+                if end > start:
+                    out.append(c[max(0, start - pos):])
+                pos = end
+        return (np.concatenate(out) if out else np.zeros(0, dtype=np.float32)), total
 
     def stop(self) -> np.ndarray:
         """Останавливает запись и возвращает всё аудио (float32, 16 кГц, моно)."""
@@ -160,6 +190,7 @@ class Recorder:
             self._recording = False
             chunks = self._chunks
             self._chunks = []
+            self._total = 0
         if not self._keep_open:
             self._close()
         if not chunks:
