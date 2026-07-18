@@ -110,6 +110,87 @@ def main() -> int:
     check(S.KEEP_TAIL_SEC > 0 and S.MIN_TAIL_SEC > S.KEEP_TAIL_SEC,
           "пороги согласованы: берёмся за работу позже, чем оставляем хвост")
 
+    # --- ГЛАВНОЕ: короткая фраза тоже разбирается на ходу ---
+    #
+    # Порог был 12 секунд, и это обесценивало всю затею: обычная диктовка
+    # короче, то есть девять фраз из десяти уходили в хвост целиком.
+    def phrase(*parts):
+        out = []
+        for kind, sec in parts:
+            out.append(speech(sec) if kind == "г" else quiet(sec))
+        return np.concatenate(out)
+
+    for name, a, ждём in (
+        ("8 с с паузой", phrase(("г", 4), ("т", 0.7), ("г", 3.3)), True),
+        ("10 с, две паузы", phrase(("г", 4), ("т", 0.6), ("г", 3),
+                                   ("т", 0.6), ("г", 2)), True),
+        ("6 с с паузой", phrase(("г", 3), ("т", 0.6), ("г", 2.4)), True),
+        ("4 с - ниже порога", phrase(("г", 2), ("т", 0.5), ("г", 1.5)), False),
+        ("8 с без пауз", speech(8), False),
+    ):
+        st = S.Stream(lambda x: "т", lambda _m: None, min_tail=5.0)
+        got = st.feed(a, a.size)
+        check(got is ждём, f"фраза {name}: "
+              f"{'разбирается на ходу' if ждём else 'уходит в хвост целиком'}")
+
+    check(S.min_tail_sec({"stream_min_tail_sec": 7.5}) == 7.5,
+          "порог читается из конфига - откатить можно без новой версии")
+    check(S.WEAK_MIN_TAIL_SEC > S.MIN_TAIL_SEC,
+          "на слабой машине порог выше: там разбор на ходу отбирал бы "
+          "процессор у микрофона, а потерянный звук хуже медленной работы")
+
+    # --- ЛОВУШКА: кусок не длиннее MAX_FEED_SEC ---
+    #
+    # Модель одна и считает по очереди. Отпустил клавишу, пока она жуёт
+    # сорокасекундный кусок, - и хвост ждёт в очереди за ним.
+    длинный = phrase(("г", 18), ("т", 0.6), ("г", 18), ("т", 0.6), ("г", 5))
+    st = S.Stream(lambda x: "т", lambda _m: None, min_tail=5.0)
+    st.feed(длинный, длинный.size)
+    check(st.consumed <= S.MAX_FEED_SEC * S.SAMPLE_RATE,
+          f"за один заход отдаём не больше {S.MAX_FEED_SEC:.0f} с "
+          f"(отдали {st.consumed / S.SAMPLE_RATE:.0f})")
+
+    # --- упреждающий хвост ---
+    #
+    # Человек замолкает раньше, чем отпускает клавишу. За эти 200-500 мс модель
+    # успевает разобрать остаток - и ожидание становится нулевым.
+    говорил = phrase(("г", 4), ("т", 0.7), ("г", 4))
+    молчит = np.concatenate([говорил, quiet(0.6)])
+
+    check(S.trailing_silence(молчит) is True,
+          "тишина в конце замечается - это и есть «человек договорил»")
+    check(S.trailing_silence(говорил) is False,
+          "речь в конце за тишину не принимаем - иначе резали бы на полуслове")
+
+    st = S.Stream(lambda x: "заготовка", lambda _m: None, min_tail=5.0)
+    check(st.speculate(молчит, молчит.size) is True, "заготовка снимается")
+    check(st.spec is not None and st.spec[0] == молчит.size,
+          "заготовка помнит, на каком месте записи она снята")
+    check(st.finish(молчит) == "заготовка" and st.spec_hit,
+          "отпустил в тишине - берём готовое, модель не зовём вовсе")
+
+    # ЛОВУШКА: заговорил снова - заготовка обязана протухнуть.
+    st = S.Stream(lambda x: "свежее", lambda _m: None, min_tail=5.0)
+    st.speculate(молчит, молчит.size)
+    ещё = np.concatenate([молчит, speech(3)])
+    check(st.finish(ещё) == "свежее" and not st.spec_hit,
+          "человек заговорил после паузы - заготовка выброшена, считаем заново")
+
+    st = S.Stream(lambda x: "т", lambda _m: None, min_tail=5.0)
+    check(st.speculate(говорил, говорил.size) is False,
+          "пока человек говорит, заготовку не снимаем")
+
+    st = S.Stream(lambda x: "т", lambda _m: None, min_tail=5.0)
+    длинный = np.concatenate([speech(20), quiet(0.6)])
+    check(st.speculate(длинный, длинный.size) is False,
+          "слишком длинный хвост заранее не гоняем - дорого")
+
+    st = S.Stream(lambda x: "т", lambda _m: None, min_tail=5.0)
+    st.speculate(молчит, молчит.size)
+    check(st.speculate(молчит, молчит.size + 100) is False,
+          "заготовку снимаем не чаще, чем раз в пару секунд - лишние прогоны "
+          "модели отбирают процессор у микрофона")
+
     print("\nИТОГ:", "всё сходится" if ok else "ЕСТЬ ПРОВАЛЫ")
     return 0 if ok else 1
 

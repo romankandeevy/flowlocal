@@ -713,7 +713,9 @@ class App:
             return
         if not self._ready or not self.transcriber.loaded:
             return
-        self._stream = streaming.Stream(self.transcriber.transcribe, log)
+        self._stream = streaming.Stream(
+            self.transcriber.transcribe, log,
+            min_tail=streaming.min_tail_sec(self.cfg))
         self._stream_thread = threading.Thread(target=self._stream_work, daemon=True)
         self._stream_thread.start()
 
@@ -733,11 +735,17 @@ class App:
         st = self._stream
         try:
             while self._recording and st is self._stream:
-                time.sleep(0.5)
+                # 0.2 с, а не 0.5: окно между «замолчал» и «отпустил»
+                # бывает в треть секунды, и полусекундный сон его проспит.
+                time.sleep(0.2)
                 if not self._recording:
                     break
                 audio, total = self.recorder.since(st.consumed)
-                st.feed(audio, total)
+                if not st.feed(audio, total):
+                    # Резать нечего - может, человек уже договорил. Тогда
+                    # разберём остаток заранее: пока он собирается отпустить
+                    # клавишу, ответ будет готов.
+                    st.speculate(audio, total)
         except Exception as e:  # noqa: BLE001
             log(f"разбор на ходу отключён: {type(e).__name__}: {e}")
             if st is self._stream:
@@ -924,20 +932,27 @@ class App:
                 # последними. Отсюда и вся выгода: ожидание больше не зависит
                 # от длины речи.
                 st, self._stream = self._stream, None
+                lat_spec = 0
+                _t = time.perf_counter()
                 if st is not None and st.runs:
                     tail = audio[st.consumed:]
-                    log(f"на ходу разобрано {st.consumed / 16000:.0f} с за "
-                        f"{st.runs} захода, хвост {tail.size / 16000:.0f} с")
                     text = st.finish(tail)
+                    streamed, tail_sec = st.consumed / 16000, tail.size / 16000
+                    if st.spec_hit:
+                        lat_spec = 1
                 else:
                     text = self.transcriber.transcribe(
                         audio, on_part=lambda i, n: self.ui(
                             self.overlay.show_downloading, f"часть {i} из {n}"))
+                    streamed, tail_sec = 0.0, audio.size / 16000
+                lat = {"asr": time.perf_counter() - _t}
                 # Что услышала модель ДО чистки. Нужно, чтобы потом показать,
                 # что программа за вас исправила, и какое слово она путает чаще
                 # прочих, - без этого такой счёт не восстановить задним числом.
                 raw = text
+                _t = time.perf_counter()
                 text = clean(text, self.cfg, log, process=process)
+                lat["clean"] = time.perf_counter() - _t
                 # Команды - ПОСЛЕ полировки: LLM не должна их видеть, иначе
                 # перепишет или послушается, оба исхода хуже.
                 before_commands = text
@@ -974,6 +989,7 @@ class App:
                 out = text + (" " if self.cfg.get("append_space", True)
                               and not want_enter else "")
                 self._inserting = True
+                _t = time.perf_counter()
                 try:
                     ok = insert(
                         out,
@@ -984,6 +1000,7 @@ class App:
                         time.sleep(0.05)   # дать окну дожевать вставку
                         press_enter()
                 finally:
+                    lat["insert"] = time.perf_counter() - _t
                     self._insert_window_closes()
                 if ok:
                     # После Enter стирать нечего: текст уже улетел сообщением.
@@ -995,6 +1012,14 @@ class App:
                         if not want_enter else None
             self._history(text, dur, process=process, raw=raw)
             n = len(text.split())
+            # Одна строка на диктовку, по которой видно, куда ушло время.
+            # Без неё любой спор о скорости решается на глазок, а этапов
+            # пять и виноват каждый раз другой.
+            log("задержка: "
+                f"запись={dur:.1f}с на_ходу={streamed:.1f}с хвост={tail_sec:.1f}с | "
+                + " ".join(f"{k}={v:.3f}" for k, v in lat.items())
+                + f" | заготовка={lat_spec}"
+                + f" | всего={sum(lat.values()):.3f}с")
             log(f"ok: {dur:.1f}s audio -> {len(text)} chars in {elapsed:.2f}s")
             if ok:
                 # Текст доехал - запись больше не нужна. Стираем ТОЛЬКО здесь:
