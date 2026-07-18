@@ -27,6 +27,40 @@ REQUIRED_LICENSES = ("LICENSE", "licenses/README.txt", "licenses/Qt-LGPLv3.txt",
                      "licenses/GPLv3.txt")
 
 
+def check_changelog() -> bool:
+    """CHANGELOG должен разбираться и содержать раздел текущей версии.
+
+    Проверяем ДО сборки, а не при выкладке. Раньше это ловил только
+    tools/release.py - и ловил поздно: установщик к тому моменту собран, файл
+    внутри него уже битый, а если передать заметки ключом --notes, проверка
+    вообще не срабатывает. Так и уехала 0.4.1: в ней «Как обновлялось»
+    показывает мусорную строку с датой «18.07.2026`, дальше строки списка».
+
+    Ошибка была моя и глупая: правка вставляла новый раздел перед «## 0.4.0», а
+    это вхождение нашлось раньше - в преамбуле, где стояло примером формата.
+    Дешевле проверять результат, чем помнить про такие совпадения.
+    """
+    sys.path.insert(0, ROOT)
+    import changelog
+
+    rels = changelog.load()
+    if not rels:
+        print("ПРОВАЛ: CHANGELOG.md не читается или пуст")
+        return False
+    bad = [r for r in rels if not r["items"] or "`" in r["date"]]
+    if bad:
+        print("ПРОВАЛ: CHANGELOG.md разобран криво, разделы без пунктов "
+              "или с мусором в дате:")
+        for r in bad:
+            print(f"  {r['version']} — {r['date'][:60]}")
+        return False
+    if not changelog.notes_for(__version__):
+        print(f"ПРОВАЛ: в CHANGELOG.md нет раздела «## {__version__} — дата»")
+        print("Без него релиз уедет без заметок, а «О программе» - без версии.")
+        return False
+    return True
+
+
 def check_licenses() -> bool:
     """Молча собрать пакет, который нельзя раздавать, - худшее из возможного:
     нарушение обнаружится уже после публикации."""
@@ -93,6 +127,8 @@ def main() -> int:
         print("использование: python tools/build.py cpu|cuda [--installer]")
         return 2
     if not check_licenses():
+        return 2
+    if not check_changelog():
         return 2
 
     out = os.path.join(ROOT, "dist", variant)

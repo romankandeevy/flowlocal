@@ -189,6 +189,7 @@ class App:
         self._work_lock = threading.Lock()
         self._ready = False
         self._llm_note = ""          # модель Ollama, найденная автоопределением
+        self._update_told = ""       # про какую версию уже сказали шариком
         self._update: dict | None = None   # свежая версия с GitHub, если нашлась
         self._hk_handles: list = []
         self._hook_handles: list = []
@@ -1066,6 +1067,10 @@ class App:
         # Первым и заметным: если обновление есть, человек пришёл в меню скорее
         # всего за ним. Прячется, пока обновлять нечего.
         self._act_update = menu.addAction("Обновить")
+        # Клик по шарику - тот же путь, что и пункт меню. Человек, которому
+        # сказали «нажмите, чтобы обновить», нажимает на сообщение, а не
+        # идёт искать меню.
+        self.tray.messageClicked.connect(self._on_balloon_clicked)
         self._act_update.triggered.connect(self._do_update)
         self._act_update.setVisible(False)
         act_settings = menu.addAction("Настройки…")
@@ -1145,6 +1150,17 @@ class App:
         log(f"есть обновление: {found['version']} ({found['size_mb']} МБ)")
         # Меню трея само перечитает self._update при открытии (_refresh_menu),
         # трогать его отсюда, из чужого потока, не надо и нельзя.
+        #
+        # Но одного меню мало, и это выяснилось на владельце: приложение нашло
+        # обновление, честно записало в лог - и не сказало ему ничего. Чтобы
+        # узнать, надо было догадаться кликнуть правой кнопкой по значку в
+        # трее, который Windows вдобавок прячет под шеврон. То есть функция
+        # была, а дойти до неё человек не мог. Ровно то, за что мы ругали
+        # «нужна Ollama».
+        #
+        # Шарик - не всплывающее окно: он не забирает фокус, не мешает печатать
+        # и уходит сам. Тем же способом мы уже говорим «FlowLocal запущен».
+        self.ui(self._notify_update, found)
 
     def _do_update(self) -> None:
         """Скачать и поставить. Зовётся из трея, работает своим потоком."""
@@ -1298,6 +1314,36 @@ class App:
                     self.tray.hide()
                 except Exception:  # noqa: BLE001
                     pass
+
+    def _notify_update(self, found: dict) -> None:
+        """Шарик «есть новая версия». Клик по нему ставит обновление.
+
+        Показываем один раз на находку, а не на каждую перепроверку: проверка
+        идёт каждые шесть часов, и напоминать об одном и том же четыре раза в
+        сутки - это уже навязчивость.
+        """
+        from PySide6.QtWidgets import QSystemTrayIcon
+
+        if self.tray is None or self._update_told == found.get("version"):
+            return
+        self._update_told = str(found.get("version") or "")
+        title = str(found.get("notes") or "").splitlines()
+        self.tray.showMessage(
+            f"Есть версия {found.get('version')}",
+            (title[0] if title else "") + f"\nНажмите, чтобы обновить · {found.get('size_mb')} МБ",
+            QSystemTrayIcon.Information, 12000)
+
+    def _on_balloon_clicked(self) -> None:
+        """Клик по шарику. Обновление - если оно есть; иначе просто окно.
+
+        Windows не говорит, по какому именно шарику кликнули, поэтому решаем
+        по состоянию: висит найденное обновление - ставим его, нет - открываем
+        настройки. Оба исхода человек и ожидает от клика по сообщению.
+        """
+        if self._update:
+            self._do_update()
+        else:
+            self._open_settings()
 
     def _greet(self) -> None:
         """Сказать, что мы здесь и чем нас звать.
