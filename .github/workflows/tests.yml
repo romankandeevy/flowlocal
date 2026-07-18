@@ -57,6 +57,9 @@ jobs:
       - name: вставка через буфер обмена
         run: python test_clipboard.py
 
+      - name: преобразования текста
+        run: python test_transforms.py
+
       - name: вопрос по интонации
         run: python test_intonation.py
 

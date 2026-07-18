@@ -16,6 +16,9 @@
                           тёмным интерфейсом висит белая системная полоса
     foreground_process()  имя exe окна, в которое сейчас пишут, — для правил
                           тона («в outlook.exe формально, в чате свободно»)
+    foreground_window()   / focus_window() — запомнить окно и вернуть в него
+                          фокус: список преобразований забирает фокус себе,
+                          а вставлять надо обратно, туда же, откуда взяли
 
 Обе уедут в `platform/`, когда дойдёт черёд macOS: там это `NSWindow` и
 bundle id вместо exe. Пока — здесь, и это единственный Win32 в проекте помимо
@@ -76,6 +79,48 @@ def style_titlebar(hwnd: int, caption=None, dark: bool = True) -> None:
         # COLORREF - это 0x00BBGGRR, а не привычный RGB
         attr(35, (caption[2] << 16) | (caption[1] << 8) | caption[0])
         attr(34, (caption[2] << 16) | (caption[1] << 8) | caption[0])
+
+
+user32.SetForegroundWindow.restype = wintypes.BOOL
+user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+user32.AttachThreadInput.restype = wintypes.BOOL
+user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+
+
+def foreground_window() -> int:
+    """HWND окна, в которое сейчас пишут. 0 - не спросить."""
+    return int(user32.GetForegroundWindow() or 0)
+
+
+def focus_window(hwnd: int) -> bool:
+    """Вернуть фокус окну, которое мы у него забрали.
+
+    Голый SetForegroundWindow тут не работает: Windows защищает активное окно
+    от кражи фокуса, и вызов молча возвращает ложь. Обход - на время
+    подцепиться к очереди ввода того окна: тогда система считает нас с ним
+    одним целым и передачу разрешает.
+
+    Классический совет «нажать Alt перед SetForegroundWindow» здесь ЯДОВИТ и
+    проверен на своей шкуре в test_insert.py: отпускание Alt вводит окно в
+    режим меню, и следующее нажатие съедается - ровно наш Ctrl+V. В режиме
+    вставки не вставлялось ничего, в посимвольном пропадала первая буква.
+    AttachThreadInput клавиатуру не трогает вовсе.
+    """
+    if not hwnd:
+        return False
+    try:
+        mine = kernel32.GetCurrentThreadId()
+        theirs = user32.GetWindowThreadProcessId(wintypes.HWND(hwnd), None)
+        attached = bool(theirs and theirs != mine
+                        and user32.AttachThreadInput(mine, theirs, True))
+        try:
+            return bool(user32.SetForegroundWindow(wintypes.HWND(hwnd)))
+        finally:
+            if attached:
+                user32.AttachThreadInput(mine, theirs, False)
+    except OSError:
+        return False
 
 
 def foreground_process() -> str:

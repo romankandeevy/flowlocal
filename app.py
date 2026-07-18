@@ -94,6 +94,7 @@ import models  # noqa: E402
 import overlay_qt as OV  # noqa: E402
 import theme as T  # noqa: E402
 import updater  # noqa: E402
+import transforms  # noqa: E402
 import wakeup  # noqa: E402
 from version import __version__  # noqa: E402
 import cleaner  # noqa: E402
@@ -198,6 +199,10 @@ class App:
         self._last_use = time.time()  # когда последний раз диктовали
         self._update: dict | None = None   # свежая версия с GitHub, если нашлась
         self._wake = None            # слух за сном и разблокировкой экрана
+        self.picker = None           # список преобразований, создаётся при первом показе
+        self._tf_text = ""           # что преобразуем
+        self._tf_clip = None         # буфер человека, вернуть после вставки
+        self._tf_hwnd = 0            # окно, куда возвращать фокус
         self._deaf_told = ""         # про какую глухоту уже сказали
         self._hk_handles: list = []
         self._hook_handles: list = []
@@ -310,6 +315,7 @@ class App:
         log(f"hotkeys: hold={self.cfg.get('hotkey_hold')!r} "
             f"toggle={self.cfg.get('hotkey_toggle')!r}")
         self._bind_undo()
+        self._bind_transform()
 
     def _bind_dictation(self, mode: str, spec: str) -> None:
         mods, key, mouse_btn = inputspec.parse(spec)
@@ -448,6 +454,128 @@ class App:
             return all(keyboard.is_pressed(m) for m in mods)
         except Exception:  # noqa: BLE001 - is_pressed изредка кидает на экзотике
             return False
+
+    def _bind_transform(self) -> None:
+        """Хоткей списка преобразований. Пусто - выключено.
+
+        Отдельным биндом, а не режимом диктовки: здесь нечего записывать.
+        Нажал - взяли выделение и показали список; всё остальное делает выбор.
+        """
+        spec = str(self.cfg.get("hotkey_transform") or "").strip()
+        if not spec:
+            return
+        try:
+            self._hk_handles.append(
+                keyboard.add_hotkey(spec, self._transform_pressed, suppress=False))
+        except (ValueError, KeyError) as e:
+            log(f"bad hotkey_transform {spec!r}: {e}")
+
+    def _transform_pressed(self) -> None:
+        """Колбэк хука: только передать в главный поток и уйти.
+
+        У низкоуровневого хука 300 мс на ответ, иначе Windows вышибает его
+        совсем. Ctrl+C с ожиданием буфера сюда не поместится, поэтому вся
+        работа - в потоке.
+        """
+        if self._recording or self._capturing:
+            return
+        threading.Thread(target=self._transform_grab, daemon=True).start()
+
+    def _transform_grab(self) -> None:
+        """Снять выделение и показать список. Рабочий поток."""
+        if not self._work_lock.acquire(blocking=False):
+            log("преобразование: занято")
+            return
+        try:
+            llm = self.cfg.get("llm") or {}
+            if not llm.get("enabled"):
+                self.ui(self.overlay.show_error, "правка текста не установлена")
+                return
+            items = transforms.all_for(self.cfg)
+            if not items:
+                self.ui(self.overlay.show_error, "список преобразований пуст")
+                return
+            # Окно запоминаем ДО Ctrl+C: список сейчас заберёт фокус себе, и
+            # спрашивать «какое окно активно» будет уже поздно - активным
+            # окажется наш собственный список.
+            self._tf_hwnd = layered.foreground_window()
+            self._inserting = True
+            try:
+                sel, old_clip = copy_selection()
+            finally:
+                self._insert_window_closes()
+            if not sel or not sel.strip():
+                self.ui(self.overlay.show_error, "ничего не выделено")
+                return
+            self._tf_text, self._tf_clip = sel, old_clip
+            self.ui(self._transform_show, items)
+        finally:
+            self._work_lock.release()
+
+    def _transform_show(self, items: list) -> None:
+        """Показать список. ТОЛЬКО главный поток Qt."""
+        if self.picker is None:
+            from picker_qt import Picker
+
+            self.picker = Picker(self.overlay.tokens)
+            self.picker.chosen.connect(self._transform_chosen)
+            self.picker.cancelled.connect(self._transform_cancelled)
+        from picker_qt import preview_of
+
+        self.picker.show(items, preview_of(self._tf_text))
+
+    def _transform_cancelled(self) -> None:
+        # Буфер человека вернуть обязательно: Ctrl+C его затёр, а он ничего не
+        # выбрал - для него не произошло вообще ничего, и буфер должен это
+        # подтверждать.
+        if self._tf_clip is not None:
+            _set_clipboard_text(self._tf_clip)
+        layered.focus_window(self._tf_hwnd)
+        self._tf_text, self._tf_clip, self._tf_hwnd = "", None, 0
+
+    def _transform_chosen(self, tid: str) -> None:
+        t = transforms.find(self.cfg, tid)
+        if not t or not self._tf_text:
+            return
+        # Фокус возвращаем СРАЗУ, а не после ответа модели: пока она думает,
+        # человек уже смотрит в своё окно, и мигание в конце было бы лишним.
+        layered.focus_window(self._tf_hwnd)
+        threading.Thread(target=self._transform_work, args=(t,), daemon=True).start()
+
+    def _transform_work(self, t: dict) -> None:
+        text, old_clip = self._tf_text, self._tf_clip
+        self._tf_text, self._tf_clip = "", None
+        with self._work_lock:
+            try:
+                self.ui(self.overlay.show_processing)
+                t0 = time.time()
+                result = llm_command(text, t["instruction"],
+                                     self.cfg.get("llm") or {}, log)
+                if not result:
+                    self.ui(self.overlay.show_error, "не получилось - текст не тронут")
+                    return
+                self._inserting = True
+                try:
+                    ok = insert(result, mode=self.cfg.get("insert_mode", "paste"),
+                                restore=False)
+                finally:
+                    self._insert_window_closes()
+                if self.cfg.get("restore_clipboard", True) and old_clip is not None:
+                    time.sleep(0.3)
+                    _set_clipboard_text(old_clip)
+                # Отмену не взводим - по той же причине, что у правки голосом:
+                # мы вставили ПОВЕРХ выделения, и стереть вставленное значит
+                # оставить дыру вместо текста.
+                self._undo_text, self._undo_armed = None, False
+                if ok:
+                    log(f"преобразование {t['id']}: {len(text)} -> {len(result)} "
+                        f"символов за {time.time() - t0:.2f}с")
+                    self.ui(self.overlay.show_done, "готово")
+                else:
+                    self.ui(self.overlay.show_error, "не удалось вставить")
+            except Exception as e:  # noqa: BLE001
+                log(f"преобразование не вышло: {e}")
+                self.ui(self.overlay.show_error, "не получилось - текст не тронут")
 
     def _bind_undo(self) -> None:
         """Хоткей отмены - отдельно от диктовки.

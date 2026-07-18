@@ -570,6 +570,17 @@ Rectangle {
                         HotkeyField { field: "hotkey_command"; allowClear: true }
                     }
                     SettingRow {
+                        title: "Преобразовать текст"
+                        subtitle: tfHint.value
+                            ? "Выделите текст, нажмите - список готовых правок: короче, строже, списком, задание для ИИ. Выбор цифрой"
+                            : "Список готовых правок по одному нажатию. Работает после установки - кнопка ниже, «Правка текста на ходу»"
+                        // Невидимая привязка к тому же тумблеру, что у правки
+                        // голосом: подпись обязана меняться сразу, как его
+                        // щёлкнули, а B.get - слот без сигнала и застыл бы.
+                        Item { id: tfHint; property bool value: llmToggle.value; width: 0 }
+                        HotkeyField { field: "hotkey_transform"; allowClear: true }
+                    }
+                    SettingRow {
                         title: "Отменить последнюю диктовку"
                         subtitle: "Уберёт вставленный текст, если вы после этого ничего не печатали"
                         HotkeyField { field: "undo_hotkey"; allowClear: true }
