@@ -89,9 +89,17 @@ def main() -> None:
         (1.8, lambda: (ov.set_hint(""), ov.show_recording())),
         (5.0, lambda: ov.show_processing()),
         (6.4, lambda: ov.show_done("готово")),
-        (7.6, lambda: (ov.set_hint("ещё раз - стоп"), ov.show_recording())),
-        (10.5, lambda: ov.show_error("модель не загрузилась")),
-        (13.0, lambda: ov.hide()),
+        # Единственная оставшаяся надпись-канал: скачивание обновления. Все
+        # подсказки с пилюли ушли 18.07.2026, показывать там больше нечего.
+        (7.6, lambda: (ov.set_hint("обновление 0.3.1"), ov.show_processing())),
+        (9.0, lambda: (ov.set_hint(""), ov.show_recording())),
+        # Тишину включаем напрямую: FakeMic всегда «говорит», а настоящий
+        # детект (_pump_bars) ждал бы 3 с честного молчания. Hint при этом
+        # гасим: надпись «не слышно» уступает подсказке, и в toggle-режиме
+        # (где hint есть) её не увидеть - показываем случай удержания.
+        (10.2, lambda: ov.root.setProperty("silence", True)),
+        (11.2, lambda: ov.show_error("модель не загрузилась")),
+        (13.5, lambda: ov.hide()),
     ]
     for at, fn in script:
         QTimer.singleShot(int(at * 1000), fn)
@@ -109,7 +117,8 @@ def main() -> None:
             return fn
 
         for at, tag in ((0.9, "loading"), (4.2, "recording"), (5.6, "processing"),
-                        (6.8, "done"), (9.0, "recording+подсказка"), (11.5, "error")):
+                        (6.8, "done"), (8.4, "обновление"),
+                        (11.0, "recording+тишина"), (12.0, "error")):
             QTimer.singleShot(int(at * 1000), grab(tag))
 
         def sheet():
@@ -134,9 +143,9 @@ def main() -> None:
             sheet_img.save(shot)
             print(f"контактный лист ({len(shots)} состояний): {shot}")
 
-        QTimer.singleShot(int(12.5 * 1000), sheet)
+        QTimer.singleShot(int(13.0 * 1000), sheet)
 
-    QTimer.singleShot(int(14.5 * 1000), app.quit)
+    QTimer.singleShot(int(15.0 * 1000), app.quit)
     print("Показываю цикл состояний ~14 с. Фокус не должен уходить из этого окна.")
     app.exec()
 

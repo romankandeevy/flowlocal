@@ -47,6 +47,19 @@ DEMO.update({
 C.load = lambda path=None: json.loads(json.dumps(DEMO))
 C.save = lambda cfg, path=None: None
 
+# Сегодняшний день тоже подменяем. Даты в демо-истории прибиты намеренно (см.
+# ниже), а `stats.summary` без аргумента берёт date.today() - и «Дней подряд»
+# зависит от того, когда снимают витрину: 16-17 июля это 3, 18-го уже 0.
+# Картинка обязана быть одинаковой в любой день, иначе гит видит diff на
+# полумегабайтном png, а в README уезжает ноль.
+import datetime as _dt  # noqa: E402
+
+import stats as _stats  # noqa: E402
+
+_DEMO_TODAY = _dt.date(2026, 7, 16)          # последний день демо-истории
+_summary = _stats.summary
+_stats.summary = lambda rows, today=None: _summary(rows, today or _DEMO_TODAY)
+
 # История: правдоподобная, но выдуманная. Даты фиксированные, иначе картинка
 # меняется от каждого прогона и гит видит diff там, где ничего не менялось.
 DEMO_HISTORY = [
@@ -116,7 +129,11 @@ def shoot(mode: str, out: str, tmp: str) -> None:
     shots = []
     for page in pages:
         root.setProperty("page", page)
-        settle(280)                   # 280 - длиннее самой долгой кривой Korti
+        # Ждём не переход между страницами (280 мс хватало), а анимации
+        # появления: count-up чисел на Главной (~520 мс) и волну столбцов на
+        # Статистике (~650 мс). Витрина должна снять дорисованный экран, а не
+        # застать графику на полпути.
+        settle(950)
         img = win.view.grabWindow()
         p = os.path.join(tmp, f"_pg_{pages.index(page)}.png")
         img.save(p)

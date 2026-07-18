@@ -7,9 +7,18 @@ Audio and text never leave your machine — no account, no cloud, no subscriptio
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="tools/preview_overlay_qt.png">
-    <img src="tools/preview_overlay_qt_light.png" width="300" alt="The FlowLocal pill: loading, recording with a live waveform, transcribing, done">
+    <source media="(prefers-color-scheme: dark)" srcset="tools/demo_dark.gif">
+    <img src="tools/demo.gif" width="820" alt="Holding the hotkey, a live waveform on the pill, then the sentence lands in the message: 'Стратегическая сессия начинается в пятницу в 10:00 утра.'">
   </picture>
+</p>
+
+<p align="center">
+  <sub>Real pill, real waveform, real model — 5 seconds of speech transcribed in
+  0.22 s on a CPU, punctuation and <code>10:00</code> included. The audio comes
+  from <code>test.wav</code> rather than a microphone so that
+  <a href="tools/demo_gif.py"><code>tools/demo_gif.py</code></a> gives the same
+  result on any machine; the mail window is a mock, because a real one cannot be
+  filmed without filming someone's mail.</sub>
 </p>
 
 ## Why another dictation app
@@ -32,13 +41,19 @@ European languages, auto-detect), **Whisper large-v3-turbo** and **base** (99+
 languages), and **Vosk** — all through [onnx-asr](https://github.com/istupakov/onnx-asr),
 all downloadable from inside the app, all swappable without a restart.
 
-> **Honest caveat:** the WER figures above are the model card's, not ours. Our
-> own benchmark harness is in `tools/bench_asr.py` and its verdict on real
-> speech isn't in yet. Believe the direction, not the decimal.
+> **Honest caveat:** the WER figures above are the model card's, not ours, and
+> we are not going to pretend otherwise. Our own harness (`tools/bench_asr.py`)
+> measures WER, latency, RAM and disk across the catalogue, and on the one
+> synthetic phrase we have it puts GigaAM at 0.0% against Whisper-turbo's 9.1%
+> — a sample of one, quoted as such. Believe the direction, not the decimal.
 
 ## Install
 
-No installer yet — that's next on the roadmap. From source:
+[**Download the installer**](https://github.com/romankandeevy/flowlocal/releases/latest)
+— 70 MB, no administrator rights, no UAC prompt. Windows 10/11.
+
+It is not code-signed, so SmartScreen will show its blue card once: *More info*
+→ *Run anyway*. From source instead:
 
 ```powershell
 git clone https://github.com/romankandeevy/flowlocal
@@ -60,12 +75,14 @@ in Settings, or `python app.py --autostart on`.
 
 ## Settings
 
-Nine pages, both themes, everything applies as you change it.
+Six doors, both themes, everything applies as you change it. The model
+catalogue is deliberately not one of them — it opens from *Dictation*, because
+a person writing letters has no business meeting a zoo of ASR models.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="tools/preview_settings_qt_dark.png">
-    <img src="tools/preview_settings_qt_light.png" alt="All nine settings pages: general, recognition, models, input, dictionary, replacements, history, stats, about">
+    <img src="tools/preview_settings_qt_light.png" alt="All six settings pages: home, dictation, words, history, stats, about">
   </picture>
 </p>
 
@@ -81,6 +98,13 @@ into QML, so switching themes repaints the window live instead of rebuilding it.
 Hold **Ctrl+Shift+Space**, talk, let go. The pill at the bottom of the screen
 shows a live waveform and a timer while you speak, then `распознаю`, then the
 word count — and the text is in place.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="tools/preview_overlay_qt.png">
+    <img src="tools/preview_overlay_qt_light.png" width="300" alt="Every state of the pill: loading, recording with a live waveform, transcribing, done, the toggle-mode hint, 'microphone is silent', and an error">
+  </picture>
+</p>
 
 Two independent bindings, not a mode switch — keep both and pick per situation:
 
@@ -168,11 +192,21 @@ they run, and close a running instance first or it will eat the test's hotkeys.
 
 ## Roadmap
 
-1. Benchmark GigaAM against real speech, not one synthetic phrase.
-2. Ship a small LLM in the box so polish and tone work on first launch.
-3. Command mode — select text, say what to do with it.
-4. Installer, code signing, a demo GIF.
-5. `platform/` abstraction, then macOS.
+Done since this list was first written: the move to onnx-asr and GigaAM,
+filler removal without a model, command mode, the installer, in-app updates.
+Shipping a small LLM in the box was **tried and rejected** — Qwen3-0.6B int4
+failed the gate loudly enough to be worth the paragraph above.
+
+What is left:
+
+1. Auto-submit per app, and not gluing two dictations into one word.
+2. Export and import of your dictionary, replacements and snippets — today they
+   exist in exactly one copy, on one disk.
+3. macOS. The honest cost is 10–15 weeks; before spending it, three evenings of
+   probes on a real Mac decide whether it is possible at all.
+
+This is a tool its author uses every day, not a product chasing stars. Features
+land when they are worth the day they cost.
 
 ## Licence
 

@@ -17,7 +17,30 @@
 только для статуса, движение без пружин. Тема светлая или тёмная - следом за
 Windows.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="tools/demo_dark.gif">
+    <img src="tools/demo.gif" width="820" alt="Зажали сочетание, на пилюле живая волна, затем фраза встала в письмо: «Стратегическая сессия начинается в пятницу в 10:00 утра.»">
+  </picture>
+</p>
+
+<p align="center">
+  <sub>Пилюля настоящая, волна настоящая, распознавание настоящее: 5 секунд
+  речи за 0.22 с на процессоре, вместе с пунктуацией и «10:00». Звук берётся из
+  <code>test.wav</code>, а не с микрофона, чтобы
+  <a href="tools/demo_gif.py"><code>tools/demo_gif.py</code></a> давал один и
+  тот же результат на любой машине; окно почты поддельное - настоящее не снять,
+  не сняв заодно чужую переписку.</sub>
+</p>
+
 ## Запуск
+
+[**Скачать установщик**](https://github.com/romankandeevy/flowlocal/releases/latest)
+- 70 МБ, без прав администратора и без окна UAC. Подписи нет, поэтому
+SmartScreen один раз покажет синюю карточку: «Подробнее» → «Выполнить в любом
+случае».
+
+Из исходников:
 
 ```powershell
 pip install -r requirements.txt
@@ -196,6 +219,13 @@ python test_hotkey.py       # хоткей: привязка, смена, зах
 
 ```powershell
 python tools/preview_overlay_qt.py dark --shot tools/preview_overlay_qt.png
+```
+
+Гифка для README пересобирается оттуда же и требует скачанной модели:
+
+```powershell
+python tools/demo_gif.py light --out tools/demo.gif
+python tools/demo_gif.py dark  --out tools/demo_dark.gif
 ```
 
 ## Ограничения
