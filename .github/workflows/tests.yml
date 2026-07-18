@@ -1,0 +1,71 @@
+# Быстрые тесты на каждый пуш.
+#
+# Здесь только то, что ничего не трогает: ни микрофона, ни клавиатуры, ни сети,
+# ни модели. `test_insert.py` и `test_hotkey.py` шлют настоящие нажатия и двигают
+# мышь - им место на живой машине, а не в CI, где за ними никто не смотрит.
+# `test_e2e.py` тянет модель на 226 МБ, и гонять её на каждый пуш незачем.
+#
+# Польза одному человеку скромная, и преувеличивать её не надо: соло-разработчик
+# и так прогоняет тесты локально. Но `import app` ловит опечатку, из-за которой
+# приложение молча не стартует под pythonw, - класс отказов, который выглядит
+# как «кликнул по ярлыку, ничего не произошло». Такое уже случалось.
+#
+# windows-latest, потому что половина проекта - Win32: pywin32, keyboard, хуки.
+# На Linux это просто не поставится.
+
+name: тесты
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  fast:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: зависимости
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: приложение вообще импортируется
+        run: python -c "import app"
+
+      - name: чистка текста
+        run: python test_clean.py
+
+      - name: сочетания клавиш
+        run: python test_inputspec.py
+
+      - name: подстановки по истории
+        run: python test_suggest.py
+
+      - name: склейка и автоввод
+        run: python test_join.py
+
+      - name: выгрузка и загрузка личного
+        run: python test_backup.py
+
+      - name: статистика
+        run: python test_stats.py
+
+      - name: обновлятор
+        run: python test_update.py
+
+      - name: полировка и предохранители
+        run: python test_llm.py
+
+    env:
+      # Иначе кириллица в выводе превращается в мусор и провал не прочитать.
+      PYTHONIOENCODING: utf-8
