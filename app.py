@@ -170,6 +170,7 @@ class App:
         # level_fn читает self.recorder лениво: микрофон пересоздаётся при
         # смене устройства в настройках, а оверлей должен видеть новый
         self.overlay = Overlay(level_fn=lambda: self.recorder.drain_levels())
+        self.overlay.set_position(str(self.cfg.get("overlay_position") or "bottom"))
         self.transcriber = Transcriber(self.cfg, log)
         self.settings = None
         self.onboarding = None
@@ -538,16 +539,15 @@ class App:
             self.ui(self.overlay.show_error, "микрофон недоступен")
             return
         beep(880, 60, self.cfg.get("sounds", True))
-        # в режиме переключателя руки с клавиш сняты - без подсказки непонятно,
-        # чем это остановить; в режиме удержания она была бы враньём
-        hint = "ещё раз - стоп" if mode == "toggle" else ""
         if self.recorder.fell_back:
-            # Выбранный микрофон умер, пишем с системного. Запись работает -
-            # поэтому не ошибка, а подсказка у таймера: молчать нельзя, человек
-            # мог остаться говорить в мёртвую гарнитуру.
-            hint = "микрофон: системный"
+            # Выбранный микрофон умер, пишем с системного. Запись при этом
+            # идёт, то есть это не отказ, а мелочь - и на пилюле ей больше не
+            # место (переделка 18.07.2026: подписи оттуда ушли). Лог остаётся.
             log("mic fell back to default device")
-        self.ui(self.overlay.set_hint, hint)
+        # Пилюля показывает состояние, а не инструкцию: подсказка «ещё раз -
+        # стоп · Esc - отмена» висела каждую диктовку, а прочитать её нужно
+        # один раз. Она есть на странице «Диктовка», рядом с самим сочетанием.
+        self.ui(self.overlay.set_hint, "")
         self.ui(self.overlay.show_recording)
         self._set_tray_state("rec")
 
@@ -562,6 +562,10 @@ class App:
             self.ui(self.overlay.hide)
             self._set_tray_state("idle")
             return
+        # hint - канал только для скачивания обновления, но чистим на всякий:
+        # прошлый заход мог его выставить, а показывать «обновление 0.3.1» под
+        # распознавание фразы нельзя.
+        self.ui(self.overlay.set_hint, "")
         self.ui(self.overlay.show_processing)
         self._set_tray_state("proc")
         if self._rec_mode == "command":
@@ -664,6 +668,9 @@ class App:
         audio = getattr(self, "_last_audio", None)
         if audio is None or not self._ready or self._recording:
             return
+        # hint переживает отмену записи, а на пилюле он занимает место надписи
+        # про обновление - и повтор после Esc показывал бы её вместо ничего.
+        self.ui(self.overlay.set_hint, "")
         self.ui(self.overlay.show_processing)
         self._set_tray_state("proc")
         threading.Thread(target=self._process,
@@ -707,8 +714,10 @@ class App:
                 text, want_enter = extract_commands(text, self.cfg)
                 elapsed = time.time() - t0
                 if not text:
+                    # Молча спрятать пилюлю нельзя: человек говорил и ждёт
+                    # текста. Скажем прямо, что вставлять нечего.
                     log(f"empty result ({dur:.1f}s audio)")
-                    self.ui(self.overlay.hide)
+                    self.ui(self.overlay.show_error, "ничего не расслышали")
                     return
                 # После текста с Enter'ом хвостовой пробел - мусор в начале
                 # следующего сообщения.
@@ -876,6 +885,8 @@ class App:
             self._reload_model_bg()
         if old.get("theme") != new.get("theme"):
             self._apply_theme()
+        if old.get("overlay_position") != new.get("overlay_position"):
+            self.overlay.set_position(str(new.get("overlay_position") or "bottom"))
 
     def _apply_theme(self) -> None:
         """Тема сменилась на живом приложении.

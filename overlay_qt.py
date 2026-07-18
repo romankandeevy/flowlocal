@@ -37,7 +37,7 @@ import theme as T
 from theme_qt import Tokens
 
 
-def _preload_qml_deps() -> None:
+def _preload_qml_deps() -> bool:
     """Втянуть в процесс Qt6QuickEffects.dll до загрузки QML.
 
     Грабли PySide6, стоившие часа. QML-плагин (qml/QtQuick/Effects/
@@ -61,13 +61,14 @@ def _preload_qml_deps() -> None:
     dll = os.path.join(base, "Qt6QuickEffects.dll")
     try:
         ctypes.WinDLL(dll)
+        return True
     except OSError:
         # Без него не будет тени, но пилюля покажется. Оверлей не должен
         # ронять приложение - тем более из-за украшения.
-        pass
+        return False
 
 
-_preload_qml_deps()
+_EFFECTS_OK = _preload_qml_deps()
 
 LOADING = "loading"
 RECORDING = "recording"
@@ -75,11 +76,24 @@ PROCESSING = "processing"
 DONE = "done"
 ERROR = "error"
 
-# Пол громкости: RMS тише этого считается тишиной. Замеры на этой машине:
-# тихая комната ~0.0004, еле слышный источник ~0.005, речь ~0.05-0.2. Выше
-# ставить нельзя - придавит речь с тихого микрофона (при 0.015 запись с rms
-# 0.001 модель читала, а волна лежала ровно).
+# Пол осциллограммы: RMS ниже него нормируется в тишину, чтобы полоски не
+# плясали на шуме. Замеры на этой машине: тихая комната ~0.0004, еле слышный
+# источник ~0.005, речь ~0.05-0.2. Выше ставить нельзя - придавит речь с тихого
+# микрофона (при 0.015 запись с rms 0.001 модель читала, а волна лежала ровно).
 _FLOOR = 0.006
+
+# Отдельный, куда более низкий порог - для надписи «не слышно микрофона». Это
+# НЕ порог отрисовки: под `_FLOOR` (0.006) попадает и еле слышный источник
+# (0.005), который модель отлично читает, - обвинять микрофон в молчании, пока
+# он пишет речь, нельзя. «Не слышно» - это про заглушенную гарнитуру и мёртвый
+# вход, а там сигнал у самого цифрового нуля (тихая комната ~0.0004). Порог
+# между ними: всё, что тише 0.0015, - действительно тишина.
+_SILENCE_FLOOR = 0.0015
+
+# Сколько секунд тишины под запись терпим молча, прежде чем написать на пилюле
+# «не слышно микрофона». Ловит заглушенные гарнитуры: без этого диктовка в
+# выключенный микрофон кончается пустой вставкой и недоумением.
+_SILENCE_SEC = 3.0
 
 
 class Overlay(QObject):
@@ -96,13 +110,22 @@ class Overlay(QObject):
         self._peak = 0.02
         self._bars = [0.0] * T.WAVE_BARS
         self._last_level_at = 0.0
+        self._last_voice_at = 0.0
+        self._silence = False
+        self._position = "bottom"        # bottom | top | off
 
         self.tokens = Tokens(1.0)
         self.view = QQuickView()
         # Тот самый набор флагов. WindowDoesNotAcceptFocus обязателен: без него
         # пилюля заберёт фокус у окна, куда диктуют, и Ctrl+V уедет не туда.
+        # WindowTransparentForInput - это WS_EX_TRANSPARENT: клики проходят
+        # насквозь. Пилюля ничего не ловит (в Overlay.qml нет ни одной
+        # MouseArea), а окно у неё с полем под тень - без этого флага оно
+        # съедало клики полосой в полтораста пикселей у края экрана. Внизу это
+        # над строкой состояния, сверху - ровно вкладки браузера.
         self.view.setFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-                           | Qt.Tool | Qt.WindowDoesNotAcceptFocus)
+                           | Qt.Tool | Qt.WindowDoesNotAcceptFocus
+                           | Qt.WindowTransparentForInput)
         self.view.setColor(QColor(0, 0, 0, 0))
         self.view.setResizeMode(QQuickView.SizeViewToRootObject)
         ctx = self.view.rootContext()
@@ -111,6 +134,7 @@ class Overlay(QObject):
         if self.view.status() == QQuickView.Error:
             raise RuntimeError("; ".join(str(e) for e in self.view.errors()))
         self.root = self.view.rootObject()
+        self.root.setProperty("shadowOk", _EFFECTS_OK)
 
         self._done_timer = QTimer()
         self._done_timer.setSingleShot(True)
@@ -140,6 +164,18 @@ class Overlay(QObject):
     def set_hint(self, text: str) -> None:
         self.root.setProperty("hint", text or "")
 
+    def set_position(self, pos: str) -> None:
+        """Где жить пилюле: bottom | top | off. «off» - совсем без неё, для
+        тех, кому на экране не нужно ничего (запись и сигналы остаются)."""
+        pos = pos if pos in ("bottom", "top", "off") else "bottom"
+        if pos == self._position:
+            return
+        self._position = pos
+        if pos == "off":
+            self.hide()
+        elif self._shown:
+            self._place()
+
     def retheme(self) -> None:
         self.tokens.retheme()
 
@@ -151,6 +187,8 @@ class Overlay(QObject):
         self._peak = 0.02
         self._bars = [0.0] * T.WAVE_BARS
         self._last_level_at = self._rec_at
+        self._last_voice_at = self._rec_at
+        self._set_silence(False)
         self._to(RECORDING)
 
     def show_processing(self) -> None:
@@ -189,6 +227,19 @@ class Overlay(QObject):
         self._state = state
         self.root.setProperty("state_", state)
         self.root.setProperty("message", self._msg)
+        # «Скрыть» гасит индикацию записи, но НЕ ошибки: настройка называется
+        # «Пилюля во время записи», а не «немой режим». Иначе у человека с
+        # мёртвым микрофоном и скрытой пилюлей нажатие клавиши даёт ноль
+        # обратной связи - он не узнает, что диктовка не идёт. Ошибка проходит
+        # всегда и сама уходит по таймеру.
+        if self._position == "off" and state != ERROR:
+            self._tick.stop()
+            # Прячем, а не просто выходим: показанная ошибка иначе оставалась
+            # висеть, и человек, выбравший «не показывать ничего», получал
+            # полноценную пилюлю на всю следующую диктовку. hide() сам
+            # проверит, показано ли что-нибудь.
+            self.hide()
+            return
         # Тик - только под запись, остальное QML анимирует само.
         if state == RECORDING:
             self._tick.start(16)
@@ -201,18 +252,21 @@ class Overlay(QObject):
             self.root.setProperty("shown", True)
 
     def _place(self) -> None:
-        """Пилюля внизу активного монитора. Масштаб берём у экрана - Qt знает
-        про DPI сам, вручную его считать больше не надо."""
+        """Пилюля у края активного монитора - снизу или сверху, по настройке.
+        Масштаб берём у экрана - Qt знает про DPI сам, вручную его считать
+        больше не надо."""
         screen = QGuiApplication.screenAt(self.view.position()) or \
             QGuiApplication.primaryScreen()
         self.tokens.set_scale(screen.devicePixelRatio())
         geo = screen.availableGeometry()
         w = self.root.width()
         h = self.root.height()
-        self.view.setGeometry(
-            int(geo.center().x() - w / 2),
-            int(geo.bottom() - T.PILL_BOTTOM * self.tokens.scale - h + T.PILL_PAD_BOTTOM),
-            int(w), int(h))
+        if self._position == "top":
+            # Зеркально низу: видимая капсула на том же отступе от края.
+            y = geo.top() + T.PILL_BOTTOM * self.tokens.scale - T.PILL_PAD
+        else:
+            y = geo.bottom() - T.PILL_BOTTOM * self.tokens.scale - h + T.PILL_PAD_BOTTOM
+        self.view.setGeometry(int(geo.center().x() - w / 2), int(y), int(w), int(h))
 
     def _frame(self) -> None:
         """Кадр. Исключения глушим: оверлей не должен ронять приложение."""
@@ -241,7 +295,10 @@ class Overlay(QObject):
         levels = self.level_fn() if self.level_fn else []
         if levels:
             self._last_level_at = now
-            self._peak = max(self._peak * (0.992 ** len(levels)), max(levels), _FLOOR)
+            loudest = max(levels)
+            if loudest >= _SILENCE_FLOOR:
+                self._last_voice_at = now
+            self._peak = max(self._peak * (0.992 ** len(levels)), loudest, _FLOOR)
             for lv in levels[-T.WAVE_BARS:]:
                 self._bars.append(min(1.0, (lv / self._peak) ** 0.65))
             del self._bars[:-T.WAVE_BARS]
@@ -249,6 +306,15 @@ class Overlay(QObject):
             # звука нет совсем (устройство отвалилось) - гасим, чтобы застывшая
             # картинка не выдавала себя за живую
             self._bars = [v * 0.90 for v in self._bars]
+        # Голоса давно не слышно - пишем об этом на пилюле. Сходит само, как
+        # только звук вернётся: заглушенную гарнитуру включают, не перезапуская
+        # диктовку.
+        self._set_silence(now - self._last_voice_at > _SILENCE_SEC)
+
+    def _set_silence(self, value: bool) -> None:
+        if value != self._silence:
+            self._silence = value
+            self.root.setProperty("silence", value)
 
 
 def _qml_path() -> str:
