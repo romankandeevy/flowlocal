@@ -35,17 +35,39 @@ Rectangle {
     }
 
     // ---------- шапка: точки прогресса ----------
-    Row {
+    //
+    // Семь точек честно говорят «это длинно», и это работает против нас. Разбор
+    // онбординга Wispr Flow (Kristen Berman, «8 lessons») отмечает ровно это:
+    // человек охотнее идёт дальше, когда знает, что осталось немного, чем когда
+    // видит полную длину пути. Поэтому к точкам добавлена подпись, и появляется
+    // она только под конец - там, где иначе хочется бросить.
+    Column {
         id: dots
-        anchors { top: parent.top; topMargin: 24; horizontalCenter: parent.horizontalCenter }
-        spacing: 8
-        Repeater {
-            model: wiz.last + 1
-            Rectangle {
-                width: 8; height: 8; radius: 4
-                color: index <= wiz.step ? T.ink : T.fill
-                Behavior on color { ColorAnimation { duration: T.durFast * 1000 } }
+        anchors { top: parent.top; topMargin: 20; horizontalCenter: parent.horizontalCenter }
+        spacing: 7
+
+        Row {
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: 8
+            Repeater {
+                model: wiz.last + 1
+                Rectangle {
+                    width: 8; height: 8; radius: 4
+                    color: index <= wiz.step ? T.ink : T.fill
+                    Behavior on color { ColorAnimation { duration: T.durFast * 1000 } }
+                }
             }
+        }
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: wiz.step === wiz.last ? "последний шаг"
+                : wiz.step === wiz.last - 1 ? "почти готово"
+                : ""
+            visible: text !== ""
+            font.family: T.sans; font.pixelSize: T.t2xs
+            color: T.textMuted
+            opacity: visible ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: T.durBase * 1000 } }
         }
     }
 
@@ -60,12 +82,14 @@ Rectangle {
             anchors.centerIn: parent
             spacing: 14
             width: parent.width
-            Text {
+            // Знак, а не голое имя: это первое, что человек видит от программы,
+            // и стена текста на белом - плохое первое впечатление для приложения,
+            // которое дальше показывает себя аккуратным. Тот же вордмарк, что в
+            // панели настроек, только крупный.
+            Wordmark {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: "FlowLocal"
-                font.family: T.sans; font.pixelSize: T.t3xl
-                font.weight: Font.Bold; font.letterSpacing: -0.9   // 700, не 800: Onest чернит
-                color: T.text
+                box: 44
+                nameSize: T.t3xl
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
@@ -82,6 +106,7 @@ Rectangle {
         // === 1. Язык и модель ===
         Column {
             visible: wiz.step === 1
+            anchors.verticalCenter: parent.verticalCenter
             width: parent.width
             spacing: 12
             Text {
@@ -150,6 +175,7 @@ Rectangle {
         Column {
             id: micStep
             visible: wiz.step === 2
+            anchors.verticalCenter: parent.verticalCenter
             width: parent.width
             spacing: 12
             property var bars: []
@@ -213,6 +239,7 @@ Rectangle {
         // === 3. Сочетание ===
         Column {
             visible: wiz.step === 3
+            anchors.verticalCenter: parent.verticalCenter
             width: parent.width
             spacing: 12
             Text {
@@ -238,6 +265,7 @@ Rectangle {
         // === 4. Проверка вставки ===
         Column {
             visible: wiz.step === 4
+            anchors.verticalCenter: parent.verticalCenter
             width: parent.width
             spacing: 12
             property string result: ""
@@ -288,6 +316,7 @@ Rectangle {
         Column {
             id: trialStep
             visible: wiz.step === 5
+            anchors.verticalCenter: parent.verticalCenter
             width: parent.width
             spacing: 12
             property bool rec: false
@@ -342,6 +371,7 @@ Rectangle {
         Column {
             id: llmStep
             visible: wiz.step === 6
+            anchors.verticalCenter: parent.verticalCenter
             width: parent.width
             spacing: 12
 

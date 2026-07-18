@@ -166,6 +166,13 @@ class _Extra(QObject):
             pass          # не записалось - покажем мастер ещё раз, не страшно
         if self._app.onboarding is not None:
             self._app.onboarding.close()
+        # И сразу сказать, чем пользоваться. Мастер закрылся - человек остался
+        # один на один с пустым экраном и иконкой в трее, которую Windows ещё и
+        # прячет под шеврон. Тот же приём, что у Wispr: подсказку показывают в
+        # момент, когда она нужна, а не заранее в списке правил.
+        greet = getattr(self._app, "_greet_after_onboarding", None)
+        if greet is not None:
+            greet()
 
 
 class OnboardingWindow:

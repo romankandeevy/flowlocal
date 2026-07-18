@@ -62,12 +62,15 @@ pip install -r requirements.txt
 python app.py           # first run downloads GigaAM (226 MB) into models/
 ```
 
-Python 3.14 or 3.13, Windows 10/11. First launch opens a six-screen setup:
+Python 3.14 or 3.13, Windows 10/11. First launch opens a seven-screen setup:
 language and model, microphone with a live waveform, your hotkey, a paste
-check, and a "say something" trial that shows the text without inserting it.
+check, a "say something" trial that shows the text without inserting it, and
+finally the offer to install text polishing. There is no skip button — a
+dictation app you don't know the gesture for is a dictation app that doesn't
+work.
 
 <p align="center">
-  <img src="tools/preview_onboarding.png" width="620" alt="The six setup screens">
+  <img src="tools/preview_onboarding.png" width="620" alt="All seven setup screens: welcome, language and model, microphone, hotkey, paste check, trial, text polishing">
 </p>
 
 Run it in the background with `pythonw app.py`. Start with Windows: a checkbox

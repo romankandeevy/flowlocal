@@ -1564,6 +1564,25 @@ class App:
         else:
             self._open_settings()
 
+    def _greet_after_onboarding(self) -> None:
+        """Мастер пройден - сказать, чем пользоваться, прямо сейчас.
+
+        Раньше мастер просто закрывался, и человек оставался с пустым экраном:
+        иконку в трее Windows прячет под шеврон, а сочетание он видел один раз,
+        три экрана назад. Подсказка нужна не в начале списка правил, а в момент,
+        когда ей можно воспользоваться.
+        """
+        from PySide6.QtWidgets import QSystemTrayIcon
+
+        if self.tray is None:
+            return
+        binds = self._binds_pretty()
+        QTimer.singleShot(400, lambda: self.tray.showMessage(
+            "Всё готово",
+            f"Зажмите {binds} в любом окне и говорите" if binds
+            else "Назначьте сочетание в настройках - и можно диктовать",
+            QSystemTrayIcon.Information, 8000))
+
     def _greet(self) -> None:
         """Сказать, что мы здесь и чем нас звать.
 
