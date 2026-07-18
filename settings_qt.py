@@ -66,6 +66,9 @@ class Backend(QObject):
     changed = Signal()               # конфиг перечитан целиком
     flashed = Signal(str, str)       # текст, цвет ("", "danger", "accent")
     captureDone = Signal(str, str)   # поле, спецификация
+    # Установка Ollama прямо из настроек: этап словами, доля, общий размер.
+    llmStage = Signal(str, float, float)
+    llmDone = Signal(bool)
     # Приватный: им колбэк из потока keyboard перебрасывает результат в главный
     # поток. Прямо из чужого потока трогать нельзя ничего - ни QTimer.start()
     # в set(), ни QML. Сигнал с авто-соединением кладётся в очередь получателя,
@@ -593,6 +596,56 @@ class Backend(QObject):
         except Exception:  # noqa: BLE001 - падение в хуке роняет весь ввод
             return
         self._mouse_hook.suppress_event()      # бросает - и это норма
+
+
+    # ---------- правка текста: ставим Ollama за человека ----------
+
+    @Slot(result=bool)
+    def llmReady(self) -> bool:
+        """Всё ли уже готово: сервер отвечает и модель на месте."""
+        import ollama_setup as O
+
+        return O.serving() and O.has_model(O.DEFAULT_MODEL)
+
+    @Slot()
+    def llmInstall(self) -> None:
+        """Скачать Ollama, поставить, забрать модель, включить полировку.
+
+        В потоке: это гигабайты и минуты. Сигналы из чужого потока Qt кладёт в
+        очередь получателя сам - в этом весь смысл сигналов, руками к QML
+        отсюда прикасаться нельзя.
+        """
+        if getattr(self, "_llm_busy", False):
+            return
+        self._llm_busy = True
+
+        import ollama_setup as O
+
+        def work() -> None:
+            try:
+                ok = O.ensure(
+                    on_stage=lambda st, fr, tot: self.llmStage.emit(st, fr, float(tot)),
+                    log=self._llm_log)
+            except Exception as e:  # noqa: BLE001 - установка не роняет настройки
+                self._llm_log(f"ollama install failed: {e}")
+                ok = False
+            if ok:
+                # Нажал кнопку - решение принято. Автопоиск (llm.enabled = None)
+                # больше не при чём.
+                self.set("llm.enabled", True)
+                self.set("llm.model", O.DEFAULT_MODEL)
+            self._llm_busy = False
+            self.llmDone.emit(bool(ok))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _llm_log(self, msg: str) -> None:
+        try:
+            import app as _app
+
+            _app.log(msg)
+        except Exception:  # noqa: BLE001 - лог не должен ронять установку
+            pass
 
 
 class _CloseFilter(QObject):

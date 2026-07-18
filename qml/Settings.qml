@@ -419,7 +419,7 @@ Rectangle {
                         // сигнала, он бы застыл на старом значении).
                         subtitle: llmToggle.value
                             ? "Выделите текст, зажмите, скажите «сделай короче», «переведи на английский», «исправь ошибки» - выделенное заменится"
-                            : "Нужна Ollama: правка по указанию - это понимание смысла. Включите «Понимать поправки на ходу» ниже"
+                            : "Правка по указанию - это понимание смысла. Установите её ниже, одной кнопкой"
                         HotkeyField { field: "hotkey_command"; allowClear: true }
                     }
                     SettingRow {
@@ -484,13 +484,81 @@ Rectangle {
                     ToggleRow {
                         id: llmToggle
                         title: "Понимать поправки на ходу"
-                        subtitle: "Сказали «в пятницу, нет, в субботу» — останется суббота. Нужна Ollama"
+                        subtitle: llmSetup.ready
+                            ? "Сказали «в пятницу, нет, в субботу» — останется суббота"
+                            : "Сказали «в пятницу, нет, в субботу» — останется суббота. Нужно доустановить, кнопка ниже"
                         path: "llm.enabled"
                     }
-                    // Адрес и модель показываем только когда полировка включена:
-                    // настройка выключенного - это шум.
+
+                    // Установка одной кнопкой - та же, что в мастере первого
+                    // запуска, и с тем же объяснением. Раньше здесь стояло
+                    // «Нужна Ollama» и всё: ни ссылки, ни того, какую модель
+                    // качать, ни слова про сервер. Владелец сказал прямо, что
+                    // даже он не знает, как это сделать, - значит функции не
+                    // существовало, сколько бы кода за ней ни стояло.
                     SettingRow {
-                        visible: llmToggle.value
+                        id: llmSetup
+                        visible: !ready
+                        property bool ready: B.llmReady()
+                        property bool busy: false
+                        property bool failed: false
+                        property string stage: ""
+                        property real frac: 0
+                        property real total: 0
+
+                        title: busy ? stage : "Установить правку текста"
+                        subtitle: busy
+                            ? (total > 0
+                               ? Math.round(frac * 100) + "% из " + (total / 1e9).toFixed(1) + " ГБ"
+                               : "идёт установка, диктовке это не мешает")
+                            : failed
+                            ? "Не получилось. Диктовка работает и без этого"
+                            : "Скачаем Ollama и модель к ней — 3.3 ГБ. Всё останется на этом компьютере"
+
+                        FlowButton {
+                            visible: !llmSetup.busy
+                            label: llmSetup.failed ? "Ещё раз" : "Установить"
+                            kind: "primary"
+                            onClicked: {
+                                llmSetup.failed = false;
+                                llmSetup.busy = true;
+                                llmSetup.stage = "начинаю";
+                                llmSetup.frac = 0;
+                                llmSetup.total = 0;
+                                B.llmInstall();
+                            }
+                        }
+                        Rectangle {
+                            visible: llmSetup.busy
+                            width: 220; height: 6; radius: 3; color: T.fill
+                            Rectangle {
+                                width: parent.width * Math.max(0, Math.min(1, llmSetup.frac))
+                                height: parent.height; radius: 3; color: T.accent
+                                Behavior on width { NumberAnimation { duration: T.durBase * 1000 } }
+                            }
+                        }
+
+                        Connections {
+                            target: B
+                            function onLlmStage(stage, frac, total) {
+                                llmSetup.stage = stage;
+                                llmSetup.frac = frac;
+                                llmSetup.total = total;
+                            }
+                            function onLlmDone(ok) {
+                                llmSetup.busy = false;
+                                llmSetup.ready = ok;
+                                llmSetup.failed = !ok;
+                            }
+                        }
+                    }
+
+                    // Адрес и модель - для тех, у кого Ollama своя и настроена
+                    // не по умолчанию. Показываем только когда полировка
+                    // включена и установка уже не нужна: настройка выключенного
+                    // и недоустановленного - это шум.
+                    SettingRow {
+                        visible: llmToggle.value && llmSetup.ready
                         title: "Адрес Ollama"
                         FlowInput {
                             width: 220
@@ -499,7 +567,7 @@ Rectangle {
                         }
                     }
                     SettingRow {
-                        visible: llmToggle.value
+                        visible: llmToggle.value && llmSetup.ready
                         title: "Модель Ollama"
                         subtitle: "Оставьте пусто — найдём подходящую сами"
                         FlowInput {

@@ -35,11 +35,27 @@ class _Extra(QObject):
 
     trialReady = Signal(str)
     insertDone = Signal(bool)
+    # Установка Ollama: этап человеческими словами, доля и общий размер.
+    # Размер отдаём отдельно, потому что 1.4 ГБ - это не та цифра, которую
+    # прячут за процентами: человек должен видеть, во что ввязался.
+    llmStage = Signal(str, float, float)
+    llmDone = Signal(bool)
 
     def __init__(self, app) -> None:
         super().__init__()
         self._app = app
         self._trial = False
+        self._llm_busy = False
+
+    def _log(self, msg: str) -> None:
+        """Логгер приложения. Импортировать app отсюда нельзя - он импортирует
+        нас, вышел бы цикл; берём через уже имеющуюся ссылку."""
+        try:
+            import app as _app
+
+            _app.log(msg)
+        except Exception:  # noqa: BLE001 - лог не должен ронять установку
+            pass
 
     @Slot(result="QVariantList")
     def levels(self) -> list:
@@ -109,6 +125,54 @@ class _Extra(QObject):
                 self.trialReady.emit(text or "тишина - попробуйте ещё раз")
             except Exception as e:  # noqa: BLE001
                 self.trialReady.emit(f"не получилось: {e}")
+
+        threading.Thread(target=work, daemon=True).start()
+
+    # ---------- правка текста: ставим Ollama за человека ----------
+
+    @Slot(result=bool)
+    def llmReady(self) -> bool:
+        """Всё ли уже есть. Если да - экран предложения показывать незачем."""
+        import ollama_setup as O
+
+        return O.serving() and O.has_model(O.DEFAULT_MODEL)
+
+    @Slot()
+    def llmInstall(self) -> None:
+        """Скачать, поставить, забрать модель, включить полировку.
+
+        В потоке: это гигабайты и минуты, главный поток на этом держать нельзя -
+        замёрзнет и мастер, и хоткей. Сигналы из чужого потока Qt кладёт в
+        очередь получателя сам, поэтому здесь можно эмитить напрямую.
+        """
+        if self._llm_busy:
+            return
+        self._llm_busy = True
+
+        import ollama_setup as O
+
+        def work() -> None:
+            try:
+                ok = O.ensure(
+                    on_stage=lambda st, fr, tot: self.llmStage.emit(st, fr, float(tot)),
+                    log=self._log)
+            except Exception as e:  # noqa: BLE001 - установка не должна ронять мастер
+                self._log(f"ollama install failed: {e}")
+                ok = False
+            if ok:
+                # Человек нажал «да» - значит решение принято, и спрашивать его
+                # второй раз (llm.enabled = None -> автопоиск) уже незачем.
+                llm = self._app.cfg.setdefault("llm", {})
+                llm["enabled"] = True
+                llm["model"] = O.DEFAULT_MODEL
+                import config as C
+
+                try:
+                    C.save(self._app.cfg)
+                except OSError:
+                    pass
+            self._llm_busy = False
+            self.llmDone.emit(bool(ok))
 
         threading.Thread(target=work, daemon=True).start()
 

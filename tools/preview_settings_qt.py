@@ -56,6 +56,15 @@ import datetime as _dt  # noqa: E402
 
 import stats as _stats  # noqa: E402
 
+# Ollama тоже подменяем. У владельца она стоит, и витрина снималась бы в
+# состоянии «всё уже установлено» - то есть кнопку установки, которую увидит
+# любой другой человек, на картинке было бы не разглядеть. Показываем то, что
+# видит большинство, а не то, что видит разработчик.
+import ollama_setup as _ollama  # noqa: E402
+
+_ollama.serving = lambda timeout=1.5: False
+_ollama.has_model = lambda name: False
+
 _DEMO_TODAY = _dt.date(2026, 7, 16)          # последний день демо-истории
 _summary = _stats.summary
 _stats.summary = lambda rows, today=None: _summary(rows, today or _DEMO_TODAY)

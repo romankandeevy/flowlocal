@@ -8,7 +8,7 @@ Rectangle {
     id: wiz
     color: T.bg
     property int step: 0
-    readonly property int last: 5
+    readonly property int last: 6
 
     // Модель, которую выбрал шаг 2. По умолчанию - рекомендация для русского.
     property string chosenModel: OB.recommended()
@@ -330,6 +330,179 @@ Rectangle {
             Connections {
                 target: OB
                 function onTrialReady(text) { trialStep.result = text }
+            }
+        }
+
+        // === 6. Правка текста ===
+        //
+        // Экран последний намеренно: сначала человек увидел, что диктовка
+        // работает, и только потом ему предлагают её улучшить. Предлагать
+        // улучшение до того, как заработало основное, - значит просить
+        // доверия авансом.
+        Column {
+            id: llmStep
+            visible: wiz.step === 6
+            width: parent.width
+            spacing: 12
+
+            property bool busy: false
+            property bool done: false
+            property bool failed: false
+            property bool declined: false
+            property string stage: ""
+            property real frac: 0
+            property real total: 0
+
+            Text {
+                text: llmStep.done ? "Готово" : "Править текст на ходу?"
+                font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
+                color: T.text
+            }
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: llmStep.done
+                      ? "Теперь программа понимает поправки на ходу. Выключить можно в «Диктовке»."
+                      : "Скажете «встреча в пятницу, нет, в субботу» - в текст попадёт только суббота. "
+                        + "И тон под приложение: в почте строже, в чате свободнее."
+                font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
+                lineHeight: 1.4
+            }
+
+            // Цена названа ДО кнопки, а не после нажатия. 3.3 ГБ - это втрое
+            // больше самой программы вместе с моделью распознавания, и узнать
+            // об этом человек должен заранее.
+            Rectangle {
+                visible: !llmStep.busy && !llmStep.done
+                width: parent.width
+                height: priceCol.implicitHeight + 28
+                radius: T.radiusLg; color: T.paper
+                border.width: 1; border.color: T.border
+                Column {
+                    id: priceCol
+                    x: 16; y: 14
+                    width: parent.width - 32
+                    spacing: 6
+                    Text {
+                        text: "Нужно скачать 3.3 ГБ"
+                        font.family: T.sans; font.pixelSize: T.tSm
+                        font.weight: Font.DemiBold; color: T.text
+                    }
+                    Text {
+                        width: parent.width
+                        wrapMode: Text.WordWrap
+                        text: "Ollama - бесплатная программа, которая считает это на вашем "
+                              + "компьютере, и модель к ней. Всё останется здесь: интернет "
+                              + "нужен только чтобы скачать."
+                        font.family: T.sans; font.pixelSize: T.t2xs; color: T.textMuted
+                        lineHeight: 1.4
+                    }
+                }
+            }
+
+            // Ход установки: этап словами и полоса. Проценты без этапа врут -
+            // «40%» ничего не значит, если непонятно, чего именно сорок.
+            Column {
+                visible: llmStep.busy
+                width: parent.width
+                spacing: 8
+                Text {
+                    text: llmStep.total > 0
+                          ? llmStep.stage + " · " + Math.round(llmStep.frac * 100) + "% из "
+                            + (llmStep.total / 1e9).toFixed(1) + " ГБ"
+                          : llmStep.stage
+                    font.family: T.sans; font.pixelSize: T.tSm; color: T.text
+                }
+                Rectangle {
+                    width: parent.width; height: 6; radius: 3; color: T.fill
+                    Rectangle {
+                        width: parent.width * Math.max(0, Math.min(1, llmStep.frac))
+                        height: parent.height; radius: 3; color: T.accent
+                        Behavior on width { NumberAnimation { duration: T.durBase * 1000 } }
+                    }
+                }
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    text: "Можно свернуть окно - диктовка уже работает."
+                    font.family: T.sans; font.pixelSize: T.t2xs; color: T.textMuted
+                }
+            }
+
+            Row {
+                visible: !llmStep.busy && !llmStep.done
+                spacing: 10
+                FlowButton {
+                    label: llmStep.failed ? "Попробовать снова" : "Да, установить"
+                    kind: "primary"
+                    onClicked: {
+                        llmStep.failed = false;
+                        llmStep.declined = false;
+                        llmStep.busy = true;
+                        llmStep.stage = "начинаю";
+                        llmStep.frac = 0;
+                        llmStep.total = 0;
+                        OB.llmInstall();
+                    }
+                }
+                FlowButton {
+                    label: "Не сейчас"
+                    onClicked: { llmStep.declined = true; declineTimer.restart() }
+                }
+            }
+
+            // Отказ не молчит: человек должен знать, что дверь осталась
+            // открытой и где она. Уходит само через пять секунд - это заметка,
+            // а не диалог, и закрывать её вручную незачем.
+            Rectangle {
+                id: declineNote
+                width: parent.width
+                height: noteText.implicitHeight + 24
+                radius: T.radiusLg
+                color: T.fillSubtle
+                border.width: 1; border.color: T.border
+                opacity: llmStep.declined ? 1 : 0
+                visible: opacity > 0
+                Behavior on opacity { NumberAnimation { duration: T.durBase * 1000 } }
+                Text {
+                    id: noteText
+                    x: 16; y: 12
+                    width: parent.width - 32
+                    wrapMode: Text.WordWrap
+                    text: "Хорошо. Включить можно потом: «Диктовка» → «Править текст», "
+                          + "там та же кнопка и то же объяснение."
+                    font.family: T.sans; font.pixelSize: T.t2xs; color: T.textSecondary
+                    lineHeight: 1.4
+                }
+                Timer {
+                    id: declineTimer
+                    interval: 5000
+                    onTriggered: llmStep.declined = false
+                }
+            }
+
+            Text {
+                visible: llmStep.failed
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "Не получилось - " + llmStep.stage + ". Диктовка работает и без этого, "
+                      + "а попробовать снова можно в настройках."
+                font.family: T.sans; font.pixelSize: T.t2xs; color: T.danger
+                lineHeight: 1.4
+            }
+
+            Connections {
+                target: OB
+                function onLlmStage(stage, frac, total) {
+                    llmStep.stage = stage;
+                    llmStep.frac = frac;
+                    llmStep.total = total;
+                }
+                function onLlmDone(ok) {
+                    llmStep.busy = false;
+                    llmStep.done = ok;
+                    llmStep.failed = !ok;
+                }
             }
         }
     }
