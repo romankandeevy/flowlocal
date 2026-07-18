@@ -192,6 +192,8 @@ class App:
         self._update_told = ""       # про какую версию уже сказали шариком
         self._ollama_busy = False    # идёт ли установка Ollama
         self._ollama_subs: list = []  # окна, которые хотят видеть ход
+        self._last_insert = None     # (exe, когда, текст) - для склейки
+        self._last_use = time.time()  # когда последний раз диктовали
         self._update: dict | None = None   # свежая версия с GitHub, если нашлась
         self._hk_handles: list = []
         self._hook_handles: list = []
@@ -715,6 +717,14 @@ class App:
                 # надо подобрать под то, куда он диктовал. Оверлей фокус не
                 # забирает (WS_EX_NOACTIVATE), так что видим настоящее окно.
                 process = layered.foreground_process()
+                # Модель могли отпустить за простоем - поднимаем обратно. Под
+                # тем же _work_lock, поэтому две фразы подряд не устроят двух
+                # загрузок.
+                if not self.transcriber.loaded:
+                    self.ui(self.overlay.show_downloading, "поднимаю модель")
+                    self.transcriber.load()
+                    self.ui(self.overlay.show_processing)
+                self._last_use = time.time()
                 text = self.transcriber.transcribe(audio)
                 text = clean(text, self.cfg, log, process=process)
                 # Команды - ПОСЛЕ полировки: LLM не должна их видеть, иначе
@@ -727,6 +737,14 @@ class App:
                     log(f"empty result ({dur:.1f}s audio)")
                     self.ui(self.overlay.show_error, "ничего не расслышали")
                     return
+                # Отправлять ли сообщение самим: список приложений в настройках.
+                # Голосовое «нажми энтер» при этом никуда не делось - оно
+                # работает везде и перебивает список.
+                want_enter = want_enter or self._auto_enter_here(process)
+                # Склейка с предыдущей вставкой: пробел спереди и строчная
+                # буква, если фраза продолжает мысль. Иначе две диктовки подряд
+                # слипаются в «первая фразаВторая фраза».
+                text = self._join_with_previous(text, process)
                 # После текста с Enter'ом хвостовой пробел - мусор в начале
                 # следующего сообщения.
                 out = text + (" " if self.cfg.get("append_space", True)
@@ -747,6 +765,10 @@ class App:
                     # После Enter стирать нечего: текст уже улетел сообщением.
                     self._undo_text, self._undo_armed = \
                         (None, False) if want_enter else (out, True)
+                    # Куда и когда вставили - чтобы следующая диктовка знала,
+                    # продолжает она мысль или начинает новую.
+                    self._last_insert = (process, time.time(), out) \
+                        if not want_enter else None
             self._history(text, dur)
             n = len(text.split())
             log(f"ok: {dur:.1f}s audio -> {len(text)} chars in {elapsed:.2f}s")
@@ -1256,6 +1278,80 @@ class App:
     def ollama_busy(self) -> bool:
         return self._ollama_busy
 
+    def _maybe_unload_model(self) -> None:
+        """Отпустить модель, если ей давно не пользовались.
+
+        Проверяем раз в минуту, а не держим таймер на каждую диктовку: одно
+        пробуждение в минуту на фоне «ноля в покое» - ничто, а лишний таймер,
+        который заводится и снимается на каждую фразу, - лишний повод ошибиться.
+
+        Во время записи и работы не трогаем: выдернуть модель из-под
+        распознавания значит потерять фразу.
+        """
+        mins = int(self.cfg.get("unload_after_min") or 0)
+        if mins <= 0 or not self._ready or self._recording:
+            return
+        if not self.transcriber.loaded:
+            return
+        if time.time() - self._last_use < mins * 60:
+            return
+        if not self._work_lock.acquire(blocking=False):
+            return          # идёт распознавание - не мешаем
+        try:
+            self.transcriber.unload()
+        finally:
+            self._work_lock.release()
+
+    def _auto_enter_here(self, process: str) -> bool:
+        """Отправлять ли сообщение самим в этом окне.
+
+        Список ведёт человек: угадывать мессенджеры по имени exe - гиблое дело,
+        их сотни, а цена ошибки высокая. Отправить недописанное сообщение в
+        рабочий чат хуже, чем не отправить дописанное.
+        """
+        if not process:
+            return False
+        apps = self.cfg.get("auto_enter_apps") or []
+        return any(str(a).lower() == process.lower() for a in apps)
+
+    def _join_with_previous(self, text: str, process: str) -> str:
+        """Склеить с предыдущей вставкой, если она была только что и там же.
+
+        Две диктовки подряд слипались в «первая фразаВторая фраза»: хвостовой
+        пробел ставится ПОСЛЕ текста, а курсор к моменту второй вставки стоит
+        уже за ним - и всё равно выходило слитно, если пробел выключен.
+
+        Три условия, и каждое нужно:
+          - то же окно: в другом окне это другая мысль;
+          - недавно: через час это уже не продолжение;
+          - предыдущая фраза не кончилась точкой - иначе новая начинает
+            предложение, и строчная буква была бы ошибкой.
+        """
+        if not self.cfg.get("smart_join", True) or not text:
+            return text
+        last = getattr(self, "_last_insert", None)
+        if not last:
+            return text
+        where, when, prev = last
+        if where != process:
+            return text
+        if time.time() - when > float(self.cfg.get("join_window_sec", 90)):
+            return text
+        prev = prev.rstrip()
+        if not prev:
+            return text
+        # Предыдущая кончилась знаком конца предложения - новая фраза начинает
+        # своё, трогать регистр нельзя.
+        if prev[-1] in ".!?:;":
+            return text
+        # Иначе это продолжение: строчная буква и пробел спереди. Заглавную
+        # оставляем именам собственным - у них вторая буква тоже заглавная
+        # редко, но первое слово из одной буквы («Я») трогать нельзя.
+        head = text[0]
+        if head.isupper() and len(text) > 1 and text[1].islower() and text[:1] != "Я":
+            text = head.lower() + text[1:]
+        return (" " if not prev[-1].isspace() else "") + text
+
     def _forget_old_history(self) -> None:
         """Выбросить диктовки старше history_days. 0 - ничего не трогаем.
 
@@ -1396,6 +1492,11 @@ class App:
         self._update_timer.timeout.connect(
             lambda: threading.Thread(target=self._check_update_bg, daemon=True).start())
         self._update_timer.start(_UPDATE_EVERY)
+        # Простой модели - раз в минуту. Дешевле, чем заводить и снимать таймер
+        # на каждую диктовку.
+        self._idle_timer = QTimer()
+        self._idle_timer.timeout.connect(self._maybe_unload_model)
+        self._idle_timer.start(60 * 1000)
         if not self.cfg.get("onboarded"):
             # Первый запуск: без мастера человек видит только иконку в трее и
             # не понимает ничего. Небольшая задержка - дать трею показаться.

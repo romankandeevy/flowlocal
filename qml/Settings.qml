@@ -803,6 +803,45 @@ Rectangle {
                             onPicked: (v) => B.set("insert_mode", v)
                         }
                     }
+                    SettingRow {
+                        title: "Освобождать память"
+                        subtitle: "Модель занимает около 370 МБ. Если долго не диктуете, "
+                                  + "её можно отпустить — обратно поднимется за пару секунд"
+                        Segmented {
+                            options: [{label: "держать", value: 0},
+                                      {label: "через час", value: 60},
+                                      {label: "через 4 часа", value: 240}]
+                            value: B.get("unload_after_min") || 0
+                            onPicked: (v) => B.set("unload_after_min", v)
+                        }
+                    }
+                    ToggleRow {
+                        title: "Продолжать мысль"
+                        subtitle: "Диктуете вторую фразу сразу за первой — программа поставит "
+                                  + "пробел и не начнёт её с заглавной посреди предложения"
+                        path: "smart_join"
+                    }
+                    SettingRow {
+                        title: "Отправлять сообщение"
+                        subtitle: "Список программ, где после вставки нажимать Enter. Имена "
+                                  + "через запятую: telegram.exe, whatsapp.exe. Голосовое "
+                                  + "«нажми энтер» работает и без списка"
+                        FlowInput {
+                            width: 260
+                            mono: true
+                            placeholder: "пусто — никуда"
+                            text: (B.get("auto_enter_apps") || []).join(", ")
+                            onEdited: (t) => {
+                                var list = [];
+                                var parts = t.split(",");
+                                for (var i = 0; i < parts.length; i++) {
+                                    var one = parts[i].trim();
+                                    if (one !== "") list.push(one);
+                                }
+                                B.set("auto_enter_apps", list);
+                            }
+                        }
+                    }
                     ToggleRow {
                         title: "Пробел в конце"
                         subtitle: "Чтобы следующая фраза не слиплась с этой"
