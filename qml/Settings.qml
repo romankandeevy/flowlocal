@@ -900,6 +900,17 @@ Rectangle {
                         }
                     }
                     SettingRow {
+                        title: "Расположение"
+                        subtitle: "Карточками — как сейчас. Строками — то же самое без рамок, "
+                                  + "плотнее и спокойнее"
+                        Segmented {
+                            options: [{label: "карточками", value: "cards"},
+                                      {label: "строками", value: "lines"}]
+                            value: B.get("layout") || "cards"
+                            onPicked: (v) => B.set("layout", v)
+                        }
+                    }
+                    SettingRow {
                         title: "Пилюля во время записи"
                         subtitle: "Полоска с волной: снизу экрана, сверху — или не показывать совсем"
                         Segmented {

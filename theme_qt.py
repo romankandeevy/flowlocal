@@ -65,6 +65,12 @@ class Tokens(QObject):
     def dark(self) -> bool:
         return T.mode() == "dark"
 
+    @Property(str, notify=changed)
+    def layout(self) -> str:
+        """cards | lines. Здесь, а не в конфиге напрямую: раскладка - такой же
+        токен оформления, как краска, и меняться должна тем же сигналом."""
+        return T.layout()
+
     # ---------- краски ----------
 
     @Property(QColor, notify=changed)

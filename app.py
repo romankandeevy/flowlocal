@@ -162,6 +162,7 @@ class App:
         # момент отрисовки, но иконка трея кэшируется, а окно настроек
         # запоминает фон канвы при создании.
         T.set_theme(str(self.cfg.get("theme") or "system"))
+        T.set_layout(str(self.cfg.get("layout") or "cards"))
         # QApplication, а не QGuiApplication: QSystemTrayIcon и QMenu живут в
         # QtWidgets. Окна при этом остаются на QML.
         self.qapp = QApplication(sys.argv)
@@ -917,7 +918,10 @@ class App:
         model_keys = ("model", "quantization", "device")
         if any(old.get(k) != new.get(k) for k in model_keys):
             self._reload_model_bg()
-        if old.get("theme") != new.get("theme"):
+        # Раскладка - такой же токен оформления, как краска: меняется тем же
+        # путём и применяется на лету, без пересборки окна.
+        if (old.get("theme") != new.get("theme")
+                or old.get("layout") != new.get("layout")):
             self._apply_theme()
         if old.get("overlay_position") != new.get("overlay_position"):
             self.overlay.set_position(str(new.get("overlay_position") or "bottom"))
@@ -936,6 +940,7 @@ class App:
         import icons
 
         mode = T.set_theme(str(self.cfg.get("theme") or "system"))
+        T.set_layout(str(self.cfg.get("layout") or "cards"))
         icons.retheme()
         self.overlay.retheme()
         self._set_tray_state(self._tray_state)

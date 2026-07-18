@@ -175,6 +175,19 @@ def _apply(p: dict) -> None:
     DANGER = p["danger"]          # ошибка / разрушительное
 
 
+_layout = "cards"
+
+
+def layout() -> str:
+    """Как расположены вещи: cards | lines. Один источник правды, как и краски."""
+    return _layout
+
+
+def set_layout(value: str) -> None:
+    global _layout
+    _layout = value if value in ("cards", "lines") else "cards"
+
+
 def mode() -> str:
     """Действующая тема: 'light' или 'dark'. Никогда не 'system'."""
     return _mode

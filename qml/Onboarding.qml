@@ -8,7 +8,7 @@ Rectangle {
     id: wiz
     color: T.bg
     property int step: 0
-    readonly property int last: 6
+    readonly property int last: 7
 
     // Модель, которую выбрал шаг 2. По умолчанию - рекомендация для русского.
     property string chosenModel: OB.recommended()
@@ -103,9 +103,90 @@ Rectangle {
             }
         }
 
-        // === 1. Язык и модель ===
+        // === 1. Как это выглядит ===
+        //
+        // Вторым экраном намеренно: дальше человек проходит ещё пять шагов и
+        // видит их уже в своём оформлении. Спросить об этом в конце значило бы
+        // показать мастер дважды - один раз чужим, один раз своим.
         Column {
             visible: wiz.step === 1
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width
+            spacing: 14
+
+            Text {
+                text: "Как вам удобнее?"
+                font.family: T.sans; font.pixelSize: T.tXl
+                font.weight: Font.DemiBold; color: T.text
+            }
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "Это можно поменять когда угодно — «Диктовка» → «Вид»."
+                font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
+            }
+
+            Item { width: 1; height: 4 }
+
+            Text {
+                text: "ЦВЕТА"
+                font.family: T.sans; font.pixelSize: T.t2xs
+                font.weight: Font.DemiBold; font.letterSpacing: 0.6
+                color: T.textFaint
+            }
+            Segmented {
+                options: [{label: "как в системе", value: "system"},
+                          {label: "светлая", value: "light"},
+                          {label: "тёмная", value: "dark"}]
+                value: B.get("theme") || "system"
+                onPicked: (v) => B.set("theme", v)
+            }
+
+            Item { width: 1; height: 8 }
+
+            Text {
+                text: "РАСПОЛОЖЕНИЕ"
+                font.family: T.sans; font.pixelSize: T.t2xs
+                font.weight: Font.DemiBold; font.letterSpacing: 0.6
+                color: T.textFaint
+            }
+            Segmented {
+                options: [{label: "карточками", value: "cards"},
+                          {label: "строками", value: "lines"}]
+                value: B.get("layout") || "cards"
+                onPicked: (v) => B.set("layout", v)
+            }
+
+            // Показываем разницу тут же, а не описываем словами: «карточками»
+            // и «строками» человеку ничего не говорят, пока он их не увидел.
+            Item { width: 1; height: 6 }
+            Card {
+                width: parent.width
+                Item {
+                    width: parent.width
+                    implicitHeight: demoCol.implicitHeight + 8
+                    Column {
+                        id: demoCol
+                        width: parent.width
+                        SettingRow {
+                            first: true
+                            title: "Так выглядит настройка"
+                            subtitle: "А так — пояснение под ней"
+                            Toggle { value: true }
+                        }
+                        SettingRow {
+                            title: "И следующая за ней"
+                            subtitle: "Разделены линией в обоих видах"
+                            Toggle { value: false }
+                        }
+                    }
+                }
+            }
+        }
+
+        // === 2. Язык и модель ===
+        Column {
+            visible: wiz.step === 2
             anchors.verticalCenter: parent.verticalCenter
             width: parent.width
             spacing: 12
@@ -171,10 +252,10 @@ Rectangle {
             }
         }
 
-        // === 2. Микрофон ===
+        // === 3. Микрофон ===
         Column {
             id: micStep
-            visible: wiz.step === 2
+            visible: wiz.step === 3
             anchors.verticalCenter: parent.verticalCenter
             width: parent.width
             spacing: 12
@@ -223,7 +304,7 @@ Rectangle {
             }
             Timer {
                 interval: 33
-                running: wiz.step === 2 && wiz.visible
+                running: wiz.step === 3 && wiz.visible
                 repeat: true
                 onTriggered: {
                     var fresh = OB.levels();
@@ -236,9 +317,9 @@ Rectangle {
             }
         }
 
-        // === 3. Сочетание ===
+        // === 4. Сочетание ===
         Column {
-            visible: wiz.step === 3
+            visible: wiz.step === 4
             anchors.verticalCenter: parent.verticalCenter
             width: parent.width
             spacing: 12
@@ -262,9 +343,9 @@ Rectangle {
             }
         }
 
-        // === 4. Проверка вставки ===
+        // === 5. Проверим вставку ===
         Column {
-            visible: wiz.step === 4
+            visible: wiz.step === 5
             anchors.verticalCenter: parent.verticalCenter
             width: parent.width
             spacing: 12
@@ -312,10 +393,10 @@ Rectangle {
             }
         }
 
-        // === 5. Проба ===
+        // === 6. Проба ===
         Column {
             id: trialStep
-            visible: wiz.step === 5
+            visible: wiz.step === 6
             anchors.verticalCenter: parent.verticalCenter
             width: parent.width
             spacing: 12
@@ -362,7 +443,7 @@ Rectangle {
             }
         }
 
-        // === 6. Правка текста ===
+        // === 7. Править текст ===
         //
         // Экран последний намеренно: сначала человек увидел, что диктовка
         // работает, и только потом ему предлагают её улучшить. Предлагать
@@ -370,7 +451,7 @@ Rectangle {
         // доверия авансом.
         Column {
             id: llmStep
-            visible: wiz.step === 6
+            visible: wiz.step === 7
             anchors.verticalCenter: parent.verticalCenter
             width: parent.width
             spacing: 12
@@ -553,16 +634,16 @@ Rectangle {
             anchors { right: parent.right; rightMargin: 36; verticalCenter: parent.verticalCenter }
             kind: "primary"
             label: wiz.step === 0 ? "Начать"
-                 : wiz.step === 1 ? (wiz.modelReady ? "Дальше"
+                 : wiz.step === 2 ? (wiz.modelReady ? "Дальше"
                                      : wiz.downloading ? "Скачивается…" : "Скачать модель")
                  : wiz.step === wiz.last ? "Готово"
                  : "Дальше"
             onClicked: {
-                if (wiz.step === 1 && !wiz.modelReady) {
+                if (wiz.step === 2 && !wiz.modelReady) {
                     if (!wiz.downloading) B.downloadModel(wiz.chosenModel);
                     return;
                 }
-                if (wiz.step === 1 && wiz.modelReady) B.setModel(wiz.chosenModel);
+                if (wiz.step === 2 && wiz.modelReady) B.setModel(wiz.chosenModel);
                 if (wiz.step === wiz.last) { OB.finish(); return; }  // finish() сам закроет окно
                 wiz.step += 1;
             }
