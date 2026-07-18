@@ -42,6 +42,13 @@ class Model:
     license: str
     url: str
     why: str                 # одна строка: зачем она вообще в списке
+    # Ставит ли модель знаки препинания сама. У GigaAM это умеет только
+    # вариант e2e; обычные CTC и RNN-T отдают сплошную строчную строку.
+    #
+    # От этого зависит, звать ли punct_rules: поверх модели, которая уже
+    # расставила знаки, правила дадут дубли и запятую там, где e2e осознанно
+    # её не поставила.
+    punctuates: bool = False
 
 
 CATALOG: list[Model] = [
@@ -94,6 +101,20 @@ def get(model_id: str) -> Model | None:
 def quant_for(model_id: str, fallback: str | None = "int8") -> str | None:
     m = BY_ID.get(model_id)
     return m.quant if m else fallback
+
+
+def puts_punctuation(model_id: str) -> bool:
+    """Ставит ли эта модель знаки препинания сама.
+
+    Для модели не из каталога решаем по имени: e2e-варианты GigaAM умеют, всё
+    остальное - нет. Это нужно не для красоты, а для людей, обновившихся со
+    старой версии: в их конфиге лежит gigaam-v3-e2e-rnnt, которого в каталоге
+    уже нет, а знаки он ставит.
+    """
+    m = BY_ID.get(model_id)
+    if m is not None:
+        return m.punctuates
+    return "e2e" in str(model_id or "").lower()
 
 
 def pick(_language: str | None = None) -> str:
