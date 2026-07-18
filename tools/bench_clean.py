@@ -135,9 +135,8 @@ def run(name: str, cfg: dict) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", help="commas | ollama | local")
+    ap.add_argument("--only", help="commas | ollama")
     ap.add_argument("--model", default="", help="модель Ollama; пусто - найти самим")
-    ap.add_argument("--local", default="", help="папка модели в models/ для genai")
     args = ap.parse_args()
 
     base = {"dictionary": [], "snippets": {}, "remove_fillers": True,
@@ -155,18 +154,6 @@ def main() -> None:
             plans.append((f"запятые + ollama ({model})", {**base, "llm": llm}))
         else:
             print("Ollama не найдена - меряем только запятые\n")
-
-    # Своя модель через onnxruntime-genai - кандидат на замену Ollama целиком.
-    # Меряем тем же набором и тем же критерием: «испорчено» = 0 или не берём.
-    if args.local and args.only not in ("commas", "ollama"):
-        import llm_local
-
-        if not llm_local.available(args.local):
-            print(f"нет модели models/{args.local} - пропускаю\n")
-        else:
-            local = {"enabled": True, "backend": "local",
-                     "local_model": args.local, "timeout_sec": 60, "max_new": 512}
-            plans.append((f"запятые + своя ({args.local})", {**base, "llm": local}))
 
     results = [run(n, c) for n, c in plans]
 
