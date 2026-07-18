@@ -33,7 +33,6 @@ Rectangle {
     // строка прячется. Заводить для них "" - два способа сказать одно.
     readonly property var subtitles: ({
         "Диктовка":    "Сочетания, микрофон и то, как появляется текст",
-        "Модели":      "Кто именно превращает голос в текст",
         "Слова":       "Научите программу писать так, как нужно вам",
         "История":     "Всё, что вы надиктовали. Можно найти и скопировать",
         "Статистика":  "Сколько вы наговорили и сколько времени это сберегло"
@@ -86,10 +85,8 @@ Rectangle {
                 NavItem {
                     label: modelData
                     icon: ic.forPage(modelData)
-                    // «Модели» открываются из «Диктовки» - пока человек там,
-                    // подсвечиваем дверь, через которую он вошёл.
                     active: win.page === modelData
-                            || (modelData === "Диктовка" && win.page === "Модели")
+
                     onClicked: win.page = modelData
                 }
             }
@@ -398,6 +395,70 @@ Rectangle {
                                 font.pixelSize: T.tSm
                                 color: T.textMuted
                                 lineHeight: 1.5
+                            }
+                        }
+                    }
+                }
+
+                // Правка текста не установлена - говорим об этом первым делом
+                // и не даём об этом забыть.
+                //
+                // Раньше она была необязательной, и без неё программа просто
+                // работала чуть скромнее. Теперь без неё программа неполна:
+                // модель по умолчанию не ставит знаков препинания, не работают
+                // ни поправки на ходу, ни преобразования выделенного текста.
+                // Молчать про это значит отдать человеку половину программы и
+                // не сказать, что вторая половина существует.
+                Card {
+                    width: parent.width
+                    visible: !llmBanner.ready
+                    Item {
+                        width: parent.width
+                        implicitHeight: bcol.implicitHeight + 32
+                        Column {
+                            id: bcol
+                            anchors { left: parent.left; right: parent.right; top: parent.top
+                                      leftMargin: 20; rightMargin: 20; topMargin: 16 }
+                            spacing: 8
+                            Row {
+                                spacing: 8
+                                Rectangle {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 7; height: 7; radius: 4; color: T.danger
+                                }
+                                Text {
+                                    text: "Правка текста не установлена"
+                                    font.family: T.sans; font.pixelSize: T.tMd
+                                    font.weight: Font.DemiBold; color: T.text
+                                }
+                            }
+                            Text {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                text: "Без неё нет знаков препинания, поправок на ходу и "
+                                      + "преобразований текста. Ставится один раз, работает "
+                                      + "дальше без интернета."
+                                font.family: T.sans; font.pixelSize: T.tSm
+                                color: T.textMuted
+                                lineHeight: 1.4
+                            }
+                            FlowButton {
+                                label: llmBanner.busy ? "Ставится…" : "Установить"
+                                kind: "primary"
+                                enabled: !llmBanner.busy
+                                onClicked: { llmBanner.busy = true; B.llmInstall() }
+                            }
+                        }
+                    }
+                    Item {
+                        id: llmBanner
+                        property bool ready: B.llmReady()
+                        property bool busy: B.llmBusy()
+                        Connections {
+                            target: B
+                            function onChanged() {
+                                llmBanner.ready = B.llmReady();
+                                llmBanner.busy = B.llmBusy();
                             }
                         }
                     }
@@ -873,22 +934,21 @@ Rectangle {
                 SectionTitle { text: "Распознавание" }
                 Card {
                     width: parent.width
+                    // Переключатель, а не список с карточками и кнопками
+                    // скачивания. Моделей осталось две, и обе - GigaAM: выбирать
+                    // тут нечего, кроме «побыстрее» и «поаккуратнее». Отдельная
+                    // страница под два варианта - это лишний экран и лишний
+                    // повод задуматься там, где думать не о чем.
                     SettingRow {
                         first: true
                         title: "Модель"
-                        subtitle: "Кто превращает голос в текст. Для других языков есть другие модели"
-                        FlowButton {
-                            label: "Другие языки и модели"
-                            onClicked: win.page = "Модели"
-                        }
-                    }
-                    SettingRow {
-                        title: "Язык"
-                        subtitle: "Не каждая модель понимает все языки. Какие - смотрите в «Другие языки и модели»"
+                        subtitle: "Обычная подходит почти всем. Внимательная чуть медленнее, "
+                                  + "но аккуратнее с окончаниями и редкими словами. "
+                                  + "Переключается на ходу - старая работает, пока грузится новая"
                         Segmented {
-                            options: B.langOptions
-                            value: B.get("language")
-                            onPicked: (v) => B.set("language", v)
+                            options: B.modelOptions
+                            value: B.get("model")
+                            onPicked: (v) => B.setModel(v)
                         }
                     }
                     SettingRow {
@@ -951,164 +1011,6 @@ Rectangle {
                         title: "Звуковые сигналы"
                         subtitle: "Тихий сигнал, когда запись началась и закончилась"
                         path: "sounds"
-                    }
-                }
-            }
-
-            // ===== Модели =====
-            // Скрытая страница: с панели убрана, вход - кнопкой из «Диктовки».
-            Column {
-                id: modelsPage
-                visible: win.page === "Модели"
-                width: parent.width
-                spacing: 12
-                property var list: []
-                function refresh() { list = B.modelsInfo() }
-                // Только при входе: страница скрыта при старте, грузить каталог
-                // при сборке окна незачем - откроется кнопкой из «Диктовки».
-                onVisibleChanged: if (visible) refresh()
-                Connections {
-                    target: B
-                    function onModelsChanged() { modelsPage.refresh() }
-                }
-
-                Row {
-                    spacing: 10
-                    FlowButton { label: "← Назад"; onClicked: win.page = "Диктовка" }
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "Переключить можно на ходу - старая работает, пока грузится новая."
-                        font.family: T.sans; font.pixelSize: T.tSm
-                        color: T.textMuted
-                    }
-                }
-
-                Repeater {
-                    model: modelsPage.list
-                    Card {
-                        width: modelsPage.width
-                        Item {
-                            width: parent.width
-                            implicitHeight: mcol.implicitHeight + 28
-
-                            Column {
-                                id: mcol
-                                x: 24; y: 14
-                                width: parent.width - 48 - 130
-                                spacing: 3
-                                Row {
-                                    spacing: 8
-                                    Text {
-                                        text: modelData.title
-                                        font.family: T.sans; font.pixelSize: T.tMd
-                                        font.weight: Font.DemiBold
-                                        color: T.text
-                                    }
-                                    // Статус - пилюлей: активная чернилами,
-                                    // остальное тише. Не синим: акцент - не статус.
-                                    Rectangle {
-                                        visible: modelData.active || modelData.installed
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        radius: height / 2
-                                        height: 18
-                                        width: st.implicitWidth + 16
-                                        color: modelData.active ? T.ink : T.fill
-                                        Text {
-                                            id: st
-                                            anchors.centerIn: parent
-                                            text: modelData.active ? "используется" : "скачана"
-                                            font.family: T.sans; font.pixelSize: T.t2xs
-                                            font.weight: Font.DemiBold
-                                            color: modelData.active ? T.bg : T.textSecondary
-                                        }
-                                    }
-                                }
-                                Text {
-                                    width: parent.width
-                                    text: modelData.why
-                                    wrapMode: Text.WordWrap
-                                    font.family: T.sans; font.pixelSize: T.tSm
-                                    color: T.textSecondary
-                                }
-                                Text {
-                                    // Метаданные моноширинным - голос терминала.
-                                    //
-                                    // Раньше здесь стояло «226 МБ · русский · CPU ·
-                                    // MIT». Человеку, который просто пишет письма,
-                                    // «CPU» и «MIT» не говорят ничего: первое он
-                                    // прочтёт как ошибку, второе примет за опечатку.
-                                    // Размер и языки - это выбор («поместится?
-                                    // поймёт меня?»), железо - ответ на «а у меня
-                                    // пойдёт?». Лицензия - обязательство перед
-                                    // авторами модели, и её место ниже, в сноске,
-                                    // а не в строке выбора.
-                                    text: modelData.sizeMb + " МБ · " + modelData.langs
-                                          + " · " + (modelData.device === "GPU"
-                                                     ? "нужна видеокарта"
-                                                     : "видеокарта не нужна")
-                                    font.family: T.mono; font.pixelSize: T.t2xs
-                                    color: T.textMuted
-                                }
-                                Text {
-                                    // Parakeet под CC-BY-4.0 - она требует указать
-                                    // авторство, и молчать об этом нельзя. Но и
-                                    // кричать незачем: это про нас и авторов модели,
-                                    // а не про выбор человека.
-                                    text: "лицензия " + modelData.license
-                                    visible: modelData.license !== "MIT"
-                                    font.family: T.mono; font.pixelSize: T.t2xs
-                                    color: T.textFaint
-                                }
-                                // Прогресс скачивания: линия, не спиннер -
-                                // видно, сколько осталось от сотен мегабайт.
-                                Item {
-                                    width: parent.width; height: 12
-                                    visible: modelData.downloading
-                                    property real frac: 0
-                                    Connections {
-                                        target: B
-                                        function onModelProgress(id, f) {
-                                            if (id === modelData.id) parent.frac = f;
-                                        }
-                                    }
-                                    Rectangle {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: parent.width; height: 4; radius: 2
-                                        color: T.fillStrong
-                                    }
-                                    Rectangle {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: parent.width * parent.frac
-                                        height: 4; radius: 2
-                                        color: T.accent
-                                        Behavior on width { NumberAnimation { duration: 300 } }
-                                    }
-                                }
-                            }
-
-                            Column {
-                                anchors { right: parent.right; rightMargin: 24
-                                          verticalCenter: parent.verticalCenter }
-                                spacing: 6
-                                FlowButton {
-                                    visible: !modelData.active
-                                    label: modelData.installed ? "Использовать"
-                                         : modelData.downloading ? "Скачивается…" : "Скачать"
-                                    kind: modelData.installed ? "primary" : "secondary"
-                                    onClicked: {
-                                        if (modelData.downloading) return;
-                                        if (modelData.installed) B.setModel(modelData.id);
-                                        else B.downloadModel(modelData.id);
-                                    }
-                                }
-                                FlowButton {
-                                    visible: modelData.installed && !modelData.active
-                                    label: "Удалить (" + modelData.onDiskMb + " МБ)"
-                                    kind: "danger"
-                                    onClicked: B.deleteModel(modelData.id)
-                                }
-                            }
-                        }
                     }
                 }
             }

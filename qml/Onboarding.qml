@@ -196,61 +196,37 @@ Rectangle {
             }
         }
 
-        // Имён моделей на этом экране нет намеренно. Это второй шаг мастера:
-        // человек ещё ничего не выбрал и ничего про программу не знает, а
-        // строка начиналась с «GigaAM» и «Parakeet» - двух слов, которые ему
-        // ничего не говорят. Первой должна идти польза, имя модели живёт на
-        // странице «Модели», куда идут именно за ним.
+        // Выбора модели на этом шаге больше нет.
+        //
+        // Был выбор языка - «русский» против «русский и другие», - и за ним
+        // стояли две разные модели. Многоязычных моделей в каталоге не
+        // осталось: программа про русский, и выбирать не из чего. А выбор,
+        // где вариант один, - это не выбор, а лишний экран.
+        //
+        // Шаг остался, потому что делает главное: качает модель. Без неё
+        // диктовка не работает вовсе, и человек должен видеть, что качается и
+        // сколько осталось.
 
-        // === 2. Язык и модель ===
+        // === 2. Модель ===
         Column {
             visible: wiz.step === 2
             anchors.top: parent.top
             width: parent.width
             spacing: 12
             Text {
-                text: "На каком языке вы говорите?"
+                text: wiz.modelReady ? "Модель на месте" : "Скачаем модель"
                 font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
                 color: T.text
             }
             Text {
                 width: parent.width
-                text: "От этого зависит модель распознавания. Видеокарта не нужна."
+                wrapMode: Text.WordWrap
+                text: wiz.modelReady
+                      ? "Она уже на этом компьютере. Дальше интернет для распознавания не нужен."
+                      : "236 МБ, скачается один раз. Дальше распознавание работает без "
+                        + "интернета - ни звук, ни текст никуда не уходят. Видеокарта не нужна."
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
-            }
-            Repeater {
-                model: [
-                    {lang: "ru", title: "Русский",
-                     sub: "Точнее всех для русского: сама ставит запятые и точки. 226 МБ"},
-                    {lang: "en", title: "Русский и другие языки",
-                     sub: "25 европейских языков, язык определяет сама. По-русски чуть хуже. 670 МБ"},
-                ]
-                Rectangle {
-                    width: parent.width
-                    height: 72
-                    radius: T.radiusLg
-                    color: T.paper
-                    border.width: wiz.chosenModel === OB.pickModel(modelData.lang) ? 2 : 1
-                    border.color: wiz.chosenModel === OB.pickModel(modelData.lang)
-                                  ? T.accent : T.border
-                    Column {
-                        anchors { left: parent.left; leftMargin: 20
-                                  verticalCenter: parent.verticalCenter }
-                        width: parent.width - 40
-                        spacing: 3
-                        Text { text: modelData.title; color: T.text
-                               font.family: T.sans; font.pixelSize: T.tMd
-                               font.weight: Font.DemiBold }
-                        Text { width: parent.width; text: modelData.sub
-                               wrapMode: Text.WordWrap; color: T.textMuted
-                               font.family: T.sans; font.pixelSize: T.tSm }
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: wiz.chosenModel = OB.pickModel(modelData.lang)
-                    }
-                }
+                lineHeight: 1.4
             }
             // Прогресс скачивания выбранной модели
             Item {
@@ -483,7 +459,7 @@ Rectangle {
             property real total: 0
 
             Text {
-                text: llmStep.done ? "Готово" : "Править текст на ходу?"
+                text: llmStep.done ? "Готово" : "Осталось поставить правку текста"
                 font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
                 color: T.text
             }
@@ -491,9 +467,11 @@ Rectangle {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: llmStep.done
-                      ? "Теперь программа понимает поправки на ходу. Выключить можно в «Диктовке»."
-                      : "Скажете «встреча в пятницу, нет, в субботу» - в текст попадёт только суббота. "
-                        + "И тон под приложение: в почте строже, в чате свободнее."
+                      ? "Всё готово. Программа понимает поправки на ходу, расставляет знаки "
+                        + "препинания и умеет преобразовывать выделенный текст."
+                      : "Без неё программа работать не будет: она расставляет знаки препинания, "
+                        + "понимает поправки на ходу («встреча в пятницу, нет, в субботу» - "
+                        + "останется суббота) и преобразует выделенный текст по одному нажатию."
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
                 lineHeight: 1.4
             }
@@ -574,10 +552,11 @@ Rectangle {
                         OB.llmInstall();
                     }
                 }
-                FlowButton {
-                    label: "Не сейчас"
-                    onClicked: { llmStep.declined = true; declineTimer.restart() }
-                }
+                // Кнопки «Не сейчас» здесь больше нет намеренно. Правка текста
+                // перестала быть украшением: без неё нет ни знаков препинания
+                // (модель по умолчанию их не ставит), ни поправок на ходу, ни
+                // преобразований. Половина программы, которую человек не увидит
+                // и о которой не узнает, - хуже, чем честное «сначала поставьте».
             }
 
             // Отказ не молчит: человек должен знать, что дверь осталась
@@ -651,10 +630,16 @@ Rectangle {
         FlowButton {
             anchors { right: parent.right; rightMargin: 36; verticalCenter: parent.verticalCenter }
             kind: "primary"
+            // На последнем шаге кнопка ждёт, пока правка текста встанет: без
+            // неё модель по умолчанию отдаёт текст без единого знака препинания,
+            // и человек решит, что программа сломана. Выпускать его отсюда с
+            // такой программой нельзя.
+            enabled: !(wiz.step === wiz.last && !llmStep.done)
+            opacity: enabled ? 1 : 0.4
             label: wiz.step === 0 ? "Начать"
                  : wiz.step === 2 ? (wiz.modelReady ? "Дальше"
                                      : wiz.downloading ? "Скачивается…" : "Скачать модель")
-                 : wiz.step === wiz.last ? "Готово"
+                 : wiz.step === wiz.last ? (llmStep.done ? "Готово" : "Сначала установите")
                  : "Дальше"
             onClicked: {
                 if (wiz.step === 2 && !wiz.modelReady) {

@@ -47,124 +47,42 @@ class Model:
 CATALOG: list[Model] = [
     Model(
         id="gigaam-v2-ctc",
-        title="GigaAM v2",
+        title="Обычная",
         quant="int8",
         size_mb=236,
         langs="русский",
         device="CPU",
         license="MIT",
         url="https://huggingface.co/ai-sage/GigaAM",
-        why="Самая точная по независимому замеру. Знаки препинания ставит программа.",
+        why="Самая точная по независимому замеру. Подходит почти всем.",
     ),
     Model(
-        id="gigaam-v3-e2e-rnnt",
-        title="GigaAM",
+        id="gigaam-v2-rnnt",
+        title="Внимательная",
         quant="int8",
-        size_mb=226,
+        size_mb=238,
         langs="русский",
         device="CPU",
         license="MIT",
-        url="https://huggingface.co/ai-sage/GigaAM-v3",
-        why="Лучшая для русского: 700 000 часов речи, сама ставит пунктуацию.",
-    ),
-    Model(
-        id="nemo-parakeet-tdt-0.6b-v3",
-        title="Parakeet",
-        quant="int8",
-        size_mb=670,
-        langs="25 европейских, язык определяет сам",
-        device="CPU",
-        license="CC-BY-4.0",
-        url="https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3",
-        why="Если диктуете не только по-русски. Лицензия требует указать автора.",
-    ),
-    # Русские модели, которых у нас не было. Библиотека onnx-asr знает
-    # девятнадцать, а возили мы четыре - остальные просто ни разу не смотрели.
-    #
-    # Про пунктуацию отдельно, потому что это главная разница на глаз. Наш
-    # GigaAM v3 **e2e** сам ставит точки, запятые и пишет «10:00» цифрами. Все
-    # пятеро ниже отдают сплошную строчную строку без знаков («в десять утра»
-    # вместо «в 10:00»), кроме FastConformer - тот ставит заглавную и точку в
-    # конце. Это не поломка и не признак худшей модели: они распознают слова, а
-    # оформление - работа отдельного слоя, которого у них нет.
-    Model(
-        id="nemo-fastconformer-ru-rnnt",
-        title="FastConformer",
-        quant="int8",
-        size_mb=136,
-        langs="русский",
-        device="CPU",
-        license="CC-BY-4.0",
-        url="https://huggingface.co/istupakov/stt_ru_fastconformer_hybrid_large_pc_onnx",
-        why="Вдвое легче нашей и заметно быстрее. Ставит заглавную и точку.",
-    ),
-    Model(
-        id="t-tech/t-one",
-        title="T-one",
-        quant=None,
-        size_mb=144,
-        langs="русский",
-        device="CPU",
-        license="Apache-2.0",
-        url="https://huggingface.co/t-tech/T-one",
-        why="Российская, от Т-Банка. Знаков препинания не ставит, грузится долго.",
-    ),
-    Model(
-        id="alphacep/vosk-model-ru",
-        title="Vosk",
-        quant="int8",
-        size_mb=72,
-        langs="русский",
-        device="CPU",
-        license="Apache-2.0",
-        url="https://huggingface.co/alphacep/vosk-model-ru",
-        why="Втрое легче нашей и самая быстрая. Без знаков препинания.",
-    ),
-    Model(
-        id="alphacep/vosk-model-small-ru",
-        title="Vosk маленькая",
-        quant="int8",
-        size_mb=27,
-        langs="русский",
-        device="CPU",
-        license="Apache-2.0",
-        url="https://huggingface.co/alphacep/vosk-model-small-ru",
-        why="Самая лёгкая: 27 МБ. Для слабой машины. Без знаков препинания.",
-    ),
-    Model(
-        id="gigaam-v3-rnnt",
-        title="GigaAM без пунктуации",
-        quant="int8",
-        size_mb=226,
-        langs="русский",
-        device="CPU",
-        license="MIT",
-        url="https://huggingface.co/ai-sage/GigaAM-v3",
-        why="Та же GigaAM, но сырым текстом - если чистка мешает больше, чем помогает.",
-    ),
-    Model(
-        id="onnx-community/whisper-large-v3-turbo",
-        title="Whisper turbo",
-        quant="int8",
-        size_mb=1086,
-        langs="99 языков",
-        device="GPU",
-        license="MIT",
-        url="https://huggingface.co/onnx-community/whisper-large-v3-turbo",
-        why="Кому нужен любой язык и не жалко гигабайта. На русском ошибается вдвое чаще.",
-    ),
-    Model(
-        id="whisper-base",
-        title="Whisper base",
-        quant="int8",
-        size_mb=108,
-        langs="99 языков",
-        device="CPU",
-        license="Apache-2.0",
-        url="https://huggingface.co/istupakov/whisper-base-onnx",
-        why="Для слабого железа. Точность заметно ниже - это разменная монета.",
+        url="https://huggingface.co/ai-sage/GigaAM",
+        why="Чуть медленнее, но аккуратнее с окончаниями и редкими словами.",
     ),
 ]
+
+# Каталог намеренно из двух моделей, а был из девяти.
+#
+# Девять - это витрина, а не выбор. Человек, которому программу отдали, не
+# может отличить CTC от RNN-T и не должен: он не знает, что выбирает, и любой
+# его выбор будет случайным. А случайный выбор здесь дорог - половина моделей
+# не ставит знаков препинания, часть весит гигабайт, часть плоха на русском.
+#
+# Убраны: Parakeet и Whisper (по-русски заметно хуже, а многоязычность нужна
+# не владельцу), Vosk и T-one (легче и быстрее, но точность ниже - а после
+# разбора на ходу скорость перестала что-либо решать), GigaAM v3 (её главное
+# преимущество - собственная пунктуация - обесценилось, когда знаки стала
+# ставить сама программа).
+#
+# Достать любую из них обратно: git show <коммит>~1:models.py.
 
 BY_ID = {m.id: m for m in CATALOG}
 
@@ -178,15 +96,13 @@ def quant_for(model_id: str, fallback: str | None = "int8") -> str | None:
     return m.quant if m else fallback
 
 
-def pick(language: str | None) -> str:
-    """Автовыбор модели по языку (PLAN 2.4).
+def pick(_language: str | None = None) -> str:
+    """Какую модель ставить. Всегда одну и ту же.
 
-    Оказалось проще, чем задумывалось: спрашивать надо не про железо, а про
-    язык. Русский - всегда GigaAM, независимо от видеокарты: он и на процессоре
-    укладывается в секунду, и ошибается вдвое реже Whisper (независимый замер,
-    см. transcriber.py). Видеокарта тут ничего не решает, поэтому и вопроса про
-    неё нет.
+    Раньше здесь был выбор по языку: русский - GigaAM, остальное - Parakeet.
+    Многоязычных моделей в каталоге больше нет, и выбирать не из чего.
+
+    Функцию оставляем: её зовут мастер первого запуска и миграция конфига, и
+    ломать их ради одной строки незачем.
     """
-    if language in (None, "ru"):
-        return DEFAULT
-    return "nemo-parakeet-tdt-0.6b-v3"
+    return DEFAULT
