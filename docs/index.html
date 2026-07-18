@@ -240,23 +240,13 @@ kbd {
   <p class="sub">
     Все локальные диктовки возят Whisper, а он хорош не на всех языках.
     Мы возим <b>GigaAM v3</b> от SberDevices — 240 миллионов параметров,
-    обученных на 700 000 часах русской речи. На русском он <b>ошибается
-    примерно втрое реже</b>.
+    обученных на 700 000 часах русской речи. На русском он <b>понимает заметно
+    больше слов</b>.
   </p>
 
-  <!--
-    Полосы, а не голая таблица чисел, и это исправление настоящей ошибки.
-    Сначала здесь стояла таблица «ошибок в словах»: 8.4 % против 25.1 %.
-    Формально верно - меньше значит лучше, - но глаз хватает крупное число, а
-    не мелкий заголовок, и владелец прочитал ровно наоборот: «Whisper в пять
-    раз лучше». В строке про атипичную речь 19.2 против 59.3 и вовсе выглядело
-    разгромом не в нашу пользу.
-    Теперь направление показывает длина полосы: короче - лучше, и перепутать
-    нечем даже не читая подписей.
-  -->
   <div class="card">
     <div class="bars-head">
-      <span>Ошибки распознавания — <b>чем короче полоса, тем лучше</b></span>
+      <span>Сколько слов из ста распознаётся <b>правильно</b></span>
       <span class="legend">
         <i class="k-us"></i> GigaAM v3 (у нас)
         <i class="k-them"></i> Whisper
@@ -266,32 +256,33 @@ kbd {
     <div class="bar-row">
       <div class="bar-name">Обычная речь</div>
       <div class="bar-pair">
-        <div class="bar us" style="width: 33.5%"><span>8.4 %</span></div>
-        <div class="bar them" style="width: 100%"><span>25.1 %</span></div>
+        <div class="bar us" style="width: 91.6%"><span>92</span></div>
+        <div class="bar them" style="width: 74.9%"><span>75</span></div>
       </div>
     </div>
 
     <div class="bar-row">
       <div class="bar-name">Колл-центр</div>
       <div class="bar-pair">
-        <div class="bar us" style="width: 39.7%"><span>9.5 %</span></div>
-        <div class="bar them" style="width: 100%"><span>23.9 %</span></div>
+        <div class="bar us" style="width: 90.5%"><span>90</span></div>
+        <div class="bar them" style="width: 76.1%"><span>76</span></div>
       </div>
     </div>
 
     <div class="bar-row">
-      <div class="bar-name">Атипичная речь</div>
+      <div class="bar-name">Тихая или невнятная речь</div>
       <div class="bar-pair">
-        <div class="bar us" style="width: 32.4%"><span>19.2 %</span></div>
-        <div class="bar them" style="width: 100%"><span>59.3 %</span></div>
+        <div class="bar us" style="width: 80.8%"><span>81</span></div>
+        <div class="bar them" style="width: 40.7%"><span>41</span></div>
       </div>
     </div>
   </div>
 
   <p class="note">
-    Проще говоря: <b>на русском мы ошибаемся примерно втрое реже.</b>
-    Цифры из карточки модели GigaAM, а не наши собственные — мы их не мерили и
-    делать вид не будем. Верьте направлению, а не десятой доле.
+    Из ста слов обычной речи мы разберём девяносто два, Whisper — семьдесят пять.
+    На тихой и невнятной речи разрыв вдвое: восемьдесят одно против сорока одного.
+    Цифры пересчитаны из карточки модели GigaAM (там доля ошибок: 8.4 % против
+    25.1 %) — они не наши, мы их не мерили и делать вид не будем.
   </p>
 
   <div class="stats" style="margin-top: 26px;">
