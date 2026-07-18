@@ -71,8 +71,7 @@ def main() -> int:
             pkg["version"] = __version__
             with open(npm_pkg, "w", encoding="utf-8") as f:
                 _json.dump(pkg, f, ensure_ascii=False, indent=2)
-                f.write("
-")
+                f.write("\n")
             print(f"npm/package.json: версия -> {__version__}")
 
     cli = gh()

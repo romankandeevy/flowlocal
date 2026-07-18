@@ -27,6 +27,37 @@ REQUIRED_LICENSES = ("LICENSE", "licenses/README.txt", "licenses/Qt-LGPLv3.txt",
                      "licenses/GPLv3.txt")
 
 
+def check_syntax() -> bool:
+    """Все файлы проекта обязаны разбираться. Проверяем ДО сборки.
+
+    Дорого добытое: правка, сделанная скриптом, оставила в tools/release.py
+    оборванную строку. PyInstaller про release.py не знает и собрал пакет молча;
+    ошибка вылезла в момент выкладки, когда установщик уже был готов, а времени
+    потрачено полчаса.
+
+    Проверка стоит доли секунды и ловит целый класс поломок: несведённые
+    кавычки, битые отступы, съеденное экранирование - всё, что при обычном
+    запуске выясняется только когда до этой строки дойдёт исполнение.
+    """
+    import ast
+    import glob
+
+    bad = []
+    for path in sorted(glob.glob(os.path.join(ROOT, "*.py"))
+                       + glob.glob(os.path.join(ROOT, "tools", "*.py"))):
+        try:
+            with open(path, encoding="utf-8") as f:
+                ast.parse(f.read(), path)
+        except SyntaxError as e:
+            bad.append(f"{os.path.relpath(path, ROOT)}:{e.lineno}: {e.msg}")
+    if bad:
+        print("ПРОВАЛ: файлы не разбираются, сборка бессмысленна:")
+        for b in bad:
+            print(f"  {b}")
+        return False
+    return True
+
+
 def check_changelog() -> bool:
     """CHANGELOG должен разбираться и содержать раздел текущей версии.
 
@@ -125,6 +156,8 @@ def main() -> int:
     variant = (args[0] if args else "cpu").lower()
     if variant not in ("cpu", "cuda"):
         print("использование: python tools/build.py cpu|cuda [--installer]")
+        return 2
+    if not check_syntax():
         return 2
     if not check_licenses():
         return 2
