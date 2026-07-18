@@ -858,6 +858,10 @@ class App:
                     self.ui(self.overlay.show_processing)
                 self._last_use = time.time()
                 text = self.transcriber.transcribe(audio)
+                # Что услышала модель ДО чистки. Нужно, чтобы потом показать,
+                # что программа за вас исправила, и какое слово она путает чаще
+                # прочих, - без этого такой счёт не восстановить задним числом.
+                raw = text
                 text = clean(text, self.cfg, log, process=process)
                 # Команды - ПОСЛЕ полировки: LLM не должна их видеть, иначе
                 # перепишет или послушается, оба исхода хуже.
@@ -914,7 +918,7 @@ class App:
                     # продолжает она мысль или начинает новую.
                     self._last_insert = (process, time.time(), out) \
                         if not want_enter else None
-            self._history(text, dur)
+            self._history(text, dur, process=process, raw=raw)
             n = len(text.split())
             log(f"ok: {dur:.1f}s audio -> {len(text)} chars in {elapsed:.2f}s")
             if ok:
@@ -997,7 +1001,28 @@ class App:
         else:
             self.ui(self.overlay.show_error, "не удалось отменить")
 
-    def _history(self, text: str, dur: float) -> None:
+    def _history(self, text: str, dur: float, process: str = "",
+                 raw: str = "") -> None:
+        """Строка в history.jsonl. Ничего не пишем, если история выключена.
+
+        Кроме текста и длительности пишем ещё два поля, и оба - ради статистики
+        о том, КАК человек диктует:
+
+            app  - куда вставили ('outlook.exe'). По нему потом видно, где вы
+                   диктуете больше всего и в какое время;
+            raw  - что услышала модель до чистки. Только если отличается от
+                   итога: совпадает - писать нечего, а история и так самое
+                   тяжёлое, что мы храним.
+
+        Заводим сейчас, хотя показывать пока негде, и это осознанно: такие
+        числа считаются по накопленному. Добавь мы поля вместе с экраном - он
+        открылся бы пустым, и первые осмысленные цифры человек увидел бы через
+        месяц. Пусть копится заранее.
+
+        Новой категории данных здесь не появляется: и то и другое - part той же
+        диктовки, лежит в том же файле на той же машине и выключается тем же
+        тумблером «Вести историю».
+        """
         if not self.cfg.get("history", True):
             return
         try:
@@ -1013,6 +1038,8 @@ class App:
                             "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
                             "sec": round(dur, 1),
                             "text": text,
+                            **({"app": process} if process else {}),
+                            **({"raw": raw} if raw and raw != text else {}),
                         },
                         ensure_ascii=False,
                     )
