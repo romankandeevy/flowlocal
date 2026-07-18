@@ -728,7 +728,8 @@ class SettingsWindow:
                  history_path: str, log_path: str, on_onboarding=None,
                  update_fn=None, do_update=None) -> None:
         self.backend = Backend(on_change, on_hotkey_capture, info_fn,
-                               history_path, log_path, on_onboarding=on_onboarding)
+                               history_path, log_path, on_onboarding=on_onboarding,
+                               update_fn=update_fn, do_update=do_update)
         self.tokens = Tokens()
         self.view: QQuickView | None = None
         self._filter = _CloseFilter(self.backend.cancelCapture)

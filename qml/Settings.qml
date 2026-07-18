@@ -98,10 +98,81 @@ Rectangle {
         // Низ панели: чем диктовать. Korti кладёт сюда карточку пользователя -
         // у нас пользователя нет, а вот сочетание человек ищет постоянно, и
         // это единственное место, где оно всегда на виду.
+        //
+        // Сюда же, над сочетаниями, - предложение обновиться. Панель видна с
+        // любой страницы, поэтому новость доходит независимо от того, где
+        // человек находится. На Главной карточка этого не давала: туда ещё надо
+        // зайти. Всплывающего окна нет намеренно - диктовка работает поверх
+        // чужой работы, и выскакивать посреди неё с новостью о версии значит
+        // мешать.
         Column {
             anchors { left: parent.left; right: parent.right; bottom: parent.bottom
                       leftMargin: 24; rightMargin: 14; bottomMargin: 18 }
             spacing: 3
+
+            Item {
+                id: upd
+                property var info: B.pendingUpdate()
+                readonly property bool has: info && info.version
+                visible: has
+                width: parent.width
+                height: has ? updCol.implicitHeight + 20 : 0
+
+                Column {
+                    id: updCol
+                    width: parent.width - 8
+                    spacing: 2
+
+                    Row {
+                        spacing: 6
+                        // Точка акцентом: в Korti синий - «особенное», и
+                        // обновление ровно оно. Красный тут был бы враньём:
+                        // ничего не сломалось.
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 6; height: 6; radius: 3
+                            color: T.accent
+                        }
+                        Text {
+                            text: "Версия " + (upd.info.version || "")
+                            font.family: T.sans; font.pixelSize: T.t2xs
+                            font.weight: Font.DemiBold
+                            color: T.text
+                        }
+                    }
+                    Text {
+                        width: updCol.width
+                        wrapMode: Text.WordWrap
+                        text: upd.info.title || ""
+                        visible: text !== ""
+                        maximumLineCount: 2
+                        elide: Text.ElideRight
+                        font.family: T.sans; font.pixelSize: T.t2xs
+                        color: T.textMuted
+                        lineHeight: 1.35
+                    }
+                    Text {
+                        id: updLink
+                        text: "Обновить · " + (upd.info.size_mb || 0) + " МБ"
+                        font.family: T.sans; font.pixelSize: T.t2xs
+                        font.weight: Font.Medium
+                        font.underline: updHit.containsMouse
+                        color: T.accent
+                        MouseArea {
+                            id: updHit
+                            anchors.fill: parent
+                            anchors.margins: -4
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: B.applyUpdate()
+                        }
+                    }
+                }
+            }
+
+            // Линия одна на двоих: блок обновления и сочетания разделяет та
+            // же волосяная линия, что была тут всегда. Своя добавочная давала
+            // на экране две подряд.
             Rectangle {
                 width: parent.width - 8; height: 1; color: T.border
                 anchors.horizontalCenter: parent.horizontalCenter
@@ -192,56 +263,6 @@ Rectangle {
                 }
                 Component.onCompleted: reload()
                 onVisibleChanged: if (visible) reload()
-
-                // Обновление - первым, до всего остального: это единственное на
-                // странице, что требует действия. Раньше оно жило только в меню
-                // трея, и владелец его попросту не увидел - «мне не предложило
-                // скачать». Меню, в которое надо догадаться заглянуть, это не
-                // уведомление.
-                //
-                // Но и всплывающего окна тут нет намеренно: диктовка живёт
-                // поверх чужой работы, и выскакивать посреди неё с новостью о
-                // версии - ровно то, за что программы не любят.
-                Card {
-                    id: updCard
-                    width: parent.width
-                    property var upd: B.pendingUpdate()
-                    visible: upd && upd.version
-
-                    Item {
-                        width: parent.width
-                        implicitHeight: updCol.implicitHeight + 36
-
-                        Column {
-                            id: updCol
-                            anchors { left: parent.left; right: updBtn.left; top: parent.top
-                                      leftMargin: 20; rightMargin: 16; topMargin: 18 }
-                            spacing: 4
-                            Text {
-                                text: "Есть версия " + (updCard.upd.version || "")
-                                      + " · " + (updCard.upd.size_mb || 0) + " МБ"
-                                font.family: T.sans; font.pixelSize: T.tSm
-                                font.weight: Font.DemiBold; color: T.text
-                            }
-                            Text {
-                                width: updCol.width
-                                wrapMode: Text.WordWrap
-                                text: updCard.upd.title || "Что изменилось — в «О программе»"
-                                font.family: T.sans; font.pixelSize: T.tXs
-                                color: T.textMuted
-                                lineHeight: 1.4
-                            }
-                        }
-                        FlowButton {
-                            id: updBtn
-                            anchors { right: parent.right; rightMargin: 20
-                                      verticalCenter: parent.verticalCenter }
-                            label: "Обновить"
-                            kind: "primary"
-                            onClicked: B.applyUpdate()
-                        }
-                    }
-                }
 
                 // Первое, что человек должен узнать: как этим пользоваться.
                 // Не «состояние системы», а одна фраза действием.
