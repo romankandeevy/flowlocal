@@ -52,6 +52,13 @@ Item {
     property var    bars: []              // WAVE_BARS чисел 0..1
     property bool   shown: false
     property bool   silence: false        // запись идёт, а микрофон молчит
+    // Доля выполнения 0..1, или -1 если считать нечего. Пока её не было,
+    // скачивание обновления показывало ту же лежащую ниточку, что и
+    // распознавание фразы: «обновление 0.4.2» и всё. Человек не знал ни
+    // сколько ждать, ни идёт ли вообще что-нибудь - за 70 МБ картинка не
+    // менялась ни разу.
+    property real   progress: -1
+    readonly property bool hasProgress: isProc && progress >= 0
     // Есть ли Qt6QuickEffects.dll. Без него MultiEffect не просто не даёт
     // тени - он способен закрасить пилюлю чёрным прямоугольником. Тень это
     // украшение, пилюля - нет: рисуем её только когда эффект точно жив.
@@ -134,10 +141,33 @@ Item {
                 }
             }
 
+            // Полоса выполнения на месте осциллограммы: та же ширина, чтобы
+            // пилюля не прыгала. Заливка акцентом - обновление в Korti как раз
+            // «особенное», и той же краской подписана ссылка в панели.
+            Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.hasProgress
+                width: T.waveW
+                height: T.px(4)
+                radius: height / 2
+                color: T.fill
+                Rectangle {
+                    width: parent.width * Math.max(0, Math.min(1, root.progress))
+                    height: parent.height
+                    radius: parent.radius
+                    color: T.accent
+                    // Полоса догоняет плавно: скачки на 5% рывками читаются
+                    // как подвисание, хотя всё идёт.
+                    Behavior on width { NumberAnimation { duration: T.durBase * 1000
+                                                          easing.type: Easing.OutCubic } }
+                }
+            }
+
             // Осциллограмма - чернила: это данные, а не статус, тонировать нечем.
             Row {
                 id: wave
                 anchors.verticalCenter: parent.verticalCenter
+                visible: !root.hasProgress
                 width: T.waveW
                 height: T.waveH
                 spacing: 0
@@ -167,7 +197,7 @@ Item {
             }
             // Ниточка медленно дышит, пока модель думает, - видно, что жив.
             SequentialAnimation {
-                running: root.isProc
+                running: root.isProc && !root.hasProgress
                 loops: Animation.Infinite
                 onRunningChanged: if (!running) wave.opacity = 1
                 NumberAnimation { target: wave; property: "opacity"
@@ -207,7 +237,9 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     opacity: root.isProc && root.hint !== "" ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: T.durBase * 1000 } }
-                    text: root.hint
+                    text: root.hasProgress
+                          ? root.hint + " · " + Math.round(root.progress * 100) + "%"
+                          : root.hint
                     font.family: T.sans; font.pixelSize: T.px(T.t2xs); font.weight: Font.DemiBold
                     color: T.text
                 }

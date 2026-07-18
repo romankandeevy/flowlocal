@@ -1170,10 +1170,17 @@ class App:
 
         def work():
             try:
-                self.ui(self.overlay.show_processing)
-                self.ui(self.overlay.set_hint, f"обновление {info['version']}")
-                path = updater.download(info["url"])
+                self.ui(self.overlay.show_downloading, f"обновление {info['version']}")
+                # Прогресс шёл в никуда: download() умеет о нём докладывать, а
+                # мы вызывали его без колбэка. На экране 70 МБ выглядели как
+                # неподвижная ниточка - владелец справедливо спросил, что это
+                # за загрузка такая.
+                path = updater.download(
+                    info["url"],
+                    lambda f: self.ui(self.overlay.set_progress, f))
                 log(f"обновление скачано: {path}")
+                self.ui(self.overlay.show_downloading, "устанавливаю")
+                self.ui(self.overlay.set_progress, 1.0)
                 updater.install(path)
                 # Уходим сами: пока мы живы, установщик не заменит наш .exe.
                 self.ui(self._shutdown)

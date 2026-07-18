@@ -113,6 +113,7 @@ class Overlay(QObject):
         self._last_voice_at = 0.0
         self._silence = False
         self._position = "bottom"        # bottom | top | off
+        self._last_progress = -1.0       # чтобы не дёргать QML на каждый килобайт
 
         self.tokens = Tokens(1.0)
         self.view = QQuickView()
@@ -192,7 +193,36 @@ class Overlay(QObject):
         self._to(RECORDING)
 
     def show_processing(self) -> None:
+        self._progress(-1)
         self._to(PROCESSING)
+
+    def show_downloading(self, msg: str) -> None:
+        """«Распознаю», но с полосой: у скачивания есть измеримый конец.
+
+        Отдельным методом, а не флагом в show_processing: у распознавания
+        прогресса нет и быть не может (модель не докладывает, сколько ей
+        осталось), и делать вид, что есть, - враньё.
+        """
+        self.set_hint(msg)
+        self._progress(0.0)
+        self._to(PROCESSING)
+
+    def set_progress(self, frac: float) -> None:
+        """Доля 0..1. Зовётся часто - из потока скачивания, - поэтому в QML
+        уходит только заметное изменение: перерисовывать пилюлю на каждый
+        килобайт незачем, а GIL нужен слушателю хоткея."""
+        self._progress(frac)
+
+    def _progress(self, frac: float) -> None:
+        if frac < 0:
+            self._last_progress = -1.0
+            self.root.setProperty("progress", -1)
+            return
+        frac = max(0.0, min(1.0, float(frac)))
+        if abs(frac - self._last_progress) < 0.01 and frac < 1.0:
+            return
+        self._last_progress = frac
+        self.root.setProperty("progress", frac)
 
     def show_done(self, msg: str = "готово") -> None:
         self._msg = msg
