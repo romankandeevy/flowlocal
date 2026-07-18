@@ -246,6 +246,11 @@ Rectangle {
                 property var st: ({})
                 property var recent: []
                 property string greeting: "Главная"
+                // Находки считаются при открытии страницы и после каждого
+                // решения: список обязан отвечать на нажатие сразу, иначе
+                // человек нажмёт второй раз.
+                property var tips: []
+                function refreshTips() { home.tips = B.suggestions(); }
                 // Есть ли что показывать в числах. Пустые метрики (три «0» и
                 // прочерк) - худшее первое впечатление, поэтому до первой
                 // диктовки ряда чисел нет вовсе, только зов попробовать.
@@ -261,8 +266,79 @@ Rectangle {
                     greeting = h < 5 ? "Доброй ночи" : h < 12 ? "Доброе утро"
                              : h < 18 ? "Добрый день" : "Добрый вечер";
                 }
-                Component.onCompleted: reload()
-                onVisibleChanged: if (visible) reload()
+                Component.onCompleted: { reload(); refreshTips(); }
+                // Находки пересчитываем при каждом заходе на страницу: история
+                // растёт, пока окно закрыто, и список должен это учитывать.
+                onVisibleChanged: if (visible) { reload(); refreshTips(); }
+
+                // Что программа заметила сама. Страница «Слова» была формой,
+                // которую надо заполнять руками, - владелец назвал это функцией
+                // для айтишника, и был прав. Заполнять её теперь предлагает
+                // программа: она видит, что человек повторяет, и приносит
+                // ЗНАЧЕНИЕ. Имя даёт человек - назвать по-человечески машина не
+                // может, «roman@почта» это «моя почта» или «рабочая», знает
+                // только он.
+                Repeater {
+                    model: home.tips
+
+                    Card {
+                        width: home.width
+                        Item {
+                            width: parent.width
+                            implicitHeight: tipCol.implicitHeight + 36
+
+                            Column {
+                                id: tipCol
+                                anchors { left: parent.left; right: parent.right; top: parent.top
+                                          leftMargin: 20; rightMargin: 20; topMargin: 18 }
+                                spacing: 10
+
+                                Text {
+                                    width: parent.width
+                                    wrapMode: Text.WordWrap
+                                    text: "Вы диктовали это " + modelData.times
+                                          + (modelData.kind !== "фраза" ? " — " + modelData.kind : "")
+                                          + ". Дать короткую фразу?"
+                                    font.family: T.sans; font.pixelSize: T.tSm
+                                    font.weight: Font.DemiBold; color: T.text
+                                }
+                                Text {
+                                    width: parent.width
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 3
+                                    elide: Text.ElideRight
+                                    text: "«" + modelData.value + "»"
+                                    font.family: T.sans; font.pixelSize: T.tXs
+                                    color: T.textMuted
+                                    lineHeight: 1.4
+                                }
+                                Row {
+                                    spacing: 8
+                                    FlowInput {
+                                        id: tipName
+                                        width: 220
+                                        placeholder: "как это называть"
+                                    }
+                                    FlowButton {
+                                        label: "Запомнить"
+                                        kind: "primary"
+                                        onClicked: {
+                                            B.acceptSuggestion(tipName.text, modelData.value);
+                                            home.refreshTips();
+                                        }
+                                    }
+                                    FlowButton {
+                                        label: "Не надо"
+                                        onClicked: {
+                                            B.declineSuggestion(modelData.value);
+                                            home.refreshTips();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Первое, что человек должен узнать: как этим пользоваться.
                 // Не «состояние системы», а одна фраза действием.

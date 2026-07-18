@@ -655,6 +655,53 @@ class Backend(QObject):
             })
         return out
 
+    # ---------- подстановки, найденные по истории ----------
+
+    @Slot(result="QVariantList")
+    def suggestions(self) -> list:
+        """Что программа заметила в истории и предлагает превратить в фразу.
+
+        Считается на лету, а не хранится: история меняется каждый день, и
+        держать рядом второй файл с находками - значит завести ещё одну правду,
+        которая разъедется с первой.
+        """
+        import stats
+        import suggest
+
+        try:
+            rows = stats.load(self.history_path)
+        except OSError:
+            return []
+        found = suggest.find(rows, self.cfg.get("snippets") or {},
+                             self.cfg.get("snippets_declined") or [])
+        from util import plural
+
+        # Согласование числительного считаем здесь, а не в QML: plural() живёт
+        # в Python, и «3 раз» вместо «3 раза» - ровно та мелочь, по которой
+        # видно, что текст писала программа, а не человек.
+        return [{"value": c["value"], "count": int(c["count"]), "kind": c["kind"],
+                 "times": f"{c['count']} {plural(c['count'], 'раз', 'раза', 'раз')}"}
+                for c in found]
+
+    @Slot(str)
+    def declineSuggestion(self, value: str) -> None:
+        """«Не надо». Запоминаем навсегда: предложить то же второй раз - значит
+        не услышать ответ."""
+        declined = list(self.cfg.get("snippets_declined") or [])
+        if value and value not in declined:
+            declined.append(value)
+            self.set("snippets_declined", declined)
+
+    @Slot(str, str)
+    def acceptSuggestion(self, phrase: str, value: str) -> None:
+        """Завести подстановку: сказал «фразу» - вставилось «значение»."""
+        if not phrase.strip() or not value.strip():
+            return
+        snippets = dict(self.cfg.get("snippets") or {})
+        snippets[phrase.strip()] = value
+        self.set("snippets", snippets)
+        self.flashed.emit(f"запомнил: «{phrase.strip()}»", "accent")
+
     # ---------- правка текста: ставим Ollama за человека ----------
 
     @Slot(result=bool)
