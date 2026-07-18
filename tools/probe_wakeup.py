@@ -1,14 +1,15 @@
 """Проба слуха за пробуждением - без усыпления машины.
 
 Настоящую проверку («закрыл ноутбук, открыл, ввёл PIN, нажал хоткей») машина
-за нас не сделает, и она всё равно обязательна. Но три вещи из четырёх
-проверяются здесь и сейчас, а без них настоящая проверка просто не имеет
-смысла:
+за нас не сделает, и она всё равно обязательна. Но всё остальное проверяется
+здесь и сейчас, а без этого настоящая проверка просто не имеет смысла:
 
   1. окно создаётся и подписка на события сеанса принята системой;
   2. WM_WTSSESSION_CHANGE доходит до нашей оконной процедуры через обычный
      цикл сообщений - то есть Qt его не съест;
-  3. залипшие клавиши вычищаются.
+  3. залипшие клавиши вычищаются;
+  4. смерть служебных потоков библиотеки замечается, а поднимать их мы
+     соглашаемся только когда это безопасно.
 
 Запуск: python tools/probe_wakeup.py
 """
@@ -25,6 +26,13 @@ import keyboard  # noqa: E402
 import wakeup  # noqa: E402
 
 ok = True
+
+
+class _DeadThread:
+    """Поток, который «умер». Настоящий убить нельзя - подменяем."""
+
+    def is_alive(self):
+        return False
 
 
 def say(good: bool, text: str) -> None:
@@ -66,6 +74,31 @@ def main() -> int:
     n = wakeup.clear_stuck_keys(keyboard, lines.append)
     say(n >= 1 and not keyboard._pressed_events,
         f"залипшие клавиши вычищены (было {n})")
+
+    # --- сторож глухоты ---
+    keyboard.add_hotkey("ctrl+alt+f24", lambda: None)   # поднять слушателя
+    say(wakeup.listener_dead(keyboard) == "", "живого слушателя не считаем мёртвым")
+
+    listener = keyboard._listener
+    for attr, what in (("listening_thread", "поток хука"),
+                       ("processing_thread", "поток разбора")):
+        real = getattr(listener, attr)
+        setattr(listener, attr, _DeadThread())
+        say(bool(wakeup.listener_dead(keyboard)), f"{what} умер - заметили")
+        setattr(listener, attr, real)
+    say(wakeup.listener_dead(keyboard) == "", "после починки снова тихо")
+
+    # ЛОВУШКА, ради которой условие и сужено: пока хоть один поток жив,
+    # поднимать слушателя нельзя - получим второй хук и двойную вставку.
+    real = listener.listening_thread
+    listener.listening_thread = _DeadThread()
+    say(not wakeup.can_revive(keyboard),
+        "один поток жив - поднимать отказываемся (иначе задвоится вставка)")
+    proc = listener.processing_thread
+    listener.processing_thread = _DeadThread()
+    say(wakeup.can_revive(keyboard), "оба потока мертвы - поднять можно")
+    listener.listening_thread, listener.processing_thread = real, proc
+    say(not wakeup.can_revive(keyboard), "на живом слушателе поднимать нечего")
 
     w.stop()
     say(w.hwnd is None, "окно снято")

@@ -198,6 +198,7 @@ class App:
         self._last_use = time.time()  # когда последний раз диктовали
         self._update: dict | None = None   # свежая версия с GitHub, если нашлась
         self._wake = None            # слух за сном и разблокировкой экрана
+        self._deaf_told = ""         # про какую глухоту уже сказали
         self._hk_handles: list = []
         self._hook_handles: list = []
         self._capturing = False
@@ -1298,6 +1299,52 @@ class App:
     def ollama_busy(self) -> bool:
         return self._ollama_busy
 
+    def _check_deaf(self) -> None:
+        """Раз в минуту: не оглохли ли мы совсем.
+
+        Отказ, ради которого это написано, стоит объяснить, потому что он
+        неочевиден. Служебные потоки библиотеки `keyboard` - демоны. Умри
+        любой из них, программа продолжит работать как ни в чём не бывало:
+        окно открывается, иконка в трее на месте, настройки сохраняются. Не
+        работает только главное. Демон умирает молча, в журнале пусто.
+
+        Для программы, которую не видно, это худший вид поломки: снаружи он
+        неотличим от «я неправильно нажал». Человек будет пробовать снова и
+        снова, потом решит, что программа плохая, и удалит - так и не узнав,
+        что достаточно было перезапустить.
+
+        Поэтому: замечаем, говорим вслух и пробуем собраться заново. Молчать
+        нельзя даже когда починить не вышло - сказать «оглох» полезнее, чем не
+        сказать ничего.
+        """
+        why = wakeup.listener_dead(keyboard)
+        if not why or self._recording or self._capturing:
+            return
+        if self._deaf_told == why:
+            return          # уже сказали и уже пробовали - не долбить каждую минуту
+        self._deaf_told = why
+        log(f"ОГЛОХ: {why}")
+        if wakeup.can_revive(keyboard):
+            try:
+                wakeup.revive(keyboard, log)
+                self._hotkey_unbind()
+                self._hotkey_bind()
+            except Exception as e:  # noqa: BLE001
+                log(f"поднять не вышло: {type(e).__name__}: {e}")
+            if not wakeup.listener_dead(keyboard):
+                log("хоткеи снова живы")
+                self._deaf_told = ""
+                return
+        else:
+            # Половина потоков жива - поднимать нельзя, будет второй хук и
+            # двойная вставка. Честно говорим человеку и не чиним наугад.
+            log("поднять нельзя без риска задвоить вставку - прошу перезапуск")
+        if self.tray is not None:
+            self.tray.showMessage(
+                "Диктовка не отвечает",
+                "Горячие клавиши перестали работать. Перезапустите программу: "
+                "правый клик по значку - «Выйти», потом откройте заново.")
+
     def _maybe_unload_model(self) -> None:
         """Отпустить модель, если ей давно не пользовались.
 
@@ -1564,6 +1611,7 @@ class App:
         # на каждую диктовку.
         self._idle_timer = QTimer()
         self._idle_timer.timeout.connect(self._maybe_unload_model)
+        self._idle_timer.timeout.connect(self._check_deaf)
         self._idle_timer.start(60 * 1000)
         if not self.cfg.get("onboarded"):
             # Первый запуск: без мастера человек видит только иконку в трее и

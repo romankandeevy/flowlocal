@@ -151,6 +151,63 @@ class WakeWatcher:
         self._registered = False
 
 
+def listener_dead(keyboard) -> str:
+    """Проверить, слышит ли нас библиотека вообще. "" - слышит.
+
+    Отдельный класс отказа, не связанный со сном: у `keyboard` два служебных
+    потока - один сидит на низкоуровневом хуке, второй разбирает очередь. Оба
+    демоны. Умри любой из них от необработанного исключения - программа
+    остаётся жива, иконка в трее на месте, а хоткей не работает больше никогда.
+    Ни ошибки, ни записи в журнале: поток-демон умирает молча.
+
+    Снаружи это тот же симптом, что и залипание после сна, - «нажимаю, ничего
+    не происходит», - поэтому проверка живёт здесь же.
+
+    Чего эта проверка НЕ ловит, и это честно: если Windows сняла наш хук сама
+    (так бывает, когда обработчик не уложился в LowLevelHooksTimeout), поток
+    остаётся жив и висит в GetMessage. Изнутри библиотеки такое не отличить от
+    исправной работы. Способа нет - и придумывать вид, что он есть, не надо.
+    """
+    listener = getattr(keyboard, "_listener", None)
+    if listener is None or not getattr(listener, "listening", False):
+        return "" if listener is None else "слушатель клавиатуры не запущен"
+    for attr, what in (("listening_thread", "поток хука клавиатуры"),
+                       ("processing_thread", "поток разбора нажатий")):
+        t = getattr(listener, attr, None)
+        if t is not None and not t.is_alive():
+            return f"{what} умер"
+    return ""
+
+
+def can_revive(keyboard) -> bool:
+    """Можно ли поднять слушателя заново, не рискуя вторым хуком.
+
+    Условие намеренно узкое: оба служебных потока мертвы. Тогда поднимать
+    некому и дублировать нечего.
+
+    Почему не пробовать шире. `start_if_necessary()` смотрит на флаг
+    `listening`, а флаг остаётся True и после смерти потоков. Сбросить его при
+    живом потоке значит завести ВТОРОЙ хук поверх первого - и каждая диктовка
+    станет вставляться дважды. Этот класс поломки в проекте уже был, на него
+    даже написан `tools/repro_double_insert.py`. Половина живых потоков - это
+    случай «сказать человеку», а не «чинить наугад».
+    """
+    listener = getattr(keyboard, "_listener", None)
+    if listener is None:
+        return False
+    threads = [getattr(listener, a, None)
+               for a in ("listening_thread", "processing_thread")]
+    threads = [t for t in threads if t is not None]
+    return bool(threads) and all(not t.is_alive() for t in threads)
+
+
+def revive(keyboard, log) -> None:
+    """Поднять слушателя заново. Звать только после can_revive()."""
+    listener = keyboard._listener
+    listener.listening = False      # иначе start_if_necessary() сочтёт, что всё уже идёт
+    log("поднимаю слушателя клавиатуры заново")
+
+
 def clear_stuck_keys(keyboard, log) -> int:
     """Забыть клавиши, которые библиотека считает зажатыми.
 
