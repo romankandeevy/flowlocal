@@ -145,12 +145,31 @@ h2 {
 .stat .hint { font-size: 12px; color: var(--text-muted); line-height: 1.45; }
 
 /* ---------- сравнение ---------- */
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { text-align: left; padding: 13px 12px; border-bottom: 1px solid var(--border); }
-th { font-weight: 500; font-size: 12px; color: var(--text-muted); }
-td.num { font-family: var(--mono); font-size: 13px; }
-tr:last-child td { border-bottom: 0; }
-.win { color: var(--success); font-weight: 500; }
+.bars-head {
+  display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  font-size: 13px; color: var(--text-secondary);
+  padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 6px;
+}
+.bars-head b { color: var(--text); font-weight: 500; }
+.legend { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--text-muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.k-us { background: var(--text); }
+.k-them { background: var(--fill); border: 1px solid var(--border-strong); }
+
+.bar-row { padding: 14px 0; border-bottom: 1px solid var(--border); }
+.bar-row:last-child { border-bottom: 0; }
+.bar-name { font-size: 14px; margin-bottom: 9px; }
+.bar-pair { display: flex; flex-direction: column; gap: 6px; }
+.bar {
+  height: 26px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: flex-end;
+  padding-right: 10px; min-width: 74px;
+}
+.bar span { font: 500 12px var(--mono); font-variant-numeric: tabular-nums; }
+.bar.us { background: var(--text); }
+.bar.us span { color: var(--bg); }
+.bar.them { background: var(--fill); border: 1px solid var(--border); }
+.bar.them span { color: var(--text-muted); }
 
 /* ---------- цитата ---------- */
 blockquote {
@@ -221,36 +240,58 @@ kbd {
   <p class="sub">
     Все локальные диктовки возят Whisper, а он хорош не на всех языках.
     Мы возим <b>GigaAM v3</b> от SberDevices — 240 миллионов параметров,
-    обученных на 700 000 часах русской речи.
+    обученных на 700 000 часах русской речи. На русском он <b>ошибается
+    примерно втрое реже</b>.
   </p>
 
-  <div class="card" style="padding: 6px 18px;">
-    <table>
-      <tr>
-        <th>Ошибок в словах, среднее по доменам</th>
-        <th style="text-align:right">GigaAM v3</th>
-        <th style="text-align:right">Whisper</th>
-      </tr>
-      <tr>
-        <td>Обычная речь</td>
-        <td class="num win" style="text-align:right">8.4 %</td>
-        <td class="num" style="text-align:right">25.1 %</td>
-      </tr>
-      <tr>
-        <td>Колл-центр</td>
-        <td class="num win" style="text-align:right">9.5 %</td>
-        <td class="num" style="text-align:right">23.9 %</td>
-      </tr>
-      <tr>
-        <td>Атипичная речь</td>
-        <td class="num win" style="text-align:right">19.2 %</td>
-        <td class="num" style="text-align:right">59.3 %</td>
-      </tr>
-    </table>
+  <!--
+    Полосы, а не голая таблица чисел, и это исправление настоящей ошибки.
+    Сначала здесь стояла таблица «ошибок в словах»: 8.4 % против 25.1 %.
+    Формально верно - меньше значит лучше, - но глаз хватает крупное число, а
+    не мелкий заголовок, и владелец прочитал ровно наоборот: «Whisper в пять
+    раз лучше». В строке про атипичную речь 19.2 против 59.3 и вовсе выглядело
+    разгромом не в нашу пользу.
+    Теперь направление показывает длина полосы: короче - лучше, и перепутать
+    нечем даже не читая подписей.
+  -->
+  <div class="card">
+    <div class="bars-head">
+      <span>Ошибки распознавания — <b>чем короче полоса, тем лучше</b></span>
+      <span class="legend">
+        <i class="k-us"></i> GigaAM v3 (у нас)
+        <i class="k-them"></i> Whisper
+      </span>
+    </div>
+
+    <div class="bar-row">
+      <div class="bar-name">Обычная речь</div>
+      <div class="bar-pair">
+        <div class="bar us" style="width: 33.5%"><span>8.4 %</span></div>
+        <div class="bar them" style="width: 100%"><span>25.1 %</span></div>
+      </div>
+    </div>
+
+    <div class="bar-row">
+      <div class="bar-name">Колл-центр</div>
+      <div class="bar-pair">
+        <div class="bar us" style="width: 39.7%"><span>9.5 %</span></div>
+        <div class="bar them" style="width: 100%"><span>23.9 %</span></div>
+      </div>
+    </div>
+
+    <div class="bar-row">
+      <div class="bar-name">Атипичная речь</div>
+      <div class="bar-pair">
+        <div class="bar us" style="width: 32.4%"><span>19.2 %</span></div>
+        <div class="bar them" style="width: 100%"><span>59.3 %</span></div>
+      </div>
+    </div>
   </div>
+
   <p class="note">
-    Цифры из карточки модели, а не наши: мы их не мерили и делать вид не будем.
-    Верьте направлению, а не десятой доле.
+    Проще говоря: <b>на русском мы ошибаемся примерно втрое реже.</b>
+    Цифры из карточки модели GigaAM, а не наши собственные — мы их не мерили и
+    делать вид не будем. Верьте направлению, а не десятой доле.
   </p>
 
   <div class="stats" style="margin-top: 26px;">
