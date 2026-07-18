@@ -139,42 +139,19 @@ class _Extra(QObject):
 
     @Slot()
     def llmInstall(self) -> None:
-        """Скачать, поставить, забрать модель, включить полировку.
+        """Установку ведёт приложение, а не мастер.
 
-        В потоке: это гигабайты и минуты, главный поток на этом держать нельзя -
-        замёрзнет и мастер, и хоткей. Сигналы из чужого потока Qt кладёт в
-        очередь получателя сам, поэтому здесь можно эмитить напрямую.
+        Мастер закроют раньше, чем докачаются три гигабайта, - и вместе с ним
+        исчезли бы и полоса, и всякий признак работы. У App хозяин один, ход
+        видно на пилюле поверх всех окон, а мы подписываемся, пока открыты.
         """
-        if self._llm_busy:
-            return
-        self._llm_busy = True
+        self._app.install_ollama(self._llm_stage)
 
-        import ollama_setup as O
-
-        def work() -> None:
-            try:
-                ok = O.ensure(
-                    on_stage=lambda st, fr, tot: self.llmStage.emit(st, fr, float(tot)),
-                    log=self._log)
-            except Exception as e:  # noqa: BLE001 - установка не должна ронять мастер
-                self._log(f"ollama install failed: {e}")
-                ok = False
-            if ok:
-                # Человек нажал «да» - значит решение принято, и спрашивать его
-                # второй раз (llm.enabled = None -> автопоиск) уже незачем.
-                llm = self._app.cfg.setdefault("llm", {})
-                llm["enabled"] = True
-                llm["model"] = O.DEFAULT_MODEL
-                import config as C
-
-                try:
-                    C.save(self._app.cfg)
-                except OSError:
-                    pass
-            self._llm_busy = False
-            self.llmDone.emit(bool(ok))
-
-        threading.Thread(target=work, daemon=True).start()
+    def _llm_stage(self, stage: str, frac: float, total: float, done) -> None:
+        if done is None:
+            self.llmStage.emit(stage, frac, float(total))
+        else:
+            self.llmDone.emit(bool(done))
 
     @Slot()
     def finish(self) -> None:

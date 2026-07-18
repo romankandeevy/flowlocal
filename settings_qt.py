@@ -77,7 +77,8 @@ class Backend(QObject):
 
     def __init__(self, on_change, on_hotkey_capture, info_fn,
                  history_path: str, log_path: str, on_onboarding=None,
-                 update_fn=None, do_update=None) -> None:
+                 update_fn=None, do_update=None,
+                 llm_install=None, llm_busy=None) -> None:
         super().__init__()
         self._on_change = on_change
         self._on_hotkey_capture = on_hotkey_capture
@@ -85,6 +86,8 @@ class Backend(QObject):
         self._on_onboarding = on_onboarding
         self._update_fn = update_fn
         self._do_update = do_update
+        self._llm_install = llm_install
+        self._llm_busy_fn = llm_busy
         self.history_path = history_path
         self.log_path = log_path
         self.cfg = C.load()
@@ -663,43 +666,34 @@ class Backend(QObject):
 
     @Slot()
     def llmInstall(self) -> None:
-        """Скачать Ollama, поставить, забрать модель, включить полировку.
+        """Попросить приложение поставить Ollama и слушать ход.
 
-        В потоке: это гигабайты и минуты. Сигналы из чужого потока Qt кладёт в
-        очередь получателя сам - в этом весь смысл сигналов, руками к QML
-        отсюда прикасаться нельзя.
+        Своего потока здесь больше нет намеренно. Раньше качали двое - это
+        окно и мастер первого запуска, - и нажатие в обоих местах давало две
+        качалки на одну машину. Плюс ход установки жил внутри окна: закрыл -
+        и не знаешь, идёт ли что-нибудь, хотя три гигабайта качаются минутами.
+
+        Теперь хозяин один (App.install_ollama), ход показывает пилюля поверх
+        всех окон, а мы лишь подписываемся, чтобы нарисовать полосу у себя.
         """
-        if getattr(self, "_llm_busy", False):
+        if self._llm_install is None:
             return
-        self._llm_busy = True
+        self._llm_install(self._llm_stage)
 
-        import ollama_setup as O
+    def _llm_stage(self, stage: str, frac: float, total: float, done) -> None:
+        """Колбэк из потока установки. Сигнал сам перебросит в главный поток."""
+        if done is None:
+            self.llmStage.emit(stage, frac, float(total))
+        else:
+            self.llmDone.emit(bool(done))
 
-        def work() -> None:
-            try:
-                ok = O.ensure(
-                    on_stage=lambda st, fr, tot: self.llmStage.emit(st, fr, float(tot)),
-                    log=self._llm_log)
-            except Exception as e:  # noqa: BLE001 - установка не роняет настройки
-                self._llm_log(f"ollama install failed: {e}")
-                ok = False
-            if ok:
-                # Нажал кнопку - решение принято. Автопоиск (llm.enabled = None)
-                # больше не при чём.
-                self.set("llm.enabled", True)
-                self.set("llm.model", O.DEFAULT_MODEL)
-            self._llm_busy = False
-            self.llmDone.emit(bool(ok))
+    @Slot(result=bool)
+    def llmBusy(self) -> bool:
+        """Идёт ли установка прямо сейчас. Нужно окну, открытому посреди неё:
+        без этого оно показало бы кнопку «Установить», как будто ничего не
+        происходит, и человек нажал бы второй раз."""
+        return bool(self._llm_busy_fn()) if self._llm_busy_fn else False
 
-        threading.Thread(target=work, daemon=True).start()
-
-    def _llm_log(self, msg: str) -> None:
-        try:
-            import app as _app
-
-            _app.log(msg)
-        except Exception:  # noqa: BLE001 - лог не должен ронять установку
-            pass
 
 
 class _CloseFilter(QObject):
@@ -726,10 +720,12 @@ class SettingsWindow:
 
     def __init__(self, on_change, on_hotkey_capture, info_fn,
                  history_path: str, log_path: str, on_onboarding=None,
-                 update_fn=None, do_update=None) -> None:
+                 update_fn=None, do_update=None,
+                 llm_install=None, llm_busy=None) -> None:
         self.backend = Backend(on_change, on_hotkey_capture, info_fn,
                                history_path, log_path, on_onboarding=on_onboarding,
-                               update_fn=update_fn, do_update=do_update)
+                               update_fn=update_fn, do_update=do_update,
+                               llm_install=llm_install, llm_busy=llm_busy)
         self.tokens = Tokens()
         self.view: QQuickView | None = None
         self._filter = _CloseFilter(self.backend.cancelCapture)

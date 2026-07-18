@@ -567,51 +567,116 @@ Rectangle {
                     // качать, ни слова про сервер. Владелец сказал прямо, что
                     // даже он не знает, как это сделать, - значит функции не
                     // существовало, сколько бы кода за ней ни стояло.
+                    //
+                    // Строка не исчезает после установки: человеку нужно
+                    // видеть, что всё на месте, а не догадываться по отсутствию
+                    // кнопки. Состояние показывает цвет - зелёный «скачано»,
+                    // синий «качается», красный «не скачано или не вышло».
                     SettingRow {
                         id: llmSetup
-                        visible: !ready
+
                         property bool ready: B.llmReady()
-                        property bool busy: false
+                        property bool busy: B.llmBusy()
                         property bool failed: false
                         property string stage: ""
                         property real frac: 0
                         property real total: 0
 
-                        title: busy ? stage : "Установить правку текста"
-                        subtitle: busy
+                        readonly property color tone: ready ? T.success
+                                                    : busy  ? T.accent
+                                                            : T.danger
+                        readonly property string word: ready ? "скачано"
+                                                     : busy  ? (stage || "качается")
+                                                     : failed ? "не вышло"
+                                                             : "не скачано"
+
+                        title: "Правка текста на ходу"
+                        subtitle: ready
+                            ? "Ollama и модель на месте. Самоисправления и тон работают"
+                            : busy
                             ? (total > 0
                                ? Math.round(frac * 100) + "% из " + (total / 1e9).toFixed(1) + " ГБ"
                                : "идёт установка, диктовке это не мешает")
                             : failed
-                            ? "Не получилось. Диктовка работает и без этого"
+                            ? "Диктовка работает и без этого — попробуйте ещё раз"
                             : "Скачаем Ollama и модель к ней — 3.3 ГБ. Всё останется на этом компьютере"
 
-                        FlowButton {
-                            visible: !llmSetup.busy
-                            label: llmSetup.failed ? "Ещё раз" : "Установить"
-                            kind: "primary"
-                            onClicked: {
-                                llmSetup.failed = false;
-                                llmSetup.busy = true;
-                                llmSetup.stage = "начинаю";
-                                llmSetup.frac = 0;
-                                llmSetup.total = 0;
-                                B.llmInstall();
-                            }
-                        }
-                        Rectangle {
-                            visible: llmSetup.busy
-                            width: 220; height: 6; radius: 3; color: T.fill
+                        // Всё в один Row, и это не вкусовщина: holder в
+                        // SettingRow кладёт детей друг на друга, без раскладки.
+                        // Когда полоса и надпись были отдельными детьми, они
+                        // налезали одна на другую - видно только на снимке.
+                        Row {
+                            spacing: 12
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            // Полоса - только пока качается, и той же краской,
+                            // что точка: одно состояние одним цветом.
                             Rectangle {
-                                width: parent.width * Math.max(0, Math.min(1, llmSetup.frac))
-                                height: parent.height; radius: 3; color: T.accent
-                                Behavior on width { NumberAnimation { duration: T.durBase * 1000 } }
+                                visible: llmSetup.busy
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 130; height: 6; radius: 3; color: T.fill
+                                Rectangle {
+                                    width: parent.width * Math.max(0, Math.min(1, llmSetup.frac))
+                                    height: parent.height; radius: 3; color: T.accent
+                                    Behavior on width {
+                                        NumberAnimation { duration: T.durBase * 1000
+                                                          easing.type: Easing.OutCubic }
+                                    }
+                                }
+                            }
+
+                            // Значок состояния: точка цветом плюс слово. Одной
+                            // точки мало - цвет читают не все и не всегда, а
+                            // «скачано» однозначно.
+                            Row {
+                                spacing: 7
+                                anchors.verticalCenter: parent.verticalCenter
+                                Rectangle {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 8; height: 8; radius: 4
+                                    color: llmSetup.tone
+                                    Behavior on color {
+                                        ColorAnimation { duration: T.durBase * 1000 }
+                                    }
+                                    // Пока качается - пульс: неподвижная точка
+                                    // не отличается от готовой, а ждать минуты.
+                                    SequentialAnimation on opacity {
+                                        running: llmSetup.busy; loops: Animation.Infinite
+                                        NumberAnimation { from: 0.4; to: 1; duration: 900
+                                                          easing.type: Easing.InOutSine }
+                                        NumberAnimation { from: 1; to: 0.4; duration: 900
+                                                          easing.type: Easing.InOutSine }
+                                    }
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: llmSetup.word
+                                    font.family: T.sans; font.pixelSize: T.tXs
+                                    font.weight: Font.Medium
+                                    color: llmSetup.tone
+                                }
+                            }
+
+                            FlowButton {
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: !llmSetup.busy && !llmSetup.ready
+                                label: llmSetup.failed ? "Ещё раз" : "Установить"
+                                kind: "primary"
+                                onClicked: {
+                                    llmSetup.failed = false;
+                                    llmSetup.busy = true;
+                                    llmSetup.stage = "начинаю";
+                                    llmSetup.frac = 0;
+                                    llmSetup.total = 0;
+                                    B.llmInstall();
+                                }
                             }
                         }
 
                         Connections {
                             target: B
                             function onLlmStage(stage, frac, total) {
+                                llmSetup.busy = true;
                                 llmSetup.stage = stage;
                                 llmSetup.frac = frac;
                                 llmSetup.total = total;

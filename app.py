@@ -190,6 +190,8 @@ class App:
         self._ready = False
         self._llm_note = ""          # модель Ollama, найденная автоопределением
         self._update_told = ""       # про какую версию уже сказали шариком
+        self._ollama_busy = False    # идёт ли установка Ollama
+        self._ollama_subs: list = []  # окна, которые хотят видеть ход
         self._update: dict | None = None   # свежая версия с GitHub, если нашлась
         self._hk_handles: list = []
         self._hook_handles: list = []
@@ -863,7 +865,9 @@ class App:
                 self._info, HISTORY_PATH, LOG_PATH,
                 on_onboarding=self._open_onboarding,
                 update_fn=lambda: self._update,
-                do_update=self._do_update)
+                do_update=self._do_update,
+                llm_install=self.install_ollama,
+                llm_busy=self.ollama_busy)
         self.settings.open()
 
     def _open_onboarding(self) -> None:
@@ -1189,6 +1193,68 @@ class App:
                 self.ui(self.overlay.show_error, "не удалось обновить")
 
         threading.Thread(target=work, daemon=True).start()
+
+    # ---------- установка Ollama: один хозяин на всё приложение ----------
+
+    def install_ollama(self, on_stage=None) -> None:
+        """Поставить Ollama и модель. Зовётся из настроек и из мастера.
+
+        Хозяин один, и это главное в этой функции. Раньше установку запускали
+        двое - Backend настроек и _Extra мастера, - каждый своим потоком и со
+        своими сигналами. Отсюда две беды: нажать «Установить» можно было
+        дважды и получить две качалки на одну машину, а закрыв окно, человек
+        терял и полосу, и всякий признак того, что что-то идёт. Три гигабайта
+        качаются минутами - окно за это время закроют обязательно.
+
+        Поэтому ход показывает пилюля: она поверх всех окон и переживает
+        закрытие любого из них. Подписчики (окна, пока открыты) получают то же
+        самое своим колбэком и рисуют полосу у себя.
+        """
+        import ollama_setup as O
+
+        if on_stage is not None and on_stage not in self._ollama_subs:
+            self._ollama_subs.append(on_stage)
+        if self._ollama_busy:
+            return                      # уже качаем - второй раз не начинаем
+        self._ollama_busy = True
+
+        def tell(stage: str, frac: float, total: float, done=None) -> None:
+            for cb in list(self._ollama_subs):
+                try:
+                    cb(stage, frac, total, done)
+                except Exception:  # noqa: BLE001 - окно могли закрыть
+                    self._ollama_subs.remove(cb)
+
+        def stage(name: str, frac: float, total: float) -> None:
+            self.ui(self.overlay.show_downloading, name)
+            self.ui(self.overlay.set_progress, frac)
+            self.ui(tell, name, frac, total, None)
+
+        def work() -> None:
+            ok = False
+            try:
+                ok = O.ensure(on_stage=stage, log=log)
+            except Exception as e:  # noqa: BLE001 - установка не роняет диктовку
+                log(f"ollama install failed: {e}")
+            if ok:
+                llm = self.cfg.setdefault("llm", {})
+                llm["enabled"] = True
+                llm["model"] = O.DEFAULT_MODEL
+                try:
+                    C.save(self.cfg)
+                except OSError:
+                    pass
+                self._llm_note = O.DEFAULT_MODEL
+            self._ollama_busy = False
+            # Итог виден и без окна: пилюля скажет «готово» или «не удалось».
+            self.ui(self.overlay.show_done if ok else self.overlay.show_error,
+                    "правка текста готова" if ok else "не удалось поставить")
+            self.ui(tell, "готово" if ok else "не удалось", 1.0 if ok else 0.0, 0, ok)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def ollama_busy(self) -> bool:
+        return self._ollama_busy
 
     def _autoconfig_llm_bg(self) -> None:
         """Есть ли у человека Ollama - выясняем сами, а не спрашиваем.
