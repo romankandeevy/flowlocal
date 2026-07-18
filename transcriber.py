@@ -194,7 +194,80 @@ class Transcriber:
 
     # ---------- распознавание ----------
 
-    def transcribe(self, audio: np.ndarray) -> str:
+    # У модели ЖЁСТКИЙ потолок длины, и стоил он дорого: владелец надиктовал
+    # пятнадцать минут - около тысячи слов - и потерял их целиком.
+    #
+    #   process error: [ONNXRuntimeError] Mul node '/layers.0/self_attn/Mul_1'
+    #   Attempting to broadcast an axis by a dimension other than 1. 5000 by 21336
+    #
+    # Позиционные коды в самовнимании энкодера рассчитаны на 5000 кадров. Кадр
+    # после свёрточного прореживания - 40 мс, то есть предел ровно 200 секунд.
+    # Его 21336 кадров - это 853 секунды, те самые четырнадцать с лишним минут.
+    # Всё длиннее 3 минут 20 секунд падало ВСЕГДА, с первого дня.
+    #
+    # Но одного потолка мало, и вторая беда нашлась замером. Самовнимание
+    # держит матрицу «каждый кадр против каждого», то есть памяти нужно КВАДРАТ
+    # от длины куска. На 150 секундах onnxruntime просит 792 МБ одним куском:
+    #
+    #   Failed to allocate memory for requested buffer of size 792084736
+    #
+    # То есть пятнадцать минут упали бы и по памяти, даже не будь потолка длины.
+    # На машине с исчерпанным файлом подкачки это ломается и на свободной
+    # физической памяти.
+    #
+    # 60 секунд вместо 150 - это в шесть с лишним раз меньше памяти (около
+    # 130 МБ вместо 792) и вчетверо запас до потолка модели. Платы за это нет:
+    # резы всё равно ложатся в паузы между фразами, а качество куска от его
+    # длины не зависит - модель не авторегрессивная, контекст ей через границу
+    # не нужен.
+    _MAX_SEC = 60.0
+    # Где искать тишину для реза. Резать по счётчику нельзя: разрез посреди
+    # слова даёт две половинки, которых модель не узнает ни ту, ни другую.
+    # Зона поиска паузы - 8 секунд при куске в 60. Больше делать нельзя: рез
+    # уехал бы слишком далеко от границы, и куски вышли бы очень разной длины.
+    _SEEK_SEC = 8.0
+
+    def _cut_points(self, audio: np.ndarray) -> list[int]:
+        """Границы кусков: не длиннее предела, рез - в самом тихом месте.
+
+        Тишину ищем окном в 30 мс по средней громкости и берём минимум в зоне
+        поиска перед границей. Это не разбор речи, а именно «где потише»: между
+        фразами человек делает паузу, и попасть в неё достаточно, чтобы не
+        разрубить слово пополам.
+        """
+        step = int(self._MAX_SEC * SAMPLE_RATE)
+        seek = int(self._SEEK_SEC * SAMPLE_RATE)
+        # Окно в 200 мс, а не в 30: ищем не «мгновение потише», а паузу между
+        # фразами. С коротким окном самым тихим оказывался первый же тихий
+        # отрезок, и рез вставал ровно на границу «речь кончилась» - с нулевым
+        # запасом. Хвостовой согласный от такого реза отрезается.
+        win = int(0.2 * SAMPLE_RATE)
+        points, pos = [], 0
+        while audio.size - pos > step:
+            hard = pos + step
+            start = max(pos, hard - seek)
+            zone = audio[start:hard]
+            if zone.size >= win * 2:
+                # Средняя громкость по окнам; argmin - самая тихая пауза.
+                n = zone.size // win
+                power = np.abs(zone[:n * win].reshape(n, win)).mean(axis=1)
+                # Режем по СЕРЕДИНЕ тихого окна: так запас есть с обеих сторон.
+                cut = start + int(np.argmin(power)) * win + win // 2
+            else:
+                cut = hard
+            # Защита от вырождения: рез обязан двигать нас вперёд, иначе
+            # цикл встанет намертво на файле из одной тишины.
+            cut = max(cut, pos + step // 2)
+            points.append(cut)
+            pos = cut
+        return points
+
+    def transcribe(self, audio: np.ndarray, on_part=None) -> str:
+        """Распознать запись. Длинную режем на куски и склеиваем.
+
+        on_part(номер, всего) - если передан, зовётся перед каждым куском:
+        человеку, наговорившему десять минут, надо видеть, что работа идёт.
+        """
         if self.model is None:
             raise RuntimeError("модель ещё не загружена")
         if audio.size < SAMPLE_RATE // 20:   # <50 мс: распознавать нечего
@@ -203,4 +276,27 @@ class Transcriber:
         name = str(self.cfg.get("model") or DEFAULT_MODEL).lower()
         if any(m in name for m in _LANG_MODELS) and self.cfg.get("language"):
             opts["language"] = self.cfg["language"]
-        return str(self.model.recognize(audio, sample_rate=SAMPLE_RATE, **opts) or "").strip()
+
+        cuts = self._cut_points(audio)
+        if not cuts:
+            return self._one(audio, opts)
+
+        bounds = [0, *cuts, audio.size]
+        total = len(bounds) - 1
+        self.log(f"запись {audio.size / SAMPLE_RATE:.0f} с - режу на {total} "
+                 f"частей (предел модели 200 с)")
+        parts = []
+        for i in range(total):
+            if on_part is not None:
+                on_part(i + 1, total)
+            piece = audio[bounds[i]:bounds[i + 1]]
+            got = self._one(piece, opts)
+            if got:
+                parts.append(got)
+        # Пробел между кусками, а не пустая строка: это одна речь, разрезанная
+        # нами, и склеивать её надо так, будто разреза не было.
+        return " ".join(parts).strip()
+
+    def _one(self, audio: np.ndarray, opts: dict) -> str:
+        return str(self.model.recognize(audio, sample_rate=SAMPLE_RATE,
+                                        **opts) or "").strip()

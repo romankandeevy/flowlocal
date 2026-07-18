@@ -60,6 +60,9 @@ jobs:
       - name: преобразования текста
         run: python test_transforms.py
 
+      - name: длинная запись
+        run: python test_long.py
+
       - name: вопрос по интонации
         run: python test_intonation.py
 

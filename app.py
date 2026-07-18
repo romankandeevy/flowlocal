@@ -94,6 +94,7 @@ import models  # noqa: E402
 import overlay_qt as OV  # noqa: E402
 import theme as T  # noqa: E402
 import updater  # noqa: E402
+import recordings  # noqa: E402
 import transforms  # noqa: E402
 import wakeup  # noqa: E402
 from version import __version__  # noqa: E402
@@ -842,6 +843,15 @@ class App:
         try:
             # лок держим на весь конвейер, включая вставку: если распознать
             # вторую фразу, пока вставляется первая, текст уедет не в том порядке
+            # Звук на диск ДО распознавания. Стоило это пятнадцати минут чужой
+            # работы: распознавание упало, исключение ушло в лог, а запись жила
+            # только в этой переменной - и исчезла вместе с ней. Ни текста, ни
+            # звука, ни возможности повторить.
+            #
+            # Теперь при любом падении дальше по конвейеру wav остаётся на
+            # диске, и его можно распознать заново. При успехе файл стирается
+            # тут же и места не занимает.
+            saved = recordings.save(audio)
             with self._work_lock:
                 t0 = time.time()
                 # Кто в фокусе - спрашиваем ДО распознавания, а не после: пока
@@ -857,7 +867,9 @@ class App:
                     self.transcriber.load()
                     self.ui(self.overlay.show_processing)
                 self._last_use = time.time()
-                text = self.transcriber.transcribe(audio)
+                text = self.transcriber.transcribe(
+                    audio, on_part=lambda i, n: self.ui(
+                        self.overlay.show_downloading, f"часть {i} из {n}"))
                 # Что услышала модель ДО чистки. Нужно, чтобы потом показать,
                 # что программа за вас исправила, и какое слово она путает чаще
                 # прочих, - без этого такой счёт не восстановить задним числом.
@@ -922,14 +934,29 @@ class App:
             n = len(text.split())
             log(f"ok: {dur:.1f}s audio -> {len(text)} chars in {elapsed:.2f}s")
             if ok:
+                # Текст доехал - запись больше не нужна. Стираем ТОЛЬКО здесь:
+                # любой другой исход означает, что её ещё можно спасти.
+                recordings.drop(saved)
+                saved = ""
                 self.ui(self.overlay.show_done,
                         f"{n} {plural(n, 'слово', 'слова', 'слов')}")
             else:
                 self.ui(self.overlay.show_error, "не удалось вставить")
         except Exception as e:  # noqa: BLE001
             log(f"process error: {e}")
-            self.ui(self.overlay.show_error, "не получилось - нажмите ещё раз")
+            if saved:
+                # Молчать здесь нельзя. Человек, наговоривший десять минут,
+                # должен узнать, что его речь цела, - иначе он решит, что
+                # работа пропала, и будет прав ровно наполовину.
+                log(f"запись сохранена: {saved}")
+                self.ui(self.overlay.show_error,
+                        "не вышло - запись цела, см. «О программе»")
+                self.ui(self._tell_saved, dur)
+            else:
+                self.ui(self.overlay.show_error, "не получилось - нажмите ещё раз")
         finally:
+            # Сверх лимита не копим: спасение не должно стать свалкой.
+            recordings.prune()
             self._set_tray_state("idle")
 
     # ---------- отмена последней вставки ----------
@@ -1001,6 +1028,17 @@ class App:
         else:
             self.ui(self.overlay.show_error, "не удалось отменить")
 
+    def _tell_saved(self, dur: float) -> None:
+        """Сказать вслух, что запись цела. Главный поток."""
+        if self.tray is None:
+            return
+        mins = int(dur // 60)
+        how = f"{mins} мин {int(dur % 60)} с" if mins else f"{int(dur)} с"
+        self.tray.showMessage(
+            "Запись сохранена",
+            f"Распознать не вышло, но {how} речи целы. "
+            f"«О программе» → «Несохранённые записи»: можно распознать заново.")
+
     def _history(self, text: str, dur: float, process: str = "",
                  raw: str = "") -> None:
         """Строка в history.jsonl. Ничего не пишем, если история выключена.
@@ -1061,8 +1099,56 @@ class App:
                 update_fn=lambda: self._update,
                 do_update=self._do_update,
                 llm_install=self.install_ollama,
-                llm_busy=self.ollama_busy)
+                llm_busy=self.ollama_busy,
+                redo_fn=self._redo_recording)
         self.settings.open()
+
+    def _redo_recording(self, path: str) -> None:
+        """Распознать сохранённую запись заново - по кнопке из «О программе».
+
+        В своём потоке: длинная запись режется на куски и считается минуты, а
+        главный поток Qt держит окно. Заморозить его на минуту - значит
+        показать человеку «программа зависла» ровно в тот момент, когда она
+        спасает его работу.
+        """
+        threading.Thread(target=self._redo_work, args=(path,), daemon=True).start()
+
+    def _redo_work(self, path: str) -> None:
+        import recordings
+
+        try:
+            audio, _sr = recordings.load(path)
+        except Exception as e:  # noqa: BLE001
+            log(f"не прочитал сохранённую запись: {e}")
+            self.ui(self._flash_settings, "не прочитать запись", "danger")
+            return
+        with self._work_lock:
+            try:
+                if not self.transcriber.loaded:
+                    self.transcriber.load()
+                text = self.transcriber.transcribe(audio)
+                text = clean(text, self.cfg, log)
+            except Exception as e:  # noqa: BLE001
+                log(f"повторное распознавание не вышло: {e}")
+                self.ui(self._flash_settings, "снова не вышло - запись цела",
+                        "danger")
+                return
+        if not text:
+            self.ui(self._flash_settings, "ничего не расслышали", "danger")
+            return
+        _set_clipboard_text(text)
+        self._history(text, len(audio) / 16000.0)
+        recordings.drop(path)
+        n = len(text.split())
+        log(f"повторно распознано: {n} слов из {os.path.basename(path)}")
+        self.ui(self._flash_settings,
+                f"{n} {plural(n, 'слово', 'слова', 'слов')} - в буфере обмена, "
+                f"вставьте куда нужно", "accent")
+
+    def _flash_settings(self, msg: str, kind: str) -> None:
+        if self.settings is not None:
+            self.settings.backend.flashed.emit(msg, kind)
+            self.settings.backend.changed.emit()
 
     def _open_onboarding(self) -> None:
         from onboarding_qt import OnboardingWindow

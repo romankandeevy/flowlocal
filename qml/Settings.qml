@@ -1536,6 +1536,64 @@ Rectangle {
                     }
                 }
 
+                // Записи, которые не удалось распознать. Раздел появляется
+                // только когда такие есть: у человека, у которого всё хорошо,
+                // он не должен даже мелькать.
+                SectionTitle { text: "Несохранённые записи"; visible: saved.count > 0 }
+                Card {
+                    width: parent.width
+                    visible: saved.count > 0
+                    Column {
+                        id: saved
+                        width: parent.width
+                        property var rows: []
+                        property int count: rows.length
+                        Component.onCompleted: rows = B.savedRecordings()
+                        Connections {
+                            target: B
+                            function onChanged() { saved.rows = B.savedRecordings() }
+                        }
+
+                        Item {
+                            width: parent.width
+                            implicitHeight: savedNote.implicitHeight + 28
+                            Text {
+                                id: savedNote
+                                anchors { left: parent.left; right: parent.right
+                                          top: parent.top
+                                          leftMargin: 24; rightMargin: 24; topMargin: 14 }
+                                wrapMode: Text.WordWrap
+                                text: "Распознать не вышло, но речь цела. Нажмите «Распознать» - "
+                                      + "текст попадёт в буфер обмена, и его можно вставить куда нужно."
+                                font.family: T.sans; font.pixelSize: T.tXs
+                                color: T.textMuted
+                                lineHeight: 1.4
+                            }
+                        }
+
+                        Repeater {
+                            model: saved.rows
+                            SettingRow {
+                                title: modelData.name
+                                subtitle: modelData.note
+                                Row {
+                                    spacing: 8
+                                    FlowButton {
+                                        label: "Распознать"
+                                        kind: "primary"
+                                        onClicked: B.redoRecording(modelData.path)
+                                    }
+                                    FlowButton {
+                                        label: "Удалить"
+                                        kind: "danger"
+                                        onClicked: B.dropRecording(modelData.path)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 SectionTitle { text: "Как обновлялось"; visible: history.count > 0 }
                 Card {
                     width: parent.width

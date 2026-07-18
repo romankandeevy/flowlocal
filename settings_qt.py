@@ -98,7 +98,7 @@ class Backend(QObject):
     def __init__(self, on_change, on_hotkey_capture, info_fn,
                  history_path: str, log_path: str, on_onboarding=None,
                  update_fn=None, do_update=None,
-                 llm_install=None, llm_busy=None) -> None:
+                 llm_install=None, llm_busy=None, redo_fn=None) -> None:
         super().__init__()
         self._on_change = on_change
         self._on_hotkey_capture = on_hotkey_capture
@@ -108,6 +108,7 @@ class Backend(QObject):
         self._do_update = do_update
         self._llm_install = llm_install
         self._llm_busy_fn = llm_busy
+        self._redo_fn = redo_fn      # распознать сохранённую запись заново
         self.history_path = history_path
         self.log_path = log_path
         self.cfg = C.load()
@@ -171,6 +172,41 @@ class Backend(QObject):
         self._on_change(dict(self.cfg))
 
     # ---------- списки для QML ----------
+
+    @Slot(result="QVariantList")
+    def savedRecordings(self) -> list:
+        """Записи, которые не удалось распознать. Свежие первыми."""
+        import recordings
+
+        out = []
+        for r in recordings.kept():
+            mins = int(r["sec"] // 60)
+            how = (f"{mins} мин {int(r['sec'] % 60)} с" if mins
+                   else f"{int(r['sec'])} с")
+            out.append({"path": r["path"], "name": r["name"],
+                        "note": f"{how} · {r['mb']:.0f} МБ"})
+        return out
+
+    @Slot(str)
+    def redoRecording(self, path: str) -> None:
+        """Распознать сохранённую запись заново.
+
+        Текст кладём в буфер обмена, а не вставляем: окно программы сейчас в
+        фокусе, и вставлять было бы некуда. Куда его деть, решает человек.
+        """
+        if self._redo_fn is None:
+            self.flashed.emit("распознавание недоступно", "danger")
+            return
+        self.flashed.emit("распознаю - на длинной записи это займёт минуту", "")
+        self._redo_fn(path)
+
+    @Slot(str)
+    def dropRecording(self, path: str) -> None:
+        import recordings
+
+        recordings.drop(path)
+        self.changed.emit()
+        self.flashed.emit("запись удалена", "")
 
     @Property("QVariantList", constant=True)
     def modelOptions(self) -> list:
@@ -862,11 +898,12 @@ class SettingsWindow:
     def __init__(self, on_change, on_hotkey_capture, info_fn,
                  history_path: str, log_path: str, on_onboarding=None,
                  update_fn=None, do_update=None,
-                 llm_install=None, llm_busy=None) -> None:
+                 llm_install=None, llm_busy=None, redo_fn=None) -> None:
         self.backend = Backend(on_change, on_hotkey_capture, info_fn,
                                history_path, log_path, on_onboarding=on_onboarding,
                                update_fn=update_fn, do_update=do_update,
-                               llm_install=llm_install, llm_busy=llm_busy)
+                               llm_install=llm_install, llm_busy=llm_busy,
+                               redo_fn=redo_fn)
         self.tokens = Tokens()
         self.view: QQuickView | None = None
         self._filter = _CloseFilter(self.backend.cancelCapture)
