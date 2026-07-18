@@ -899,6 +899,47 @@ Rectangle {
                                   + "пробел и не начнёт её с заглавной посреди предложения"
                         path: "smart_join"
                     }
+                    // Знаки препинания. Модель по умолчанию их не ставит, и
+                    // это выбор между «мгновенно правилами» и «умнее моделью».
+                    SettingRow {
+                        title: "Знаки препинания"
+                        subtitle: punctBox.ready
+                            ? "Модель скачана - ставит запятые по смыслу и слышит вопрос. "
+                              + "Правила проще, но не ошибаются на редких словах"
+                            : "Правила ставят запятые перед «что», «если», «который». "
+                              + "Модель умнее: понимает смысл фразы. " + punctBox.note
+                        Row {
+                            spacing: 8
+                            Segmented {
+                                options: [{label: "правила", value: "rules"},
+                                          {label: "модель", value: "model"}]
+                                value: B.get("punctuation") || "rules"
+                                enabled: punctBox.ready
+                                opacity: enabled ? 1 : 0.45
+                                onPicked: (v) => B.set("punctuation", v)
+                            }
+                            FlowButton {
+                                visible: !punctBox.ready
+                                label: punctBox.busy ? "Качается…" : "Скачать 30 МБ"
+                                enabled: !punctBox.busy
+                                onClicked: { punctBox.busy = true; B.punctModelInstall() }
+                            }
+                        }
+                        Item {
+                            id: punctBox
+                            property bool ready: B.punctModelReady()
+                            property bool busy: B.punctBusy()
+                            property string note: B.punctModelNote()
+                            Connections {
+                                target: B
+                                function onChanged() {
+                                    punctBox.ready = B.punctModelReady();
+                                    punctBox.busy = B.punctBusy();
+                                    punctBox.note = B.punctModelNote();
+                                }
+                            }
+                        }
+                    }
                     SettingRow {
                         title: "Отправлять сообщение"
                         subtitle: "После вставки нажимать Enter. Перечислите программы "

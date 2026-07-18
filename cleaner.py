@@ -668,11 +668,55 @@ def _punctuate(text: str, cfg: dict) -> str:
 
         if models.puts_punctuation(str(cfg.get("model") or "")):
             return text
+        if str(cfg.get("punctuation") or "rules") == "model":
+            got = _punct_by_model(text)
+            if got:
+                return got
+            # Модель не скачана или не поднялась - работают правила. Это не
+            # отказ и не повод беспокоить человека: знаки он всё равно получит.
         import punct_rules
 
         return punct_rules.apply(text)
     except Exception:  # noqa: BLE001 - без знаков хуже, но текст важнее знаков
         return basic_punctuation(text)
+
+
+# Модель живёт между диктовками: поднимать BERT на каждую фразу дороже, чем
+# сама расстановка.
+_PUNCT_MODEL = None
+_PUNCT_TRIED = False
+# Сколько заняла последняя расстановка знаков - для строки задержки в логе.
+last_punct_sec = 0.0
+
+
+def _punct_by_model(text: str) -> str:
+    """Расставить знаки моделью. Пусто - не вышло, зовите правила."""
+    global _PUNCT_MODEL, _PUNCT_TRIED
+
+    if _PUNCT_MODEL is None:
+        if _PUNCT_TRIED:
+            return ""
+        _PUNCT_TRIED = True
+        import punct_model
+
+        folder = punct_model.folder()
+        if not punct_model.installed():
+            return ""
+        _PUNCT_MODEL = punct_model.Punctuator(folder)
+        _PUNCT_MODEL.warmup()
+    got = _PUNCT_MODEL.apply(text)
+    # Модель классифицирует токены и слов не сочиняет, но проверку оставляем:
+    # ошибка в нашем же токенизаторе или обрезка по длине могут съесть хвост,
+    # а терять текст нельзя ни при каких обстоятельствах.
+    if not _sane(text, got, lambda _m: None, "punct", floor=0.8):
+        return ""
+    # Начало фразы - по нашим правилам, а не по модели. Почему именно так,
+    # подробно расписано в punct_rules.normalize_lead: модель не знает, что
+    # запятая после первого слова для нашего фильтра равносильна команде
+    # «удали это слово», и на проверке теряла его.
+    import punct_rules
+
+    return punct_rules.normalize_lead(got)
 
 
 def clean(text: str, cfg: dict, log, process: str = "") -> str:
@@ -692,7 +736,10 @@ def clean(text: str, cfg: dict, log, process: str = "") -> str:
         # Половина его правил ищет паразитов, размеченных запятыми («Ну вот,
         # короче, я думаю»), и в тексте без запятых им не за что зацепиться.
         # Пока знаки ставились после, фильтр на новой модели работал вполсилы.
+        _pt = time.perf_counter()
         text = _punctuate(text, cfg)
+        global last_punct_sec
+        last_punct_sec = time.perf_counter() - _pt
         if cfg.get("remove_fillers", True):
             text = _strip_fillers(text)
         llm = cfg.get("llm") or {}

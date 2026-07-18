@@ -122,6 +122,8 @@ _NOT_UNION = re.compile(r",(\s+)(что|где|куда|как)(?=-)", re.IGNORE
 _MULTI_HEADS = frozenset(w.split()[-2] for w in _MULTI if len(w.split()) > 1)
 
 
+_RE_LEAD_ANY = re.compile(
+    rf"^\s*(?:(?:{_alt(_LEAD_SURE + _LEAD_MAYBE)})\s*,?\s+)+", re.IGNORECASE)
 _RE_LEAD = re.compile(
     rf"^\s*((?:(?:{_alt(_LEAD_SURE + _LEAD_MAYBE)})\s+)+)", re.IGNORECASE)
 
@@ -132,6 +134,7 @@ def _mark_lead(text: str) -> str:
     if not m:
         return text
     run, rest = m.group(1).strip(), text[m.end():]
+    run = run.rstrip(",")
     if not rest:
         return text            # фраза целиком из бубнежа - не трогаем
 
@@ -154,6 +157,44 @@ def _mark_lead(text: str) -> str:
     if len(words) < 2 and not sure:
         return text            # одно неоднозначное слово - «Вот дом», не трогаем
     return ", ".join(words) + ", " + rest
+
+
+def normalize_lead(text: str) -> str:
+    """Привести начало фразы к нашему виду. Зовётся ПОСЛЕ модели уровня 2.
+
+    Модель расставляет запятые хорошо, но ничего не знает про наш фильтр
+    бубнежа - а он удаляет слово, увидев запятую после него. На проверке это
+    вышло дважды и в обе стороны:
+
+        «короче путь через двор»
+            модель: «Короче, путь через двор.»
+            фильтр: «Путь через двор.»          <- СЛОВО ПОТЕРЯНО
+
+        «ну вот короче я думаю что надо сделать»
+            модель: «Ну вот короче, я думаю...»
+            фильтр: не тронул ничего            <- паразиты остались
+
+    Оба случая - про начало фразы, и решать их должны наши правила, а не
+    модель: у правил есть то, чего у неё нет, - знание, что запятая здесь
+    равносильна команде «удали это слово».
+
+    Поэтому: срезаем запятые, которые модель поставила внутри начальной связки,
+    и расставляем их заново по своему, осторожному правилу. Всё остальное в
+    предложении - работа модели, её не трогаем.
+    """
+    t = (text or "").strip()
+    if not t:
+        return text
+    m = _RE_LEAD_ANY.match(t)
+    if not m:
+        return text
+    run, rest = m.group(0), t[m.end():]
+    if not rest:
+        return text
+    # Начальную связку разбираем заново из чистых слов, без запятых модели.
+    plain = re.sub(r"\s*,\s*", " ", run).strip()
+    fixed = _mark_lead(plain + " " + rest.lstrip())
+    return fixed if fixed else text
 
 
 def _prev_word(text: str, pos: int) -> str:

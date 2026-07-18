@@ -66,6 +66,9 @@ jobs:
       - name: разбор речи на ходу
         run: python test_stream.py
 
+      - name: модель знаков препинания
+        run: python test_punct_model.py
+
       - name: вопрос по интонации
         run: python test_intonation.py
 

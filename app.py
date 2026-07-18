@@ -953,6 +953,7 @@ class App:
                 _t = time.perf_counter()
                 text = clean(text, self.cfg, log, process=process)
                 lat["clean"] = time.perf_counter() - _t
+                lat["punct"] = cleaner.last_punct_sec
                 # Команды - ПОСЛЕ полировки: LLM не должна их видеть, иначе
                 # перепишет или послушается, оба исхода хуже.
                 before_commands = text

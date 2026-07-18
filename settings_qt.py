@@ -109,6 +109,7 @@ class Backend(QObject):
         self._llm_install = llm_install
         self._llm_busy_fn = llm_busy
         self._redo_fn = redo_fn      # распознать сохранённую запись заново
+        self._punct_busy = False     # идёт ли скачивание модели знаков
         self.history_path = history_path
         self.log_path = log_path
         self.cfg = C.load()
@@ -207,6 +208,49 @@ class Backend(QObject):
         recordings.drop(path)
         self.changed.emit()
         self.flashed.emit("запись удалена", "")
+
+    @Slot(result=bool)
+    def punctModelReady(self) -> bool:
+        import punct_model
+
+        return punct_model.installed()
+
+    @Slot(result=str)
+    def punctModelNote(self) -> str:
+        import punct_model
+
+        if punct_model.installed():
+            return f"скачана, {punct_model.size_mb():.0f} МБ"
+        return "не скачана, нужно 30 МБ"
+
+    @Slot()
+    def punctModelInstall(self) -> None:
+        """Скачать модель знаков. Своим потоком - тридцать мегабайт это минуты."""
+        import threading
+
+        import punct_model
+
+        if self._punct_busy:
+            return
+        self._punct_busy = True
+        self.flashed.emit("качаю модель знаков препинания…", "")
+
+        def work() -> None:
+            err = punct_model.download()
+            self._punct_busy = False
+            if err:
+                _log(f"модель знаков не скачалась: {err}")
+                self.flashed.emit("не скачалось - смотрите журнал работы", "danger")
+            else:
+                self.set("punctuation", "model")
+                self.flashed.emit("модель знаков готова", "accent")
+            self.changed.emit()
+
+        threading.Thread(target=work, daemon=True).start()
+
+    @Slot(result=bool)
+    def punctBusy(self) -> bool:
+        return self._punct_busy
 
     @Property("QVariantList", constant=True)
     def modelOptions(self) -> list:
