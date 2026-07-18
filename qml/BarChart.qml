@@ -31,14 +31,43 @@ Item {
                        / Math.max(1, chart.values.length)
                 height: chart.height
                 Rectangle {
+                    id: bar
                     anchors.bottom: parent.bottom
                     width: parent.width
                     radius: 2
                     // Пустой день - ниточка, а не пустота: иначе не видно, что
                     // день вообще был.
-                    height: Math.max(2, chart.height * (chart.values[index] / chart.maxValue))
+                    readonly property real full:
+                        Math.max(2, chart.height * (chart.values[index] / chart.maxValue))
                     color: T.ink
                     opacity: chart.values[index] > 0 ? 0.72 : 0.16
+
+                    // Высота - ПРИВЯЗКА, умноженная на коэффициент появления.
+                    // Анимировать саму height нельзя: императивная запись рвёт
+                    // привязку намертво, и график навсегда остаётся с высотами
+                    // первого захода. У Repeater model - это длина массива, то
+                    // есть всегда 30: делегаты не пересоздаются, и второй раз
+                    // Component.onCompleted уже не играет. Симптом был
+                    // издевательский: прозрачность живая, высота мёртвая - день
+                    // без единого слова стоял высоким столбцом, а день с пиком
+                    // лежал ниточкой. Проверено пробой, см. ревью 18.07.2026.
+                    property real k: 0
+                    height: bar.full * bar.k
+
+                    // Столбцы вырастают снизу волной слева направо: 11 мс на
+                    // шаг - к тридцатому дню ~330 мс. Движение читается как
+                    // «вот ваши дни», а не мельтешение. Korti разрешает: рост
+                    // высоты - не пружина.
+                    Component.onCompleted: grow.start()
+                    SequentialAnimation {
+                        id: grow
+                        PauseAnimation { duration: index * 11 }
+                        NumberAnimation {
+                            target: bar; property: "k"; from: 0; to: 1
+                            duration: 300; easing.type: Easing.OutCubic
+                        }
+                    }
+                    Component.onDestruction: grow.stop()
                 }
             }
         }
