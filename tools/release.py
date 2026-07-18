@@ -29,6 +29,10 @@ TAG = f"v{__version__}"
 SETUP = os.path.join(ROOT, "dist", f"FlowLocal-{__version__}-setup.exe")
 
 
+def git() -> str:
+    return shutil.which("git") or "git"
+
+
 def gh() -> str:
     for p in (r"C:\Program Files\GitHub CLI\gh.exe",
               r"C:\Program Files (x86)\GitHub CLI\gh.exe"):
@@ -73,6 +77,15 @@ def main() -> int:
                 _json.dump(pkg, f, ensure_ascii=False, indent=2)
                 f.write("\n")
             print(f"npm/package.json: версия -> {__version__}")
+            # И сразу коммитим - иначе сами себе устроим грязное дерево, на
+            # котором проверка ниже откажется выкладывать. Ровно это и вышло
+            # при первом выпуске: скрипт правил файл и тут же на него ругался.
+            #
+            # Коммитим ТОЛЬКО этот файл и только когда правка наша: чужие
+            # изменения так проскочить не могут, проверка их всё равно поймает.
+            run([git(), "add", "npm/package.json"], cwd=ROOT)
+            run([git(), "commit", "-m", f"npm: версия {__version__}",
+                 "--only", "npm/package.json"], cwd=ROOT)
 
     cli = gh()
     if not cli:
