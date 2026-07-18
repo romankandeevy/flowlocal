@@ -82,6 +82,20 @@ def set_autostart(enabled: bool) -> None:
                 pass
 
 
+def autostart_command_current() -> str:
+    """Что сейчас записано в реестре. Пусто - записи нет.
+
+    Нужна тому, кто решает, лечить запись или не трогать: из исходников
+    переписывать команду, указывающую на установленную сборку, нельзя.
+    """
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
+            value, _ = winreg.QueryValueEx(k, RUN_NAME)
+        return str(value or "")
+    except OSError:
+        return ""
+
+
 def autostart_command_stale() -> bool:
     """Записанная в реестре команда разошлась с той, что нужна сегодня.
 
