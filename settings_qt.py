@@ -598,6 +598,31 @@ class Backend(QObject):
         self._mouse_hook.suppress_event()      # бросает - и это норма
 
 
+    @Slot(result="QVariantList")
+    def changelog(self) -> list:
+        """История версий для «О программе».
+
+        Из файла рядом с приложением, а не из GitHub: страница, которая
+        объясняет, что интернет нужен один раз, не имеет права показывать
+        пустоту без сети.
+
+        Текущую версию помечаем здесь, а не в QML: сравнение версий - работа
+        для того, кто их и так знает.
+        """
+        import changelog as CL
+        from version import __version__
+
+        out = []
+        for rel in CL.load():
+            out.append({
+                "version": rel["version"],
+                "date": rel["date"],
+                "title": rel["title"],
+                "items": rel["items"],
+                "current": rel["version"] == __version__,
+            })
+        return out
+
     # ---------- правка текста: ставим Ollama за человека ----------
 
     @Slot(result=bool)

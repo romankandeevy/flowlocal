@@ -1141,6 +1141,99 @@ Rectangle {
                     }
                 }
 
+                // Как обновлялось. Раньше человек видел номер версии и всё:
+                // что в ней изменилось и чем она отличается от вчерашней -
+                // узнать было неоткуда, а обновлятор предлагал обновиться,
+                // не говоря ради чего.
+                SectionTitle { text: "Как обновлялось"; visible: history.count > 0 }
+                Card {
+                    width: parent.width
+                    visible: history.count > 0
+                    Column {
+                        id: history
+                        width: parent.width
+                        property int count: rel.count
+                        Repeater {
+                            id: rel
+                            model: B.changelog()
+                            Item {
+                                width: history.width
+                                implicitHeight: relCol.implicitHeight + 32
+                                // Волосяная линия между версиями, кроме первой:
+                                // это список, а не набор карточек.
+                                Rectangle {
+                                    visible: index > 0
+                                    width: parent.width - 48
+                                    x: 24
+                                    height: 1
+                                    color: T.border
+                                }
+                                Column {
+                                    id: relCol
+                                    anchors { left: parent.left; right: parent.right
+                                              top: parent.top
+                                              leftMargin: 24; rightMargin: 24; topMargin: 16 }
+                                    spacing: 6
+
+                                    Row {
+                                        spacing: 8
+                                        Text {
+                                            text: modelData.version
+                                            font.family: T.sans; font.pixelSize: T.tSm
+                                            font.weight: Font.DemiBold; color: T.text
+                                        }
+                                        // «Сейчас у вас» - единственное, ради
+                                        // чего этот список открывают дважды.
+                                        Rectangle {
+                                            visible: modelData.current
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: nowLbl.implicitWidth + 14
+                                            height: 18
+                                            radius: 9
+                                            color: T.fill
+                                            Text {
+                                                id: nowLbl
+                                                anchors.centerIn: parent
+                                                text: "сейчас у вас"
+                                                font.family: T.sans; font.pixelSize: T.t2xs
+                                                color: T.textSecondary
+                                            }
+                                        }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: modelData.date
+                                            font.family: T.mono; font.pixelSize: T.t2xs
+                                            color: T.textMuted
+                                        }
+                                    }
+
+                                    Text {
+                                        width: relCol.width
+                                        wrapMode: Text.WordWrap
+                                        text: modelData.title
+                                        visible: text !== ""
+                                        font.family: T.sans; font.pixelSize: T.tXs
+                                        color: T.textSecondary
+                                        lineHeight: 1.4
+                                    }
+
+                                    Repeater {
+                                        model: modelData.items
+                                        Text {
+                                            width: relCol.width
+                                            wrapMode: Text.WordWrap
+                                            text: "· " + modelData
+                                            font.family: T.sans; font.pixelSize: T.tXs
+                                            color: T.textMuted
+                                            lineHeight: 1.4
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 SectionTitle { text: "Служебное" }
                 Card {
                     width: parent.width

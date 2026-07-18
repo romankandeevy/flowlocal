@@ -43,9 +43,20 @@ def run(args: list, **kw) -> subprocess.CompletedProcess:
 
 
 def main() -> int:
-    notes = ""
+    # Заметки берём из CHANGELOG.md - там же, откуда их показывает окно
+    # «О программе». Пока они писались ключом --notes, они жили ровно один раз,
+    # в истории команд: приложение о них не знало, а человек, обновившийся
+    # неделю назад, не мог посмотреть, что было в промежуточных версиях.
+    # --notes оставлен, чтобы можно было перебить руками.
+    import changelog
+
+    notes = changelog.notes_for(__version__)
     if "--notes" in sys.argv:
         notes = sys.argv[sys.argv.index("--notes") + 1]
+    elif not notes:
+        print(f"в CHANGELOG.md нет раздела «## {__version__} — дата» - "
+              f"допишите его или передайте --notes")
+        return 2
 
     cli = gh()
     if not cli:

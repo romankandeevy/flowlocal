@@ -45,6 +45,10 @@ DEFAULT_MODEL = "qwen2.5:3b"
 # себя в автозапуске и стартует сама, но не мгновенно.
 _SERVE_WAIT = 90
 
+# Таймаут потока скачивания модели. Не 60 секунд: замер на живой установке -
+# 291 секунда на 1.93 ГБ, и запас нужен на медленный интернет, а не на наш.
+_PULL_TIMEOUT = 900
+
 _UA = {"User-Agent": "FlowLocal"}
 
 
@@ -161,13 +165,16 @@ def pull(model: str, on_progress=None, log=print) -> bool:
     body = json.dumps({"model": model, "stream": True}).encode("utf-8")
     req = urllib.request.Request(API + "/api/pull", data=body,
                                  headers={"Content-Type": "application/json", **_UA})
+    # Таймаут на поток, а не на запрос. Два гигабайта едут минутами (замер:
+    # 291 с на этой машине), и минутный таймаут рвал бы скачивание на ровном
+    # месте - при первой же паузе сервера между чанками.
     # Модель приезжает слоями, и у каждого свои completed/total. Показывать
     # прогресс слоя нельзя: он добегает до 100%, а следом начинается новый с
     # нуля - полоса дёргается назад по нескольку раз. Считаем сумму по всем
     # слоям, которые видели, - это и есть честный общий прогресс.
     layers: dict = {}
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=_PULL_TIMEOUT) as resp:
             for line in resp:
                 if not line.strip():
                     continue
@@ -240,7 +247,19 @@ def ensure(model: str = DEFAULT_MODEL, on_stage=None, log=print) -> bool:
 
     if not has_model(model):
         stage("скачиваю модель")
-        if not pull(model, lambda s, f, t: stage("скачиваю модель", f, t), log):
+        # Две попытки, и это не суеверие: на живой установке 18.07.2026 первая
+        # оборвалась на 225 МБ из 1.93 ГБ. Ollama докачивает с того места, где
+        # встала (проверено: вторая попытка добрала остаток), поэтому повтор
+        # стоит секунды, а не второй гигабайт. Молча сдаться после обрыва -
+        # значит показать человеку «не удалось» там, где хватало одной повторной
+        # попытки.
+        for attempt in (1, 2):
+            if pull(model, lambda s, f, t: stage("скачиваю модель", f, t), log):
+                break
+            if attempt == 1:
+                log("ollama: скачивание модели оборвалось, пробую ещё раз")
+                stage("продолжаю скачивать модель")
+        else:
             stage("не удалось скачать модель")
             return False
 
