@@ -112,6 +112,11 @@ LOG_MAX = 512 * 1024
 HISTORY_MAX = 4 * 1024 * 1024
 
 
+# Как часто перепроверять обновления, пока приложение висит в трее.
+# Шесть часов: релиз выходит не чаще, а узнать о нём в тот же день - достаточно.
+_UPDATE_EVERY = 6 * 60 * 60 * 1000
+
+
 def log(msg: str) -> None:
     line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n"
     try:
@@ -855,7 +860,9 @@ class App:
             self.settings = SettingsWindow(
                 self._on_config_change, self._on_hotkey_capture,
                 self._info, HISTORY_PATH, LOG_PATH,
-                on_onboarding=self._open_onboarding)
+                on_onboarding=self._open_onboarding,
+                update_fn=lambda: self._update,
+                do_update=self._do_update)
         self.settings.open()
 
     def _open_onboarding(self) -> None:
@@ -1108,7 +1115,7 @@ class App:
             self.ui(self._shutdown)
 
     def _check_update_bg(self) -> None:
-        """Есть ли версия свежее. Своим потоком, молча, один раз за запуск.
+        """Есть ли версия свежее. Своим потоком, молча, раз в несколько часов.
 
         Молча - это принцип, а не лень. Приложение висит в трее сутками; всплыть
         поверх чужой работы с новостью «вышла версия 0.2.1» - это ровно то, за
@@ -1117,6 +1124,13 @@ class App:
 
         Из исходников не проверяем вовсе: там обновляются git pull, а не
         установщиком поверх рабочей копии.
+
+        **Раз за запуск было мало, и это поймал владелец.** Приложение живёт в
+        трее сутками: он поставил версию, запустил, проверка прошла и ничего
+        не нашла - а релиз вышел через час. Узнать о нём было неоткуда, пока не
+        перезапустишь. Теперь проверка повторяется по таймеру (_UPDATE_EVERY).
+        Четыре пробуждения в сутки - это не «ноль в покое», это ноль и есть:
+        принцип был про тик 60 раз в секунду, а не про запрос раз в шесть часов.
         """
         if not updater.can_update():
             return
@@ -1243,6 +1257,11 @@ class App:
         threading.Thread(target=self._load_model_bg, daemon=True).start()
         threading.Thread(target=self._autoconfig_llm_bg, daemon=True).start()
         threading.Thread(target=self._check_update_bg, daemon=True).start()
+        # И дальше - по таймеру, пока приложение живёт в трее.
+        self._update_timer = QTimer()
+        self._update_timer.timeout.connect(
+            lambda: threading.Thread(target=self._check_update_bg, daemon=True).start())
+        self._update_timer.start(_UPDATE_EVERY)
         if not self.cfg.get("onboarded"):
             # Первый запуск: без мастера человек видит только иконку в трее и
             # не понимает ничего. Небольшая задержка - дать трею показаться.

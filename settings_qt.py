@@ -76,12 +76,15 @@ class Backend(QObject):
     _captured = Signal(str)
 
     def __init__(self, on_change, on_hotkey_capture, info_fn,
-                 history_path: str, log_path: str, on_onboarding=None) -> None:
+                 history_path: str, log_path: str, on_onboarding=None,
+                 update_fn=None, do_update=None) -> None:
         super().__init__()
         self._on_change = on_change
         self._on_hotkey_capture = on_hotkey_capture
         self._info_fn = info_fn
         self._on_onboarding = on_onboarding
+        self._update_fn = update_fn
+        self._do_update = do_update
         self.history_path = history_path
         self.log_path = log_path
         self.cfg = C.load()
@@ -450,6 +453,32 @@ class Backend(QObject):
     def about(self) -> str:
         return "\n".join(f"{k}: {v}" for k, v in (self._info_fn() or {}).items())
 
+    @Slot(result="QVariantMap")
+    def pendingUpdate(self) -> dict:
+        """Найденное обновление или пустой словарь.
+
+        Показываем на Главной, а не всплывающим окном. Всплыть поверх чужой
+        работы с новостью «вышла версия» - это ровно то, за что программы
+        ненавидят. Но и прятать в меню трея, как было, - значит не сказать
+        вовсе: владелец обновление так и не увидел.
+        """
+        upd = (self._update_fn() if self._update_fn else None) or {}
+        if not upd:
+            return {}
+        return {
+            "version": str(upd.get("version") or ""),
+            "size_mb": int(upd.get("size_mb") or 0),
+            # Первая строка заметок - фраза о релизе целиком. Весь список тут
+            # не нужен: подробности человек прочтёт в «Как обновлялось».
+            "title": str(upd.get("notes") or "").splitlines()[0] if upd.get("notes") else "",
+        }
+
+    @Slot()
+    def applyUpdate(self) -> None:
+        """Поставить обновление. Приложение закроется - его закроет установщик."""
+        if self._do_update is not None:
+            self._do_update()
+
     @Slot()
     def restartOnboarding(self) -> None:
         """«Пройти знакомство заново» - мастер открывается из настроек (PLAN 4)."""
@@ -696,7 +725,8 @@ class SettingsWindow:
     и пересборка не нужна вовсе."""
 
     def __init__(self, on_change, on_hotkey_capture, info_fn,
-                 history_path: str, log_path: str, on_onboarding=None) -> None:
+                 history_path: str, log_path: str, on_onboarding=None,
+                 update_fn=None, do_update=None) -> None:
         self.backend = Backend(on_change, on_hotkey_capture, info_fn,
                                history_path, log_path, on_onboarding=on_onboarding)
         self.tokens = Tokens()

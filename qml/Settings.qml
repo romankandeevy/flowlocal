@@ -193,6 +193,56 @@ Rectangle {
                 Component.onCompleted: reload()
                 onVisibleChanged: if (visible) reload()
 
+                // Обновление - первым, до всего остального: это единственное на
+                // странице, что требует действия. Раньше оно жило только в меню
+                // трея, и владелец его попросту не увидел - «мне не предложило
+                // скачать». Меню, в которое надо догадаться заглянуть, это не
+                // уведомление.
+                //
+                // Но и всплывающего окна тут нет намеренно: диктовка живёт
+                // поверх чужой работы, и выскакивать посреди неё с новостью о
+                // версии - ровно то, за что программы не любят.
+                Card {
+                    id: updCard
+                    width: parent.width
+                    property var upd: B.pendingUpdate()
+                    visible: upd && upd.version
+
+                    Item {
+                        width: parent.width
+                        implicitHeight: updCol.implicitHeight + 36
+
+                        Column {
+                            id: updCol
+                            anchors { left: parent.left; right: updBtn.left; top: parent.top
+                                      leftMargin: 20; rightMargin: 16; topMargin: 18 }
+                            spacing: 4
+                            Text {
+                                text: "Есть версия " + (updCard.upd.version || "")
+                                      + " · " + (updCard.upd.size_mb || 0) + " МБ"
+                                font.family: T.sans; font.pixelSize: T.tSm
+                                font.weight: Font.DemiBold; color: T.text
+                            }
+                            Text {
+                                width: updCol.width
+                                wrapMode: Text.WordWrap
+                                text: updCard.upd.title || "Что изменилось — в «О программе»"
+                                font.family: T.sans; font.pixelSize: T.tXs
+                                color: T.textMuted
+                                lineHeight: 1.4
+                            }
+                        }
+                        FlowButton {
+                            id: updBtn
+                            anchors { right: parent.right; rightMargin: 20
+                                      verticalCenter: parent.verticalCenter }
+                            label: "Обновить"
+                            kind: "primary"
+                            onClicked: B.applyUpdate()
+                        }
+                    }
+                }
+
                 // Первое, что человек должен узнать: как этим пользоваться.
                 // Не «состояние системы», а одна фраза действием.
                 Card {
