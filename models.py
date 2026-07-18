@@ -59,6 +59,70 @@ CATALOG: list[Model] = [
         url="https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3",
         why="Если диктуете не только по-русски. Лицензия требует указать автора.",
     ),
+    # Русские модели, которых у нас не было. Библиотека onnx-asr знает
+    # девятнадцать, а возили мы четыре - остальные просто ни разу не смотрели.
+    #
+    # Про пунктуацию отдельно, потому что это главная разница на глаз. Наш
+    # GigaAM v3 **e2e** сам ставит точки, запятые и пишет «10:00» цифрами. Все
+    # пятеро ниже отдают сплошную строчную строку без знаков («в десять утра»
+    # вместо «в 10:00»), кроме FastConformer - тот ставит заглавную и точку в
+    # конце. Это не поломка и не признак худшей модели: они распознают слова, а
+    # оформление - работа отдельного слоя, которого у них нет.
+    Model(
+        id="nemo-fastconformer-ru-rnnt",
+        title="FastConformer",
+        quant="int8",
+        size_mb=136,
+        langs="русский",
+        device="CPU",
+        license="CC-BY-4.0",
+        url="https://huggingface.co/istupakov/stt_ru_fastconformer_hybrid_large_pc_onnx",
+        why="Вдвое легче нашей и заметно быстрее. Ставит заглавную и точку.",
+    ),
+    Model(
+        id="t-tech/t-one",
+        title="T-one",
+        quant=None,
+        size_mb=144,
+        langs="русский",
+        device="CPU",
+        license="Apache-2.0",
+        url="https://huggingface.co/t-tech/T-one",
+        why="Российская, от Т-Банка. Знаков препинания не ставит, грузится долго.",
+    ),
+    Model(
+        id="alphacep/vosk-model-ru",
+        title="Vosk",
+        quant="int8",
+        size_mb=72,
+        langs="русский",
+        device="CPU",
+        license="Apache-2.0",
+        url="https://huggingface.co/alphacep/vosk-model-ru",
+        why="Втрое легче нашей и самая быстрая. Без знаков препинания.",
+    ),
+    Model(
+        id="alphacep/vosk-model-small-ru",
+        title="Vosk маленькая",
+        quant="int8",
+        size_mb=27,
+        langs="русский",
+        device="CPU",
+        license="Apache-2.0",
+        url="https://huggingface.co/alphacep/vosk-model-small-ru",
+        why="Самая лёгкая: 27 МБ. Для слабой машины. Без знаков препинания.",
+    ),
+    Model(
+        id="gigaam-v3-rnnt",
+        title="GigaAM без пунктуации",
+        quant="int8",
+        size_mb=226,
+        langs="русский",
+        device="CPU",
+        license="MIT",
+        url="https://huggingface.co/ai-sage/GigaAM-v3",
+        why="Та же GigaAM, но сырым текстом - если чистка мешает больше, чем помогает.",
+    ),
     Model(
         id="onnx-community/whisper-large-v3-turbo",
         title="Whisper turbo",
