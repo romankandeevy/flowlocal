@@ -94,6 +94,7 @@ import models  # noqa: E402
 import overlay_qt as OV  # noqa: E402
 import theme as T  # noqa: E402
 import updater  # noqa: E402
+import wakeup  # noqa: E402
 from version import __version__  # noqa: E402
 import cleaner  # noqa: E402
 from cleaner import _strip_fillers, clean, extract_commands, llm_command  # noqa: E402
@@ -196,6 +197,7 @@ class App:
         self._last_insert = None     # (exe, когда, текст) - для склейки
         self._last_use = time.time()  # когда последний раз диктовали
         self._update: dict | None = None   # свежая версия с GitHub, если нашлась
+        self._wake = None            # слух за сном и разблокировкой экрана
         self._hk_handles: list = []
         self._hook_handles: list = []
         self._capturing = False
@@ -1441,7 +1443,39 @@ class App:
         if self.overlay.state == OV.LOADING:
             self.overlay.hide()
 
+    def _on_wake(self) -> None:
+        """Машина проснулась или экран разблокировали - собрать себя заново.
+
+        Вызывается из оконной процедуры, а она живёт в главном потоке Qt, так
+        что делать всё можно прямо здесь - в отличие от рабочего потока.
+
+        Порядок важен: сперва чистим залипшие клавиши, потом пересобираем
+        хоткеи. Наоборот - бесполезно: свежий бинд сверится с тем же мусорным
+        состоянием и промолчит ровно так же.
+        """
+        if self._recording or self._capturing or self._work_lock.locked():
+            # Идёт диктовка или человек как раз ловит новое сочетание в
+            # настройках - разбирать хоткеи посреди этого нельзя. Ждать нечего:
+            # раз конвейер работает, значит и хук жив.
+            log("пробуждение: занято, ничего не трогаю")
+            return
+        wakeup.clear_stuck_keys(keyboard, log)
+        self._hotkey_unbind()
+        self._hotkey_bind()
+        # Микрофон после сна - вторая половина той же беды. Поток бывает жив по
+        # флагу active, а колбэков с него уже не приходит: ссылка на устройство
+        # протухла, пока машина спала. Диагностика тогда сбивает с толку - проба
+        # в настройках работает (она открывает поток заново), а по хоткею
+        # тишина. Закрываем сами, следующая запись откроет свежий.
+        try:
+            self.recorder._close()
+        except Exception as e:  # noqa: BLE001
+            log(f"пробуждение: микрофон не закрылся ({type(e).__name__}: {e})")
+
     def _shutdown(self) -> None:
+        if self._wake is not None:
+            self._wake.stop()
+            self._wake = None
         self._hotkey_unbind()
         if self.tray is not None:
             try:
@@ -1512,6 +1546,8 @@ class App:
 
     def run(self, silent: bool = False) -> None:
         self._hotkey_bind()
+        self._wake = wakeup.WakeWatcher(self._on_wake, log)
+        self._wake.start()
         self._start_tray()
         self._start_ipc()
         self._heal_autostart()

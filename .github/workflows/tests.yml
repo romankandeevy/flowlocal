@@ -54,6 +54,12 @@ jobs:
       - name: склейка и автоввод
         run: python test_join.py
 
+      - name: вставка через буфер обмена
+        run: python test_clipboard.py
+
+      - name: вопрос по интонации
+        run: python test_intonation.py
+
       - name: выгрузка и загрузка личного
         run: python test_backup.py
 

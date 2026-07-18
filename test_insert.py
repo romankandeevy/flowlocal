@@ -33,6 +33,8 @@ SEED = "буфер-до-вставки-42"
 VK_MENU = 0x12
 VK_SHIFT = 0x10
 
+_user32 = ctypes.windll.user32
+
 
 def _force_foreground(hwnd) -> bool:
     """Дотащить окно в фокус и дождаться, пока это правда случится.
@@ -132,7 +134,22 @@ def _run_modifier_release() -> bool:
     return ok
 
 
-def _run(mode: str) -> bool:
+def _window_text(hwnd) -> str:
+    """Забрать текст окна целиком.
+
+    Не win32gui.GetWindowText: он читает в буфер фиксированного размера и молча
+    обрезает на 511 знаках. Проверено прямо здесь - положили 900, получили 511.
+    Ровно на этом тест длинной вставки покраснел на исправном коде: текст
+    вставился весь, а читалка вернула огрызок. Обрезание тихое, и выглядит оно
+    в точности как тот баг, который тест и должен ловить.
+    """
+    n = _user32.SendMessageW(hwnd, win32con.WM_GETTEXTLENGTH, 0, 0)
+    buf = ctypes.create_unicode_buffer(n + 1)
+    _user32.SendMessageW(hwnd, win32con.WM_GETTEXT, n + 1, buf)
+    return buf.value
+
+
+def _run(mode: str, expect: str = EXPECT, label: str = "") -> bool:
     _set_clipboard_text(SEED)
     hwnd = win32gui.CreateWindow(
         "EDIT",
@@ -154,7 +171,7 @@ def _run(mode: str) -> bool:
     def go() -> None:
         time.sleep(0.8)
         state["fg"] = win32gui.GetForegroundWindow()
-        state["ok"] = insert(EXPECT, mode)
+        state["ok"] = insert(expect, mode)
         time.sleep(0.8)
         done.set()
 
@@ -164,23 +181,23 @@ def _run(mode: str) -> bool:
         win32gui.PumpWaitingMessages()
         time.sleep(0.01)
 
-    got = win32gui.GetWindowText(hwnd)
+    got = _window_text(hwnd)
     clip = _get_clipboard_text()
     try:
         win32gui.DestroyWindow(hwnd)
     except Exception:  # noqa: BLE001 - окно могли закрыть вручную
         pass
 
-    text_ok = got == EXPECT
+    text_ok = got == expect
     # в режиме type буфер вообще не трогается, в paste - должен вернуться
     clip_ok = clip == SEED
     focus_ok = state["fg"] == hwnd
-    print(f"--- {mode}")
+    print(f"--- {label or mode}")
     print(f"  insert() -> {state['ok']}")
     print(f"  focus was ours:    {focus_ok}")
     print(f"  text inserted:     {text_ok}  {got!r}")
     print(f"  clipboard restored:{clip_ok}  {clip!r}")
-    if not text_ok and _intruded(got):
+    if not text_ok and _intruded(got, expect):
         # Окно теста топмостовое и в фокусе - в него влезает всё, что печатают
         # рядом. Дважды тест краснел именно так («оман к…ндее» - куски чужой
         # диктовки), и каждый раз это выглядело как баг вставки. Отличаем по
@@ -194,15 +211,42 @@ def _run(mode: str) -> bool:
     return ok
 
 
-def _intruded(got: str) -> bool:
+def _intruded(got: str, expect: str = EXPECT) -> bool:
     """Наш текст доехал целиком, но в окне есть и что-то ещё."""
-    return EXPECT.strip() in got and got != EXPECT
+    return expect.strip() in got and got != expect
+
+
+LONG = ("Здравствуйте! Отправляю письмо целиком, как его наговаривают на "
+        "самом деле: длинным куском, а не фразой в три слова. " * 6)
+
+
+def _run_long() -> bool:
+    """Длинный текст - тот случай, где вставка отказывала МОЛЧА.
+
+    Приложение читает буфер не в момент Ctrl+V, а позже, разобрав WM_PASTE.
+    Пока мы возвращали прежний буфер через фиксированные 300 мс, оно не
+    успевало, и человек получал свой старый буфер вместо письма - при том
+    что конвейер рапортовал успех. У соседей это воспроизведено с точностью
+    до цифр: до 90 знаков вставлялось всегда, 202 и 520 - уже нет.
+
+    Владелец диктует именно письма, то есть живёт ровно в этой длине.
+
+    Честно про границы этой проверки: нативный EDIT читает буфер прямо в
+    обработчике WM_PASTE, синхронно, и потому успевал всегда - он прошёл бы и
+    со старым кодом. Значит этот случай доказывает не «починили», а «не
+    сломали»: длинный текст доезжает целиком и уборка за собой не мешает.
+    Тормозят с чтением буфера Electron и браузеры, а их сюда не затащить.
+    """
+    return _run("paste", LONG, label=f"paste, длинный текст ({len(LONG)} знаков)")
 
 
 def main() -> None:
     arg = sys.argv[1] if len(sys.argv) > 1 else "both"
     if arg == "both":
-        results = [_run("paste"), _run("type"), _run_modifier_release()]
+        results = [_run("paste"), _run_long(), _run("type"),
+                   _run_modifier_release()]
+    elif arg == "long":
+        results = [_run_long()]
     elif arg == "shift":
         results = [_run_modifier_release()]
     else:
