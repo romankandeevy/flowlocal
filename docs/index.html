@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlowLocal — диктовка, которая работает без интернета</title>
+<meta name="description" content="Зажал клавишу, сказал, отпустил — текст в активном окне. Русская речь распознаётся втрое точнее Whisper, на процессоре, без облака и без подписки.">
+<meta property="og:title" content="FlowLocal — диктовка, которая работает без интернета">
+<meta property="og:description" content="Голос не покидает компьютер. Не потому что мы обещаем, а потому что некуда.">
+<meta property="og:image" content="pill.png">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='5' fill='black'/><path d='M12 5.5a2 2 0 0 0-2 2v4.2a2 2 0 0 0 4 0V7.5a2 2 0 0 0-2-2Zm5 6.2v.6a5 5 0 0 1-10 0v-.6M12 17v2.2' stroke='white' stroke-width='1.6' fill='none' stroke-linecap='round'/></svg>">
+
+<!--
+  Оформление - дизайн-система Korti, ровно та же, что в приложении. Токены
+  скопированы не на глаз: они выгружены из theme.py, единственного источника
+  правды в проекте. Отсюда и правила, которые здесь соблюдаются буквально:
+
+    две краски - бумага и чернила, всё остальное чернила поверх бумаги
+    с прозрачностью; тёмная тема - инверсия, а не второй набор красок;
+    волосяные линии вместо заливок и теней;
+    синий акцент только для особенного, зелёный и красный только для статуса;
+    движение 120/180/280 мс по одной кривой, без пружин;
+    радиусы 6 контролы, 12 карточки, 16 модалки.
+
+  Ни одной внешней загрузки: шрифты системные, картинки рядом. Сайт про
+  программу, которая работает без интернета, не должен ходить в чужие CDN.
+-->
+<style>
+:root {
+  --bg: rgb(255,255,255);
+  --paper: rgb(255,255,255);
+  --text: rgb(0,0,0);
+  --text-secondary: rgb(92,92,92);
+  --text-muted: rgb(138,138,138);
+  --text-faint: rgb(173,173,173);
+  --border: rgba(0,0,0,0.129);
+  --border-strong: rgba(0,0,0,0.239);
+  --fill: rgba(0,0,0,0.059);
+  --fill-subtle: rgba(0,0,0,0.039);
+  --accent: rgb(37,99,235);
+  --success: rgb(18,168,95);
+  --danger: rgb(224,31,43);
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --dur: .18s;
+  --ease: cubic-bezier(.2,.8,.2,1);
+  --sans: "Onest", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: rgb(0,0,0); --paper: rgb(0,0,0);
+    --text: rgb(255,255,255);
+    --text-secondary: rgb(163,163,163);
+    --text-muted: rgb(117,117,117);
+    --text-faint: rgb(82,82,82);
+    --border: rgba(255,255,255,0.129);
+    --border-strong: rgba(255,255,255,0.239);
+    --fill: rgba(255,255,255,0.059);
+    --fill-subtle: rgba(255,255,255,0.039);
+    --accent: rgb(110,155,255);
+    --success: rgb(52,208,125);
+    --danger: rgb(255,90,97);
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 400 15px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  /* Точечная сетка и прожектор акцентом - tokens/patterns.css из Korti:
+     «subtle, technical background textures so surfaces aren't flat/boring». */
+  background-image:
+    radial-gradient(60% 55% at 50% -5%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--text) 10%, transparent) 1px, transparent 0);
+  background-size: 100% 900px, 20px 20px;
+  background-repeat: no-repeat, repeat;
+  background-attachment: fixed, scroll;
+}
+.wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+
+/* ---------- шапка ---------- */
+header { padding: 28px 0; }
+.mark { display: flex; align-items: center; gap: 10px; }
+.mark .badge {
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  background: var(--text); display: grid; place-items: center;
+}
+.mark .badge svg { width: 16px; height: 16px; }
+.mark b { font-size: 20px; font-weight: 700; letter-spacing: -.03em; }
+
+/* ---------- герой ---------- */
+.hero { padding: 56px 0 40px; text-align: center; }
+h1 {
+  font-size: clamp(30px, 5.4vw, 52px); font-weight: 700;
+  letter-spacing: -.03em; line-height: 1.08; margin-bottom: 18px;
+}
+.lede {
+  font-size: 17px; color: var(--text-secondary);
+  max-width: 620px; margin: 0 auto 28px;
+}
+.cta { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 11px 20px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong); background: transparent;
+  color: var(--text); font: 500 14px var(--sans); text-decoration: none;
+  transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.btn:hover { background: var(--fill); }
+.btn:active { transform: translateY(1px); }  /* нажатие - сдвиг на 1px, канон */
+.btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+.btn.primary:hover { opacity: .88; background: var(--text); }
+.note { font-size: 12px; color: var(--text-muted); margin-top: 14px; }
+
+/* ---------- карточки ---------- */
+.card {
+  background: var(--paper); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 22px 24px;
+}
+.shot { border-radius: var(--radius-xl); border: 1px solid var(--border); overflow: hidden; }
+.shot img { display: block; width: 100%; height: auto; }
+figure { margin: 0; }
+figcaption { font-size: 12px; color: var(--text-muted); margin-top: 10px; text-align: center; }
+
+section { padding: 56px 0; }
+h2 {
+  font-size: 26px; font-weight: 700; letter-spacing: -.02em; margin-bottom: 8px;
+}
+.sub { color: var(--text-secondary); margin-bottom: 26px; max-width: 620px; }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.grid h3 { font-size: 15px; font-weight: 500; margin-bottom: 5px; }
+.grid p { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+
+/* ---------- числа ---------- */
+.stats { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.stat .label {
+  font: 500 11px var(--mono); color: var(--text-muted);
+  text-transform: lowercase; letter-spacing: .04em;
+}
+.stat .value { font-size: 30px; font-weight: 700; letter-spacing: -.03em; margin: 6px 0 4px; }
+.stat .hint { font-size: 12px; color: var(--text-muted); line-height: 1.45; }
+
+/* ---------- сравнение ---------- */
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 13px 12px; border-bottom: 1px solid var(--border); }
+th { font-weight: 500; font-size: 12px; color: var(--text-muted); }
+td.num { font-family: var(--mono); font-size: 13px; }
+tr:last-child td { border-bottom: 0; }
+.win { color: var(--success); font-weight: 500; }
+
+/* ---------- цитата ---------- */
+blockquote {
+  border-left: 2px solid var(--border-strong); padding-left: 18px;
+  font-size: 17px; line-height: 1.55; color: var(--text-secondary);
+}
+
+footer {
+  padding: 40px 0 56px; border-top: 1px solid var(--border);
+  font-size: 13px; color: var(--text-muted);
+  display: flex; gap: 18px; flex-wrap: wrap; justify-content: space-between;
+}
+footer a { color: var(--text-secondary); }
+a { color: var(--accent); }
+kbd {
+  font: 500 12px var(--mono); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); padding: 3px 7px; background: var(--fill-subtle);
+  white-space: nowrap;
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header>
+  <div class="mark">
+    <span class="badge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round">
+        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/>
+      </svg>
+    </span>
+    <b>FlowLocal</b>
+  </div>
+</header>
+
+<div class="hero">
+  <h1>Диктовка, которая работает<br>без интернета</h1>
+  <p class="lede">
+    Зажали клавишу — говорите. Отпустили — текст уже в том окне, где вы и печатали.
+    Голос не покидает этот компьютер: не потому что мы обещаем, а потому что некуда.
+  </p>
+  <div class="cta">
+    <a class="btn primary" href="https://github.com/romankandeevy/flowlocal/releases/latest">
+      Скачать для Windows
+    </a>
+    <a class="btn" href="https://github.com/romankandeevy/flowlocal">Исходный код</a>
+  </div>
+  <p class="note">70 МБ · без прав администратора · бесплатно и с открытым кодом</p>
+</div>
+
+<figure>
+  <div class="shot">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="demo_dark.gif">
+      <img src="demo.gif" alt="Зажали сочетание, на пилюле живая волна, затем фраза встала в письмо">
+    </picture>
+  </div>
+  <figcaption>
+    Настоящая запись работы: 5 секунд речи распознаны за 0.22 секунды на процессоре,
+    вместе с пунктуацией и «10:00».
+  </figcaption>
+</figure>
+
+<section id="why">
+  <h2>Почему не Whisper</h2>
+  <p class="sub">
+    Все локальные диктовки возят Whisper, а он хорош не на всех языках.
+    Мы возим <b>GigaAM v3</b> от SberDevices — 240 миллионов параметров,
+    обученных на 700 000 часах русской речи.
+  </p>
+
+  <div class="card" style="padding: 6px 18px;">
+    <table>
+      <tr>
+        <th>Ошибок в словах, среднее по доменам</th>
+        <th style="text-align:right">GigaAM v3</th>
+        <th style="text-align:right">Whisper</th>
+      </tr>
+      <tr>
+        <td>Обычная речь</td>
+        <td class="num win" style="text-align:right">8.4 %</td>
+        <td class="num" style="text-align:right">25.1 %</td>
+      </tr>
+      <tr>
+        <td>Колл-центр</td>
+        <td class="num win" style="text-align:right">9.5 %</td>
+        <td class="num" style="text-align:right">23.9 %</td>
+      </tr>
+      <tr>
+        <td>Атипичная речь</td>
+        <td class="num win" style="text-align:right">19.2 %</td>
+        <td class="num" style="text-align:right">59.3 %</td>
+      </tr>
+    </table>
+  </div>
+  <p class="note">
+    Цифры из карточки модели, а не наши: мы их не мерили и делать вид не будем.
+    Верьте направлению, а не десятой доле.
+  </p>
+
+  <div class="stats" style="margin-top: 26px;">
+    <div class="card stat">
+      <div class="label">размер модели</div>
+      <div class="value">226 МБ</div>
+      <div class="hint">вместо 1.6 ГБ у Whisper-turbo</div>
+    </div>
+    <div class="card stat">
+      <div class="label">видеокарта</div>
+      <div class="value">не нужна</div>
+      <div class="hint">на процессоре быстрее, чем Whisper на RTX 4090</div>
+    </div>
+    <div class="card stat">
+      <div class="label">в покое</div>
+      <div class="value">ноль</div>
+      <div class="hint">пока вы не диктуете, не тратится ни процессор, ни сеть</div>
+    </div>
+  </div>
+</section>
+
+<section id="silence">
+  <h2>Не выдумывает текст в тишине</h2>
+  <blockquote>
+    У Whisper есть фирменная болезнь: на паузах он дописывает «Спасибо за просмотр!»
+    и прочее из субтитров, которых наслушался. Лечат это отдельным детектором речи.
+    У нас лечить нечего — RNN-T нечем выдумывать: у него нет авторегрессивного
+    декодера. Проверено: цифровая тишина, шум, гул, щелчок — на выходе пусто.
+  </blockquote>
+</section>
+
+<section id="right-text">
+  <h2>Речь → <i>правильный</i> текст</h2>
+  <p class="sub">
+    Распознать — половина дела. Дальше начинается то, за что конкуренты берут
+    15 долларов в месяц.
+  </p>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Слова-паразиты убираются без модели</h3>
+      <p>
+        «Ну вот, короче, я думаю, типа, надо сделать» → «Я думаю, надо сделать».
+        Ноль мегабайт, ноль задержки — и ни одного шанса потерять слово:
+        мы ничего не сочиняем, только вычёркиваем.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Понимает поправки на ходу</h3>
+      <p>
+        «Встреча в пятницу, нет, в субботу» → останется суббота.
+        Работает на вашем компьютере, ставится одной кнопкой.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Короткие фразы заводятся сами</h3>
+      <p>
+        Программа замечает, что вы повторяете, и предлагает дать этому короткую
+        фразу. Имя придумываете вы — только вы знаете, «моя почта» это или
+        «рабочая».
+      </p>
+    </div>
+    <div class="card">
+      <h3>Тон под приложение</h3>
+      <p>
+        В почте строже, в чате свободнее. Правило на программу, а не общий
+        переключатель.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Правка голосом</h3>
+      <p>
+        Выделите текст, зажмите сочетание, скажите «сделай короче» —
+        выделенное заменится.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Отмена вставки</h3>
+      <p>
+        Своим сочетанием, ровно то, что вставилось. И только если вы после этого
+        ничего не печатали — иначе это была бы уже ваша работа.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section id="look">
+  <h2>Выглядит так, как вам удобно</h2>
+  <p class="sub">
+    Светлая или тёмная — следом за Windows или по вашему выбору. Настройки
+    карточками или строками. Спрашиваем при первом запуске, меняется когда угодно.
+  </p>
+  <figure>
+    <div class="shot">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="settings_dark.png">
+        <img src="settings.png" alt="Шесть страниц настроек: главная, диктовка, слова, история, статистика, о программе">
+      </picture>
+    </div>
+    <figcaption>Шесть страниц. Каталог моделей спрятан вглубь намеренно: человеку, который пишет письма, зоопарк моделей видеть незачем.</figcaption>
+  </figure>
+</section>
+
+<section id="start">
+  <h2>Восемь экранов — и всё готово</h2>
+  <p class="sub">
+    Язык, микрофон с живой волной, сочетание, проверка вставки и проба голосом:
+    первый текст вы увидите ещё в мастере, никуда его не вставляя.
+  </p>
+  <figure>
+    <div class="shot"><img src="onboarding.png" alt="Экраны мастера первого запуска"></div>
+  </figure>
+</section>
+
+<section id="privacy">
+  <h2>Приватность, которую нечем нарушить</h2>
+  <p class="sub">
+    Это не обещание в политике конфиденциальности, а устройство программы.
+  </p>
+  <div class="grid">
+    <div class="card">
+      <h3>Некуда отправлять</h3>
+      <p>В программе нет ни аккаунта, ни сервера, ни адреса, куда слать. Интернет нужен дважды: скачать модель и проверить обновления.</p>
+    </div>
+    <div class="card">
+      <h3>История у вас</h3>
+      <p>Лежит файлом рядом с программой. Можно выключить совсем, можно забывать через месяц, можно выгрузить и унести.</p>
+    </div>
+    <div class="card">
+      <h3>Открытый код</h3>
+      <p>Лицензия MIT. Не верите на слово — читайте, собирайте сами.</p>
+    </div>
+  </div>
+</section>
+
+<section id="get">
+  <h2>Поставить</h2>
+  <p class="sub">
+    Windows 10 или 11. Установщик не требует прав администратора и не показывает
+    окно UAC. Подписи у него нет, поэтому SmartScreen один раз покажет синюю
+    карточку: «Подробнее» → «Выполнить в любом случае».
+  </p>
+  <div class="cta" style="justify-content:flex-start">
+    <a class="btn primary" href="https://github.com/romankandeevy/flowlocal/releases/latest">Скачать установщик</a>
+    <a class="btn" href="https://github.com/romankandeevy/flowlocal#readme">Как это устроено</a>
+  </div>
+  <p class="note">
+    После установки нажмите <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> в любом окне и говорите.
+  </p>
+</section>
+
+<footer>
+  <span>FlowLocal — свободная программа под лицензией MIT</span>
+  <span>
+    <a href="https://github.com/romankandeevy/flowlocal">GitHub</a> ·
+    <a href="https://github.com/romankandeevy/flowlocal/releases">Все версии</a>
+  </span>
+</footer>
+
+</div>
+</body>
+</html>

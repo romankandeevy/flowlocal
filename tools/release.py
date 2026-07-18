@@ -58,6 +58,23 @@ def main() -> int:
               f"допишите его или передайте --notes")
         return 2
 
+    # Версия пакета npm - за версией программы. Разъедься они, и `npx flowlocal`
+    # стал бы обещать одно, а ставить другое. Правим до выкладки, чтобы правка
+    # уехала тем же коммитом.
+    npm_pkg = os.path.join(ROOT, "npm", "package.json")
+    if os.path.exists(npm_pkg):
+        import json as _json
+
+        with open(npm_pkg, encoding="utf-8") as f:
+            pkg = _json.load(f)
+        if pkg.get("version") != __version__:
+            pkg["version"] = __version__
+            with open(npm_pkg, "w", encoding="utf-8") as f:
+                _json.dump(pkg, f, ensure_ascii=False, indent=2)
+                f.write("
+")
+            print(f"npm/package.json: версия -> {__version__}")
+
     cli = gh()
     if not cli:
         print("gh не найден: winget install GitHub.cli")
