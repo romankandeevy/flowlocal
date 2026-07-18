@@ -16,14 +16,14 @@ Korti (HANDOFF, раздел 4) закрыто само собой.
 только когда окно в фокусе, а боковые кнопки мыши не отдаёт вовсе.
 """
 
-import json
 import os
 import shutil
 import subprocess
 import threading
 import time
 
-from PySide6.QtCore import (Property, QEvent, QObject, QTimer, QUrl, Signal, Slot)
+from PySide6.QtCore import (Property, QEvent, QObject, QSize, QTimer, QUrl,
+                            Signal, Slot)
 from PySide6.QtGui import QColor
 from PySide6.QtQuick import QQuickView
 
@@ -36,7 +36,10 @@ import theme as T
 from theme_qt import Tokens
 from util import plural
 
-W, H = 900, 660
+# Канон Korti (templates/app-shell) свёрстан под 1280x820; нам хватает
+# скромнее, но 900 узко: ряд из трёх метрик на главной становился тесным.
+W, H = 1060, 700
+MIN_W, MIN_H = 940, 620
 
 
 def _dur(sec: float) -> str:
@@ -159,6 +162,10 @@ class Backend(QObject):
     def insertOptions(self) -> list:
         return _opts([("вставка", "paste"), ("посимвольно", "type")])
 
+    @Property("QVariantList", constant=True)
+    def pillOptions(self) -> list:
+        return _opts([("снизу", "bottom"), ("сверху", "top"), ("скрыть", "off")])
+
     @Property("QVariantList", notify=changed)
     def micOptions(self) -> list:
         """Один физический микрофон PortAudio показывает по разу на каждый
@@ -201,7 +208,7 @@ class Backend(QObject):
                 "«дружелюбно», «коротко». Текст станет появляться чуть медленнее.")
         return base + ("  Работает." if C.get(self.cfg, "llm.enabled") else
                        "  Сейчас не работает: включите «Понимать поправки на ходу» "
-                       "на вкладке «Распознавание».")
+                       "на странице «Диктовка».")
 
     # ---------- словарь и таблицы ----------
 
@@ -233,26 +240,28 @@ class Backend(QObject):
 
     # ---------- история ----------
 
+    @Slot(result="QVariantMap")
+    def historyData(self) -> dict:
+        """Записи и подпись под ними одним заходом: подпись считается из тех же
+        строк, и читать history.jsonl дважды за одно открытие «Истории» незачем
+        (та же экономия, что у homeData)."""
+        rows = self._rows(stats.load(self.history_path))
+        return {"rows": rows, "note": self._note(rows)}
+
     @Slot(result="QVariantList")
     def history(self) -> list:
-        rows = []
-        try:
-            with open(self.history_path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            rows.append(json.loads(line))
-                        except ValueError:
-                            pass
-        except OSError:
-            pass
+        """Последние 400 диктовок, свежие сверху. Чтение и терпимость к битым
+        строкам - в stats.load(): свой парсер тут был бы вторым мнением о том,
+        что считать целой строкой, и однажды разошёлся бы со статистикой."""
+        return self._rows(stats.load(self.history_path))
+
+    @staticmethod
+    def _rows(rows: list[dict]) -> list:
         return [{"ts": str(r.get("ts", "")), "sec": r.get("sec", 0),
                  "text": str(r.get("text", ""))} for r in reversed(rows[-400:])]
 
-    @Slot(result=str)
-    def historyNote(self) -> str:
-        rows = self.history()
+    @staticmethod
+    def _note(rows: list) -> str:
         if not rows:
             return "Пока пусто. Продиктуйте что-нибудь."
         total = sum(len(r["text"].split()) for r in rows)
@@ -281,22 +290,44 @@ class Backend(QObject):
     # ---------- статистика ----------
 
     @Slot(result="QVariantMap")
-    def stats(self) -> dict:
+    def homeData(self) -> dict:
+        """Всё для «Главной» одним заходом: числа плюс пять последних диктовок.
+        Раньше страница звала stats() и history() подряд, и history.jsonl
+        читался с диска дважды на каждое открытие окна."""
         rows = stats.load(self.history_path)
+        return {"stats": self._stats(rows), "recent": self._rows(rows)[:5]}
+
+    @Slot(result="QVariantMap")
+    def stats(self) -> dict:
+        return self._stats(stats.load(self.history_path))
+
+    def _stats(self, rows: list[dict]) -> dict:
         s = stats.summary(rows)
         days = stats.by_day(rows, 30)
         top = max((v for _d, v in days), default=0)
+
+        # Личный множитель «во сколько раз речь быстрее печати» - замер по
+        # истории, а не лозунг из рекламы. На паре коротких фраз число ещё
+        # случайное, поэтому до минуты записи честнее промолчать: прочерк
+        # вместо цифры, взятой с потолка.
+        enough = s["seconds"] >= 60 and s["words"] >= 50
+        ratio = s["speech_wpm"] / stats.TYPING_WPM
+        streak = s["streak_days"]
+
         return {
             "dictations": f"{s['dictations']}",
             "words": f"{s['words']}",
-            "avg_words": f"{s['avg_words']:.0f}",
             "seconds": _dur(s["seconds"]),
             "saved_sec": _dur(s["saved_sec"]),
+            "speedOk": enough,
+            "speed": ("в " + f"{ratio:.1f}".replace(".", ",") + " раза")
+                     if enough else "—",
+            "userWpm": round(s["speech_wpm"]),
+            "streak": f"{streak} {plural(streak, 'день', 'дня', 'дней')}",
             "values": [v for _d, v in days],
             "range": (f"{days[0][0]} - {days[-1][0]}   ·   пик {top} "
                       f"{plural(top, 'слово', 'слова', 'слов')} в день") if days
                      else "Пока пусто. Продиктуйте что-нибудь.",
-            "speechWpm": stats.SPEECH_WPM,
             "typingWpm": stats.TYPING_WPM,
         }
 
@@ -600,7 +631,7 @@ class SettingsWindow:
         v.setColor(QColor(*T.BG))
         v.setResizeMode(QQuickView.SizeRootObjectToView)
         v.resize(W, H)
-        v.setMinimumSize(v.size())
+        v.setMinimumSize(QSize(MIN_W, MIN_H))
         ctx = v.rootContext()
         ctx.setContextProperty("T", self.tokens)
         ctx.setContextProperty("B", self.backend)

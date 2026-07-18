@@ -190,6 +190,10 @@ class Tokens(QObject):
         return T.T_XL
 
     @Property(int, constant=True)
+    def t2xl(self) -> int:
+        return T.T_2XL
+
+    @Property(int, constant=True)
     def t3xl(self) -> int:
         return T.T_3XL
 
@@ -210,6 +214,10 @@ class Tokens(QObject):
     @Property(int, notify=changed)
     def pillH(self) -> int:
         return round(T.PILL_H * self._s)
+
+    @Property(int, notify=changed)
+    def pillWMax(self) -> int:
+        return round(T.PILL_W_MAX * self._s)
 
     @Property(int, notify=changed)
     def pillPad(self) -> int:

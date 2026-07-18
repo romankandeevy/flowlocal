@@ -64,7 +64,7 @@ Rectangle {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "FlowLocal"
                 font.family: T.sans; font.pixelSize: T.t3xl
-                font.weight: Font.ExtraBold; font.letterSpacing: -1
+                font.weight: Font.Bold; font.letterSpacing: -0.9   // 700, не 800: Onest чернит
                 color: T.text
             }
             Text {
@@ -86,7 +86,7 @@ Rectangle {
             spacing: 12
             Text {
                 text: "На каком языке вы говорите?"
-                font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.Bold
+                font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
                 color: T.text
             }
             Text {
@@ -155,7 +155,7 @@ Rectangle {
             property var bars: []
             Text {
                 text: "Микрофон"
-                font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.Bold
+                font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
                 color: T.text
             }
             Text {
@@ -217,7 +217,7 @@ Rectangle {
             spacing: 12
             Text {
                 text: "Каким жестом диктовать?"
-                font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.Bold
+                font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
                 color: T.text
             }
             Text {
@@ -244,7 +244,7 @@ Rectangle {
             id: insStep
             Text {
                 text: "Проверим вставку"
-                font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.Bold
+                font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
                 color: T.text
             }
             Text {
@@ -294,7 +294,7 @@ Rectangle {
             property string result: ""
             Text {
                 text: "Скажите что-нибудь"
-                font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.Bold
+                font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
                 color: T.text
             }
             Text {

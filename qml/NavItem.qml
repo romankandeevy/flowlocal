@@ -14,7 +14,8 @@ Item {
     property bool active: false
     signal clicked()
 
-    width: 186
+    // Ширину диктует панель: пункт растягивается на всю колонку меню.
+    width: parent ? parent.width : 212
     height: 34
 
     Rectangle {
