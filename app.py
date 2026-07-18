@@ -201,6 +201,7 @@ class App:
         self._last_use = time.time()  # когда последний раз диктовали
         self._update: dict | None = None   # свежая версия с GitHub, если нашлась
         self._wake = None            # слух за сном и разблокировкой экрана
+        self.notes_win = None        # окно заметок, создаётся при первом открытии
         self.picker = None           # список преобразований, создаётся при первом показе
         self._tf_text = ""           # что преобразуем
         self._tf_clip = None         # буфер человека, вернуть после вставки
@@ -320,6 +321,7 @@ class App:
             f"toggle={self.cfg.get('hotkey_toggle')!r}")
         self._bind_undo()
         self._bind_transform()
+        self._bind_notes()
 
     def _bind_dictation(self, mode: str, spec: str) -> None:
         mods, key, mouse_btn = inputspec.parse(spec)
@@ -473,6 +475,50 @@ class App:
                 keyboard.add_hotkey(spec, self._transform_pressed, suppress=False))
         except (ValueError, KeyError) as e:
             log(f"bad hotkey_transform {spec!r}: {e}")
+
+    def _bind_notes(self) -> None:
+        """Сочетание для окна заметок. Пусто - только из трея."""
+        spec = str(self.cfg.get("hotkey_notes") or "").strip()
+        if not spec:
+            return
+        try:
+            self._hk_handles.append(keyboard.add_hotkey(
+                spec, lambda: self.ui(self.open_notes), suppress=False))
+        except (ValueError, KeyError) as e:
+            log(f"bad hotkey_notes {spec!r}: {e}")
+
+    def open_notes(self) -> None:
+        """Открыть окно заметок. ТОЛЬКО главный поток Qt.
+
+        Диктовка в него работает сама: текст мы вставляем в активное окно через
+        Ctrl+V, а активным будет это окно с полем в фокусе. Специального кода
+        для этого нет и не нужно.
+        """
+        try:
+            if self.notes_win is None:
+                from notes_qt import NotesWindow
+
+                self.notes_win = NotesWindow(
+                    self.overlay.tokens, self.cfg, log, tidy_fn=self._tidy_note)
+            self.notes_win.open()
+        except Exception as e:  # noqa: BLE001 - заметки не должны ронять диктовку
+            import traceback
+
+            log("окно заметок не открылось:\n" + traceback.format_exc())
+            self.ui(self.overlay.show_error, "заметки не открылись")
+
+    def _tidy_note(self, text: str, instruction: str) -> str:
+        """Причесать заметку. Зовётся из потока окна заметок.
+
+        Через llm_command - тот же путь, что у трансформов: там уже есть и
+        предохранители от пустого ответа, и защита от абсурдной длины. Второй
+        путь к Ollama заводить незачем.
+        """
+        llm = self.cfg.get("llm") or {}
+        if not llm.get("enabled"):
+            return ""
+        with self._work_lock:
+            return llm_command(text, instruction, llm, log)
 
     def _transform_pressed(self) -> None:
         """Колбэк хука: только передать в главный поток и уйти.
@@ -1465,6 +1511,7 @@ class App:
         self.tray.messageClicked.connect(self._on_balloon_clicked)
         self._act_update.triggered.connect(self._do_update)
         self._act_update.setVisible(False)
+        menu.addAction("Заметки…").triggered.connect(self.open_notes)
         act_settings = menu.addAction("Настройки…")
         act_settings.triggered.connect(self._open_settings)
         self._act_retry = menu.addAction("Повторить последнюю диктовку")

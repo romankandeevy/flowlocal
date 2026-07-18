@@ -69,6 +69,9 @@ jobs:
       - name: модель знаков препинания
         run: python test_punct_model.py
 
+      - name: заметки
+        run: python test_notes.py
+
       - name: вопрос по интонации
         run: python test_intonation.py
 
