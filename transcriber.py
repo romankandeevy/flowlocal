@@ -80,6 +80,28 @@ class Transcriber:
         attempts.append(("cpu", ["CPUExecutionProvider"]))
         return attempts
 
+    def _session_options(self):
+        """Настройки сессии onnxruntime. None - оставить умолчания.
+
+        Единственное, что мы здесь трогаем, - число потоков, и трогаем по
+        замеру: умолчание берёт потоков по числу ядер и на короткой фразе
+        оказывается вдвое медленнее двух потоков (цифры в config.py).
+
+        Больше ядер тут не помогает, а мешает: модель маленькая, фраза
+        короткая, и раздача работы стоит дороже самой работы.
+        """
+        n = int(self.cfg.get("asr_threads") or 0)
+        if n <= 0:
+            return None
+        import onnxruntime as rt
+
+        so = rt.SessionOptions()
+        so.intra_op_num_threads = n
+        # Межоператорную параллельность не трогаем: у последовательной модели
+        # параллельных веток нет, и потоки под них - чистые накладные расходы.
+        so.inter_op_num_threads = 1
+        return so
+
     def _load_once(self, name: str, quant: str | None, providers: list[str]):
         """Загрузка с одной попыткой докачки.
 
@@ -92,14 +114,20 @@ class Transcriber:
         from onnx_asr.utils import ModelFileNotFoundError
 
         d = model_dir(name, quant)
+        kw = {}
+        so = self._session_options()
+        if so is not None:
+            kw["sess_options"] = so
         try:
-            return onnx_asr.load_model(name, path=d, quantization=quant, providers=providers)
+            return onnx_asr.load_model(name, path=d, quantization=quant,
+                                       providers=providers, **kw)
         except ModelFileNotFoundError:
             if not os.path.isdir(d):
                 raise
             self.log(f"модель в {d} неполная - качаю заново")
             shutil.rmtree(d, ignore_errors=True)
-            return onnx_asr.load_model(name, path=d, quantization=quant, providers=providers)
+            return onnx_asr.load_model(name, path=d, quantization=quant,
+                                       providers=providers, **kw)
 
     def load(self) -> None:
         name = str(self.cfg.get("model") or DEFAULT_MODEL)
@@ -119,7 +147,9 @@ class Transcriber:
                 self.model = model
                 self.device = dev
                 self.compute_type = quant or "fp32"
+                threads = int(self.cfg.get("asr_threads") or 0)
                 self.log(f"model={name} device={dev} quant={self.compute_type} "
+                         f"threads={threads or 'умолчание'} "
                          f"load={time.time() - t0:.1f}s")
                 return
             except Exception as e:  # noqa: BLE001 - фолбэк на следующий бэкенд

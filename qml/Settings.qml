@@ -629,6 +629,12 @@ Rectangle {
                         path: "voice_commands"
                     }
                     ToggleRow {
+                        title: "Слышать вопрос"
+                        subtitle: "«Ты придёшь» и «Ты придёшь?» — одни и те же слова, "
+                                  + "разница только в голосе. Услышим — поставим знак"
+                        path: "question_by_voice"
+                    }
+                    ToggleRow {
                         id: llmToggle
                         title: "Понимать поправки на ходу"
                         subtitle: llmSetup.ready

@@ -730,7 +730,20 @@ class App:
                 text = clean(text, self.cfg, log, process=process)
                 # Команды - ПОСЛЕ полировки: LLM не должна их видеть, иначе
                 # перепишет или послушается, оба исхода хуже.
+                before_commands = text
                 text, want_enter = extract_commands(text, self.cfg)
+                # Вопрос по голосу - но только если в конце не было команды.
+                # Сказали «нажми энтер» - последние полсекунды записи это она,
+                # и интонация там про команду, а не про фразу. Разбирать её
+                # значило бы гадать по чужому хвосту.
+                if (self.cfg.get("question_by_voice", True)
+                        and text == before_commands):
+                    import intonation
+
+                    try:
+                        text = intonation.maybe_question(text, audio)
+                    except Exception as e:  # noqa: BLE001 - знак не стоит фразы
+                        log(f"интонация: {e}")
                 elapsed = time.time() - t0
                 if not text:
                     # Молча спрятать пилюлю нельзя: человек говорил и ждёт
