@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FlowLocal — диктовка, которая работает без интернета</title>
-<meta name="description" content="Зажал клавишу, сказал, отпустил — текст в активном окне. Русская речь распознаётся втрое точнее Whisper, на процессоре, без облака и без подписки.">
+<meta name="description" content="Зажал клавишу, сказал, отпустил — текст в активном окне. Русская речь распознаётся вдвое точнее Whisper, на процессоре, без облака и без подписки.">
 <meta property="og:title" content="FlowLocal — диктовка, которая работает без интернета">
 <meta property="og:description" content="Голос не покидает компьютер. Не потому что мы обещаем, а потому что некуда.">
 <meta property="og:image" content="pill.png">
@@ -254,35 +254,24 @@ kbd {
     </div>
 
     <div class="bar-row">
-      <div class="bar-name">Обычная речь</div>
+      <div class="bar-name">Русская речь</div>
       <div class="bar-pair">
-        <div class="bar us" style="width: 91.6%"><span>92</span></div>
-        <div class="bar them" style="width: 74.9%"><span>75</span></div>
-      </div>
-    </div>
-
-    <div class="bar-row">
-      <div class="bar-name">Колл-центр</div>
-      <div class="bar-pair">
-        <div class="bar us" style="width: 90.5%"><span>90</span></div>
-        <div class="bar them" style="width: 76.1%"><span>76</span></div>
-      </div>
-    </div>
-
-    <div class="bar-row">
-      <div class="bar-name">Тихая или невнятная речь</div>
-      <div class="bar-pair">
-        <div class="bar us" style="width: 80.8%"><span>81</span></div>
-        <div class="bar them" style="width: 40.7%"><span>41</span></div>
+        <div class="bar us" style="width: 91.4%"><span>91</span></div>
+        <div class="bar them" style="width: 83.8%"><span>84</span></div>
       </div>
     </div>
   </div>
 
   <p class="note">
-    Из ста слов обычной речи мы разберём девяносто два, Whisper — семьдесят пять.
-    На тихой и невнятной речи разрыв вдвое: восемьдесят одно против сорока одного.
-    Цифры пересчитаны из карточки модели GigaAM (там доля ошибок: 8.4 % против
-    25.1 %) — они не наши, мы их не мерили и делать вид не будем.
+    Из ста слов мы разберём девяносто одно, Whisper — восемьдесят четыре. То есть
+    ошибок вдвое меньше.
+  </p>
+  <p class="note">
+    Замер не наш и не Сбера: одиннадцать наборов записей, независимый стенд,
+    который ведёт автор Vosk — конкурирующей модели, проигравшей в этом же
+    сравнении. Свидетельство против собственного интереса, и потому мы приводим
+    именно его. Сбер про свою модель сообщает разрыв больше нашего, но проверить
+    его нечем, поэтому мы его не повторяем.
   </p>
 
   <div class="stats" style="margin-top: 26px;">
