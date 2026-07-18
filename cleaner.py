@@ -342,6 +342,13 @@ def _ollama(prompt: str, llm_cfg: dict, log, what: str) -> str:
     и пустой/битый url в конфиге (KeyError, ValueError) убивал clean() целиком -
     то есть терялась уже распознанная фраза. LLM опциональна, диктовка - нет.
     """
+    # Без имени модели запрос уходить не должен. Ollama на пустое имя отвечает
+    # «HTTP Error 404: Not Found» - и это худший вид сообщения об ошибке: он
+    # показывает на сеть и на адрес, а виновата настройка. Сутки было потрачено
+    # на поиски «почему не отвечает Ollama», пока она отвечала исправно.
+    if not str(llm_cfg.get("model") or "").strip():
+        log(f"llm {what}: имя модели пустое - запрос не отправляю")
+        return ""
     try:
         req = urllib.request.Request(
             llm_cfg["url"].rstrip("/") + "/api/generate",
