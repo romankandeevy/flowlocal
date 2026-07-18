@@ -68,7 +68,7 @@ Item {
         anchors { left: track.right; leftMargin: 10; verticalCenter: parent.verticalCenter }
         // Моноширинный: это число-метаданные, и табличные цифры не дают
         // подписи дёргаться при перетаскивании.
-        text: sld.value.toFixed(1) + sld.suffix
+        text: sld.value.toFixed(1).replace(".", ",") + sld.suffix
         font.family: T.mono
         font.pixelSize: T.tXs
         color: T.textSecondary

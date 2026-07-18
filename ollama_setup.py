@@ -242,7 +242,7 @@ def ensure(model: str = DEFAULT_MODEL, on_stage=None, log=print) -> bool:
                 return False
             shutil.rmtree(os.path.dirname(path), ignore_errors=True)
         elif not _wait_serving(log):
-            stage("Ollama установлена, но не запускается")
+            stage("Установилось, но не запускается - попробуйте ещё раз")
             return False
 
     if not has_model(model):

@@ -76,6 +76,18 @@ Rectangle {
         anchors { top: dots.bottom; left: parent.left; right: parent.right
                   bottom: footer.top; margins: 36 }
 
+        // Заголовок каждого шага стоит на ОДНОЙ высоте: шаги привязаны к верху,
+        // а не центрируются по вертикали.
+        //
+        // Раньше центрировались, и выглядело это так: блоки у шагов разной
+        // высоты, поэтому заголовок прыгал вверх-вниз на каждое «Дальше». Глазу
+        // приходилось заново искать, где начинается текст, - и так семь раз
+        // подряд. Мелочь, которой не замечаешь, пока не положишь два экрана
+        // рядом, и от которой мастер кажется дёрганым.
+        //
+        // Приветствие - осознанное исключение: там один знак и одна фраза,
+        // прижимать их к верху не к чему, они и должны стоять посередине.
+
         // === 0. Привет ===
         Column {
             visible: wiz.step === 0
@@ -110,7 +122,7 @@ Rectangle {
         // показать мастер дважды - один раз чужим, один раз своим.
         Column {
             visible: wiz.step === 1
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.top: parent.top
             width: parent.width
             spacing: 14
 
@@ -122,7 +134,7 @@ Rectangle {
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: "Это можно поменять когда угодно — «Диктовка» → «Вид»."
+                text: "Это можно поменять когда угодно - «Диктовка» → «Вид»."
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
             }
 
@@ -171,7 +183,7 @@ Rectangle {
                         SettingRow {
                             first: true
                             title: "Так выглядит настройка"
-                            subtitle: "А так — пояснение под ней"
+                            subtitle: "А так - пояснение под ней"
                             Toggle { value: true }
                         }
                         SettingRow {
@@ -184,10 +196,16 @@ Rectangle {
             }
         }
 
+        // Имён моделей на этом экране нет намеренно. Это второй шаг мастера:
+        // человек ещё ничего не выбрал и ничего про программу не знает, а
+        // строка начиналась с «GigaAM» и «Parakeet» - двух слов, которые ему
+        // ничего не говорят. Первой должна идти польза, имя модели живёт на
+        // странице «Модели», куда идут именно за ним.
+
         // === 2. Язык и модель ===
         Column {
             visible: wiz.step === 2
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.top: parent.top
             width: parent.width
             spacing: 12
             Text {
@@ -203,9 +221,9 @@ Rectangle {
             Repeater {
                 model: [
                     {lang: "ru", title: "Русский",
-                     sub: "GigaAM: обучена на 700 000 часов русской речи, сама ставит пунктуацию. 226 МБ"},
+                     sub: "Точнее всех для русского: сама ставит запятые и точки. 226 МБ"},
                     {lang: "en", title: "Русский и другие языки",
-                     sub: "Parakeet: 25 европейских языков, язык определяет сама. 670 МБ"},
+                     sub: "25 европейских языков, язык определяет сама. По-русски чуть хуже. 670 МБ"},
                 ]
                 Rectangle {
                     width: parent.width
@@ -247,7 +265,7 @@ Rectangle {
             }
             Text {
                 visible: wiz.modelReady
-                text: "Модель уже на диске - можно дальше."
+                text: "Уже скачано - можно дальше."
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.success
             }
         }
@@ -256,7 +274,7 @@ Rectangle {
         Column {
             id: micStep
             visible: wiz.step === 3
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.top: parent.top
             width: parent.width
             spacing: 12
             property var bars: []
@@ -320,11 +338,11 @@ Rectangle {
         // === 4. Сочетание ===
         Column {
             visible: wiz.step === 4
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.top: parent.top
             width: parent.width
             spacing: 12
             Text {
-                text: "Каким жестом диктовать?"
+                text: "Чем включать диктовку?"
                 font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
                 color: T.text
             }
@@ -346,7 +364,7 @@ Rectangle {
         // === 5. Проверим вставку ===
         Column {
             visible: wiz.step === 5
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.top: parent.top
             width: parent.width
             spacing: 12
             property string result: ""
@@ -358,7 +376,7 @@ Rectangle {
             }
             Text {
                 width: parent.width
-                text: "Разрешения Windows не нужны, но вставке может мешать антивирус. Нажмите кнопку - текст должен появиться в поле."
+                text: "Нажмите кнопку - текст должен появиться в поле. Если не появился, мешает антивирус."
                 wrapMode: Text.WordWrap
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
             }
@@ -397,7 +415,7 @@ Rectangle {
         Column {
             id: trialStep
             visible: wiz.step === 6
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.top: parent.top
             width: parent.width
             spacing: 12
             property bool rec: false
@@ -452,7 +470,7 @@ Rectangle {
         Column {
             id: llmStep
             visible: wiz.step === 7
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.top: parent.top
             width: parent.width
             spacing: 12
 
@@ -580,7 +598,7 @@ Rectangle {
                     x: 16; y: 12
                     width: parent.width - 32
                     wrapMode: Text.WordWrap
-                    text: "Хорошо. Включить можно потом: «Диктовка» → «Править текст», "
+                    text: "Хорошо. Включить можно потом: «Диктовка» → «Правка текста на ходу», "
                           + "там та же кнопка и то же объяснение."
                     font.family: T.sans; font.pixelSize: T.t2xs; color: T.textSecondary
                     lineHeight: 1.4

@@ -25,6 +25,20 @@ Card {
     property string suffix: ""
     property int order: 0            // место в ряду - для лесенки появления
 
+    // Числа ещё нет, но будет. Не то же самое, что ноль.
+    //
+    // Скорость печати нельзя посчитать, пока человек не наговорил хотя бы
+    // минуту, и раньше на её месте стоял прочерк - тем же кеглем 24 и тем же
+    // жирным начертанием, что и настоящие числа рядом. Читалось это как
+    // сломанное значение: два числа и одно битое. Прочерк вообще плохо годится
+    // на роль «пока нечего показать» - в таблицах он значит «ноль» или
+    // «неприменимо», а здесь не то и не другое.
+    //
+    // Поэтому ожидающая метрика говорит словами и вполголоса: обычный кегль,
+    // приглушённый цвет. Строй ряда из трёх сохраняется, но карточка честно
+    // выглядит приглашением, а не поломкой.
+    property bool pending: false
+
     property real _shown: 0
     readonly property string _display: countTo >= 0
         ? Math.round(_shown) + suffix : value
@@ -91,6 +105,7 @@ Card {
             }
             Text {
                 text: root._display
+                visible: !root.pending
                 font.family: T.sans
                 // 24, а не канонические 32. В Korti 32 - это --display, кегль
                 // для ОДНОГО числа на экране. У нас их три в ряд, и рядом
@@ -104,9 +119,20 @@ Card {
                 font.letterSpacing: -0.72      // -.03em от 24px
                 color: T.text
             }
+            // Вместо числа - что надо сделать, чтобы оно появилось.
+            Text {
+                text: root.value
+                visible: root.pending
+                width: col.width
+                wrapMode: Text.WordWrap
+                font.family: T.sans
+                font.pixelSize: T.tMd
+                color: T.textSecondary
+                lineHeight: 1.3
+            }
             Text {
                 text: root.hint
-                visible: root.hint !== ""
+                visible: root.hint !== "" && !root.pending
                 width: col.width
                 wrapMode: Text.WordWrap
                 font.family: T.sans

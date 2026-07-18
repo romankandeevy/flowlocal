@@ -124,7 +124,15 @@ class _Extra(QObject):
                 text = clean(text, self._app.cfg, lambda *_a: None)
                 self.trialReady.emit(text or "тишина - попробуйте ещё раз")
             except Exception as e:  # noqa: BLE001
-                self.trialReady.emit(f"не получилось: {e}")
+                # Первая проба голоса в жизни человека. Питоновское исключение
+                # здесь - худшее из возможных первых впечатлений; подробность
+                # уходит в журнал, человеку остаётся понятная строка.
+                try:
+                    from app import log
+                    log(f"пробная диктовка не вышла: {e}")
+                except Exception:  # noqa: BLE001
+                    pass
+                self.trialReady.emit("не получилось - попробуйте ещё раз")
 
         threading.Thread(target=work, daemon=True).start()
 

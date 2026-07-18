@@ -29,6 +29,26 @@ from PySide6.QtQuick import QQuickView
 
 import app_paths
 import config as C
+
+
+def _log(msg: str) -> None:
+    """Подробность - в журнал, человеку - фразу без питоновских потрохов.
+
+    Текст исключения раньше уходил прямо в подпись окна: человек видел
+    «не удалось сохранить: [Errno 13] Permission denied». Это ровно
+    тот случай, ради которого в правилах написано «служебное живёт в flow.log,
+    и кнопка рядом» - кнопка «Журнал работы» тут же, на странице «О программе».
+
+    Импорт внутри функции, а не сверху: app импортирует settings_qt, и сверху
+    получилось бы кольцо. К моменту вызова app давно загружен.
+    """
+    try:
+        from app import log
+        log(msg)
+    except Exception:  # noqa: BLE001 - молчащий журнал не должен ронять окно
+        pass
+
+
 import inputspec
 import models
 import stats
@@ -145,7 +165,8 @@ class Backend(QObject):
         try:
             C.save(self.cfg)
         except OSError as e:
-            self.flashed.emit(f"не удалось сохранить: {e}", "danger")
+            _log(f"настройки не сохранились: {e}")
+            self.flashed.emit("не удалось сохранить - смотрите журнал работы", "danger")
             return
         self._on_change(dict(self.cfg))
 
@@ -157,11 +178,11 @@ class Backend(QObject):
 
     @Property("QVariantList", constant=True)
     def langOptions(self) -> list:
-        return _opts([("авто", None), ("рус", "ru"), ("eng", "en")])
+        return _opts([("авто", None), ("русский", "ru"), ("английский", "en")])
 
     @Property("QVariantList", constant=True)
     def deviceOptions(self) -> list:
-        return _opts([("авто", "auto"), ("GPU", "cuda"), ("CPU", "cpu")])
+        return _opts([("авто", "auto"), ("видеокарта", "cuda"), ("процессор", "cpu")])
 
     @Property("QVariantList", constant=True)
     def themeOptions(self) -> list:
@@ -285,14 +306,15 @@ class Backend(QObject):
         from PySide6.QtGui import QGuiApplication
 
         QGuiApplication.clipboard().setText(text)
-        self.flashed.emit("скопировано в буфер", "")
+        self.flashed.emit("скопировано", "")
 
     @Slot()
     def clearHistory(self) -> None:
         try:
             open(self.history_path, "w", encoding="utf-8").close()
         except OSError as e:
-            self.flashed.emit(f"не удалось очистить: {e}", "danger")
+            _log(f"история не очистилась: {e}")
+            self.flashed.emit("не удалось очистить - смотрите журнал работы", "danger")
             return
         self.flashed.emit("история очищена", "")
 
@@ -324,19 +346,23 @@ class Backend(QObject):
         streak = s["streak_days"]
 
         return {
+            # Признак «есть что показывать» считаем здесь, а не разбираем в QML
+            # уже отформатированные строки: там «0» - непустая строка, и любая
+            # проверка на месте выходит враньём.
+            "hasData": s["dictations"] > 0,
             "dictations": f"{s['dictations']}",
             "words": f"{s['words']}",
             "seconds": _dur(s["seconds"]),
             "saved_sec": _dur(s["saved_sec"]),
             "speedOk": enough,
             "speed": ("в " + f"{ratio:.1f}".replace(".", ",") + " раза")
-                     if enough else "—",
+                     if enough else "-",
             "userWpm": round(s["speech_wpm"]),
             "streak": f"{streak} {plural(streak, 'день', 'дня', 'дней')}",
             "values": [v for _d, v in days],
             "range": (f"{days[0][0]} - {days[-1][0]}   ·   пик {top} "
                       f"{plural(top, 'слово', 'слова', 'слов')} в день") if days
-                     else "Пока пусто. Продиктуйте что-нибудь.",
+                     else "",
             "typingWpm": stats.TYPING_WPM,
         }
 
@@ -406,7 +432,8 @@ class Backend(QObject):
                 self.modelProgress.emit(model_id, 1.0)
                 self.flashed.emit(f"{m.title} скачана", "")
             except Exception as e:  # noqa: BLE001
-                self.flashed.emit(f"не удалось скачать: {e}", "danger")
+                _log(f"модель не скачалась: {e}")
+                self.flashed.emit("не удалось скачать - проверьте интернет", "danger")
             finally:
                 self._downloading.discard(model_id)
                 self.modelsChanged.emit()
@@ -433,7 +460,8 @@ class Backend(QObject):
                             for f in os.listdir(d)) / 1e6
                 shutil.rmtree(d)
         except OSError as e:
-            self.flashed.emit(f"не удалось удалить: {e}", "danger")
+            _log(f"модель не удалилась: {e}")
+            self.flashed.emit("не удалось удалить - смотрите журнал работы", "danger")
             return
         self.flashed.emit(f"удалена, освобождено {freed:.0f} МБ", "")
         self.modelsChanged.emit()
@@ -450,7 +478,8 @@ class Backend(QObject):
             app_paths.set_autostart(bool(value))
             self.flashed.emit("автозапуск включён" if value else "автозапуск выключен", "")
         except OSError as e:
-            self.flashed.emit(f"не удалось: {e}", "danger")
+            _log(f"автозапуск не переключился: {e}")
+            self.flashed.emit("не вышло переключить автозапуск", "danger")
 
     @Slot(result=str)
     def about(self) -> str:
@@ -684,9 +713,13 @@ class Backend(QObject):
         try:
             n = backup.save(path, self.cfg, history)
         except OSError as e:
-            self.flashed.emit(f"не сохранилось: {e}", "danger")
+            _log(f"выгрузка не сохранилась: {e}")
+            self.flashed.emit("не сохранилось - смотрите журнал работы", "danger")
             return ""
-        what = f"{n} настроек" + (f" и {len(history)} диктовок" if history else "")
+        what = f"{n} {plural(n, 'настройка', 'настройки', 'настроек')}"
+        if history:
+            what += (f" и {len(history)} "
+                     f"{plural(len(history), 'диктовка', 'диктовки', 'диктовок')}")
         self.flashed.emit(f"сохранено: {what}", "accent")
         return path
 
@@ -704,12 +737,13 @@ class Backend(QObject):
         try:
             data = backup.load(path)
         except Exception as e:  # noqa: BLE001 - чужой файл не должен ронять окно
-            self.flashed.emit(f"не подошёл: {e}", "danger")
+            _log(f"файл выгрузки не подошёл: {e}")
+            self.flashed.emit("файл не подошёл - выберите другой", "danger")
             return ""
         added, replaced = backup.merge(self.cfg, data)
         self._flush()
         self.changed.emit()
-        note = f"добавлено {added}"
+        note = f"добавлено {added} {plural(added, 'запись', 'записи', 'записей')}"
         if replaced:
             note += f", заменено {len(replaced)}"
         self.flashed.emit(note if added or replaced else "всё это уже было", "accent")

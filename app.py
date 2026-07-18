@@ -612,7 +612,7 @@ class App:
                 llm = self.cfg.get("llm") or {}
                 if not llm.get("enabled"):
                     log("command: полировка выключена, править нечем")
-                    self.ui(self.overlay.show_error, "нужна Ollama")
+                    self.ui(self.overlay.show_error, "правка текста не установлена")
                     return
 
                 self._inserting = True
@@ -725,7 +725,7 @@ class App:
                 # тем же _work_lock, поэтому две фразы подряд не устроят двух
                 # загрузок.
                 if not self.transcriber.loaded:
-                    self.ui(self.overlay.show_downloading, "поднимаю модель")
+                    self.ui(self.overlay.show_downloading, "просыпаюсь")
                     self.transcriber.load()
                     self.ui(self.overlay.show_processing)
                 self._last_use = time.time()
@@ -796,7 +796,7 @@ class App:
                 self.ui(self.overlay.show_error, "не удалось вставить")
         except Exception as e:  # noqa: BLE001
             log(f"process error: {e}")
-            self.ui(self.overlay.show_error, "ошибка распознавания")
+            self.ui(self.overlay.show_error, "не получилось - нажмите ещё раз")
         finally:
             self._set_tray_state("idle")
 
@@ -1096,7 +1096,7 @@ class App:
                 # Пусть в ней будет то, что человек ищет: чем диктовать.
                 # Обновляем по событию, а не таймером: приложение висит в трее
                 # сутками, и опрос ради строчки - те же холостые пробуждения.
-                self.tray.setToolTip(f"FlowLocal — {self._status()}")
+                self.tray.setToolTip(f"FlowLocal - {self._status()}")
             except Exception:  # noqa: BLE001
                 pass
 
@@ -1291,7 +1291,7 @@ class App:
             self._ollama_busy = False
             # Итог виден и без окна: пилюля скажет «готово» или «не удалось».
             self.ui(self.overlay.show_done if ok else self.overlay.show_error,
-                    "правка текста готова" if ok else "не удалось поставить")
+                    "правка текста готова" if ok else "не удалось установить")
             self.ui(tell, "готово" if ok else "не удалось", 1.0 if ok else 0.0, 0, ok)
 
         threading.Thread(target=work, daemon=True).start()
@@ -1343,7 +1343,7 @@ class App:
             self.tray.showMessage(
                 "Диктовка не отвечает",
                 "Горячие клавиши перестали работать. Перезапустите программу: "
-                "правый клик по значку - «Выйти», потом откройте заново.")
+                "правый клик по значку - «Выход», потом откройте заново.")
 
     def _maybe_unload_model(self) -> None:
         """Отпустить модель, если ей давно не пользовались.
@@ -1714,7 +1714,7 @@ class App:
         self.tray.showMessage(
             "FlowLocal запущен",
             f"Диктовка: {binds}" if binds
-            else "Хоткей не назначен - откройте настройки",
+            else "Сочетание не назначено - откройте настройки",
             QSystemTrayIcon.Information, 4000)
 
 
