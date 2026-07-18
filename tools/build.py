@@ -1,4 +1,4 @@
-"""Собрать FlowLocal — папку с .exe, чтобы «скачал и запустил», без Python.
+"""Собрать FlowLocal - папку с .exe, чтобы «скачал и запустил», без Python.
 
     python tools/build.py cpu     # работает у всех. Друзьям это.
     python tools/build.py cuda    # только если стоит onnxruntime-gpu
@@ -83,10 +83,10 @@ def check_changelog() -> bool:
         print("ПРОВАЛ: CHANGELOG.md разобран криво, разделы без пунктов "
               "или с мусором в дате:")
         for r in bad:
-            print(f"  {r['version']} — {r['date'][:60]}")
+            print(f"  {r['version']} - {r['date'][:60]}")
         return False
     if not changelog.notes_for(__version__):
-        print(f"ПРОВАЛ: в CHANGELOG.md нет раздела «## {__version__} — дата»")
+        print(f"ПРОВАЛ: в CHANGELOG.md нет раздела «## {__version__} - дата»")
         print("Без него релиз уедет без заметок, а «О программе» - без версии.")
         return False
     return True
@@ -210,8 +210,8 @@ def main() -> int:
         print("  Их надо выбросить в flowlocal.spec (_QT_KEEP), иначе раздавать нельзя.")
     if variant == "cpu":
         print("Модель качается при первом запуске в models/ рядом с .exe.")
-    print("Раздавать — папку целиком, а не один .exe: см. licenses/README.txt.")
-    print("Проверять — на машине БЕЗ Python: см. tools/BUILD.md.")
+    print("Раздавать - папку целиком, а не один .exe: см. licenses/README.txt.")
+    print("Проверять - на машине БЕЗ Python: см. tools/BUILD.md.")
 
     if "--installer" in sys.argv:
         if variant != "cpu":
