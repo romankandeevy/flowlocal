@@ -12,7 +12,11 @@ huggingface_hub>=0.30
 # они GPL-only и утянут проект в GPL.
 PySide6>=6.9
 sounddevice>=0.5
-keyboard>=0.13
+# Только Windows. У автора в описании репозитория буквально «Hook and simulate
+# global keyboard events on Windows and Linux», macOS помечена experimental, а
+# сам проект - unmaintained с марта 2020. На Mac клавиатурный слой придётся
+# делать на pynput, который у нас уже есть и уже держит мышь.
+keyboard>=0.13; sys_platform == "win32"
 # Кнопки мыши как хоткей (ctrl+mouse4): keyboard про мышь не знает.
 # Была библиотека mouse - выброшена (PLAN 0.4): автор архивировал её в феврале
 # 2026, последний коммит - январь 2020, и подавлять события она не умела вовсе.
@@ -23,7 +27,10 @@ pynput>=1.7
 # ему не нужно. Заодно из сборки пропала вкомпиленная LGPLv3-библиотека.
 # Pillow остаётся: на нём иконка трея (icons.py).
 pillow>=10
-pywin32>=306
+# Только Windows, очевидно. Без маркера `pip install -r requirements.txt` на
+# Mac обрывался на этой строке - то есть до проб этапа 20 нельзя было дойти
+# вовсе, хотя всё остальное ставится колёсами и компилятора не требует.
+pywin32>=306; sys_platform == "win32"
 numpy
 # Видеокарта не нужна. Кому хочется гонять Whisper на GPU - ставит вместо
 # onnxruntime колесо onnxruntime-gpu, и device=auto подхватит CUDA сам.
