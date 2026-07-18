@@ -655,6 +655,66 @@ class Backend(QObject):
             })
         return out
 
+    # ---------- выгрузка и загрузка личного ----------
+
+    @Slot(bool, result=str)
+    def exportData(self, with_history: bool) -> str:
+        """Сохранить словарь, замены и сочетания в файл. Возвращает отчёт.
+
+        Диалог сохранения - системный: своё окно выбора файла человеку
+        объяснять не надо, а системное он видел тысячу раз.
+        """
+        import backup
+        from PySide6.QtWidgets import QFileDialog
+
+        name = time.strftime("FlowLocal-%Y-%m-%d.json")
+        path, _ = QFileDialog.getSaveFileName(
+            None, "Куда сохранить", os.path.join(os.path.expanduser("~"), name),
+            "Файл FlowLocal (*.json)")
+        if not path:
+            return ""
+        history = None
+        if with_history:
+            import stats
+
+            try:
+                history = stats.load(self.history_path)
+            except OSError:
+                history = []
+        try:
+            n = backup.save(path, self.cfg, history)
+        except OSError as e:
+            self.flashed.emit(f"не сохранилось: {e}", "danger")
+            return ""
+        what = f"{n} настроек" + (f" и {len(history)} диктовок" if history else "")
+        self.flashed.emit(f"сохранено: {what}", "accent")
+        return path
+
+    @Slot(result=str)
+    def importData(self) -> str:
+        """Загрузить из файла. Сливает, а не затирает - см. backup.merge."""
+        import backup
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            None, "Откуда загрузить", os.path.expanduser("~"),
+            "Файл FlowLocal (*.json)")
+        if not path:
+            return ""
+        try:
+            data = backup.load(path)
+        except Exception as e:  # noqa: BLE001 - чужой файл не должен ронять окно
+            self.flashed.emit(f"не подошёл: {e}", "danger")
+            return ""
+        added, replaced = backup.merge(self.cfg, data)
+        self._flush()
+        self.changed.emit()
+        note = f"добавлено {added}"
+        if replaced:
+            note += f", заменено {len(replaced)}"
+        self.flashed.emit(note if added or replaced else "всё это уже было", "accent")
+        return path
+
     # ---------- подстановки, найденные по истории ----------
 
     @Slot(result="QVariantList")

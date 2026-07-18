@@ -1138,6 +1138,22 @@ Rectangle {
 
                 Card {
                     width: parent.width
+                    SettingRow {
+                        title: "Забывать старое"
+                        subtitle: "История - самое личное, что тут есть: дословно всё, что вы "
+                                  + "наговорили. Можно хранить не вечно"
+                        Segmented {
+                            // options - пары «подпись/значение», а не голые
+                            // строки: value здесь число дней, и сравнивать
+                            // подписи было бы враньём про то, что хранится.
+                            options: [{label: "всегда", value: 0},
+                                      {label: "месяц", value: 30},
+                                      {label: "полгода", value: 180},
+                                      {label: "год", value: 365}]
+                            value: B.get("history_days") || 0
+                            onPicked: (v) => B.set("history_days", v)
+                        }
+                    }
                     ToggleRow {
                         first: true
                         title: "Вести историю"
@@ -1357,6 +1373,41 @@ Rectangle {
                 // что в ней изменилось и чем она отличается от вчерашней -
                 // узнать было неоткуда, а обновлятор предлагал обновиться,
                 // не говоря ради чего.
+                // Копия личного. Словарь и замены копятся годами, живут в одном
+                // файле рядом с программой и не воспроизводятся ничем: снёс
+                // Windows - и нет их. Раздел 0.8 плана уже ловил этот риск на
+                // самом проекте («работа висит на одном диске»), на данных
+                // владельца вывод тот же.
+                SectionTitle { text: "Свои слова и настройки" }
+                Card {
+                    width: parent.width
+                    SettingRow {
+                        first: true
+                        title: "Сохранить в файл"
+                        subtitle: "Словарь, замены, тон и сочетания. Пригодится при переустановке "
+                                  + "и на втором компьютере"
+                        Row {
+                            spacing: 8
+                            FlowButton {
+                                label: "Сохранить"
+                                onClicked: B.exportData(false)
+                            }
+                            FlowButton {
+                                label: "Вместе с историей"
+                                onClicked: B.exportData(true)
+                            }
+                        }
+                    }
+                    SettingRow {
+                        title: "Загрузить из файла"
+                        subtitle: "Добавит к тому, что есть. Ваши сочетания и слова не пропадут"
+                        FlowButton {
+                            label: "Загрузить"
+                            onClicked: B.importData()
+                        }
+                    }
+                }
+
                 SectionTitle { text: "Как обновлялось"; visible: history.count > 0 }
                 Card {
                     width: parent.width

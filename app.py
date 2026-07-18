@@ -1256,6 +1256,50 @@ class App:
     def ollama_busy(self) -> bool:
         return self._ollama_busy
 
+    def _forget_old_history(self) -> None:
+        """Выбросить диктовки старше history_days. 0 - ничего не трогаем.
+
+        Зовём на старте, а не по таймеру: приложение живёт в трее сутками, и
+        просыпаться ради перечитывания файла незачем. День туда-сюда для срока
+        хранения роли не играет.
+
+        Переписываем целиком через временный файл: обрыв на середине оставил бы
+        половину истории, а это не лог, это данные.
+        """
+        days = int(self.cfg.get("history_days") or 0)
+        if days <= 0 or not os.path.exists(HISTORY_PATH):
+            return
+        import datetime
+
+        edge = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+        kept, dropped = [], 0
+        try:
+            with open(HISTORY_PATH, encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    # Сравниваем строки: формат «ГГГГ-ММ-ДД ЧЧ:ММ:СС» сортируется
+                    # как текст, разбирать дату ради этого незачем.
+                    try:
+                        ts = json.loads(line).get("ts") or ""
+                    except ValueError:
+                        continue        # битую строку не тащим дальше
+                    if str(ts)[:10] >= edge:
+                        kept.append(line)
+                    else:
+                        dropped += 1
+            if not dropped:
+                return
+            tmp = HISTORY_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.writelines(kept)
+            os.replace(tmp, HISTORY_PATH)
+            log(f"история: забыто {dropped} "
+                f"{plural(dropped, 'диктовка', 'диктовки', 'диктовок')} "
+                f"старше {days} {plural(days, 'дня', 'дней', 'дней')}")
+        except OSError as e:
+            log(f"история: почистить не вышло - {e}")
+
     def _autoconfig_llm_bg(self) -> None:
         """Есть ли у человека Ollama - выясняем сами, а не спрашиваем.
 
@@ -1345,6 +1389,7 @@ class App:
         self._heal_autostart()
         threading.Thread(target=self._load_model_bg, daemon=True).start()
         threading.Thread(target=self._autoconfig_llm_bg, daemon=True).start()
+        self._forget_old_history()
         threading.Thread(target=self._check_update_bg, daemon=True).start()
         # И дальше - по таймеру, пока приложение живёт в трее.
         self._update_timer = QTimer()
