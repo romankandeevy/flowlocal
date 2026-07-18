@@ -308,6 +308,24 @@ def autoconfig_llm(cfg: dict, log) -> str:
     if not isinstance(llm, dict):
         return ""
 
+    # Своя модель в models/ - она никуда не делась и ничего не спрашивает.
+    # Проверяем первой: если человек её скачал, то он этот выбор уже сделал, и
+    # искать чужой сервер незачем.
+    if str(llm.get("backend") or "") == "local":
+        import llm_local
+
+        name = str(llm.get("local_model") or "")
+        if not llm_local.available(name):
+            if llm.get("enabled"):
+                log(f"llm local: модели {name} нет - чистим запятыми")
+            return ""
+        if llm.get("enabled") is None:
+            llm["enabled"] = True
+        t0 = time.monotonic()
+        if _ask("ок", {**llm, "timeout_sec": 120}, log, "warmup"):
+            log(f"llm прогрета за {time.monotonic() - t0:.1f} с")
+        return name
+
     have = probe_ollama(str(llm.get("url") or ""))
     if not have:
         if llm.get("enabled"):
@@ -330,9 +348,29 @@ def autoconfig_llm(cfg: dict, log) -> str:
     # фоновом потоке - греем здесь, чтобы к первой фразе модель уже сидела в
     # памяти. keep_alive в запросе держит её там дальше.
     t0 = time.monotonic()
-    if _ollama("ок", {**llm, "timeout_sec": 120}, log, "warmup"):
+    if _ask("ок", {**llm, "timeout_sec": 120}, log, "warmup"):
         log(f"llm прогрета за {time.monotonic() - t0:.1f} с")
     return model
+
+
+def _ask(prompt: str, llm_cfg: dict, log, what: str) -> str:
+    """Один запрос к LLM, какой бы она ни была. Пустая строка - не получилось.
+
+    Два движка, один контракт:
+
+        ollama  чужая программа с сервером на порту. Работает отлично, но
+                поставить и настроить её человеку, который пишет письма, никто
+                не поможет;
+        local   onnxruntime-genai в нашем же процессе. Рантайм уже в сборке
+                ради распознавания, модель качается в models/ рядом с GigaAM.
+
+    Выбор - в конфиге (`llm.backend`). Умолчание - ollama: у тех, у кого она
+    уже стоит, ничего не должно измениться от этой правки.
+    """
+    if str(llm_cfg.get("backend") or "ollama") == "local":
+        import llm_local
+        return llm_local.ask(prompt, llm_cfg, log, what)
+    return _ollama(prompt, llm_cfg, log, what)
 
 
 def _ollama(prompt: str, llm_cfg: dict, log, what: str) -> str:
@@ -430,7 +468,7 @@ def _sane(before: str, after: str, log, what: str, floor: float = 0.5) -> bool:
 
 
 def _llm_polish(text: str, llm_cfg: dict, log) -> str:
-    got = _ollama(_LLM_PROMPT.format(text=text), llm_cfg, log, "polish")
+    got = _ask(_LLM_PROMPT.format(text=text), llm_cfg, log, "polish")
     if not _sane(text, got, log, "polish"):
         return text
     # Полировка - это вычёркивание, и ответ обязан быть исходником с
@@ -467,7 +505,7 @@ def llm_command(text: str, instruction: str, llm_cfg: dict, log) -> str:
     """
     if not text.strip() or not instruction.strip():
         return ""
-    got = _ollama(_COMMAND_PROMPT.format(text=text, instruction=instruction),
+    got = _ask(_COMMAND_PROMPT.format(text=text, instruction=instruction),
                   llm_cfg, log, "command")
     if not got:
         return ""
@@ -479,7 +517,7 @@ def llm_command(text: str, instruction: str, llm_cfg: dict, log) -> str:
 
 
 def _llm_tone(text: str, tone: str, llm_cfg: dict, log) -> str:
-    got = _ollama(_TONE_PROMPT.format(text=text, tone=tone), llm_cfg, log, "tone")
+    got = _ask(_TONE_PROMPT.format(text=text, tone=tone), llm_cfg, log, "tone")
     # Тону позволено больше: он для того и зван, чтобы переписать фразу.
     return got if _sane(text, got, log, "tone", floor=0.4) else text
 
