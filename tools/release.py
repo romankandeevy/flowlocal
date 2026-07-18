@@ -124,8 +124,56 @@ def main() -> int:
         print("ПРОВАЛ:", (r.stderr or r.stdout).strip()[:400])
         return 1
     print(r.stdout.strip())
+    publish_npm()
     print("\nОбновлятор увидит это на следующем запуске тех, у кого версия ниже.")
     return 0
+
+
+def publish_npm() -> None:
+    """Выложить пакет в npm той же версией.
+
+    Зачем в этом скрипте, а не руками. Версию в npm/package.json мы правим
+    выше, но пакет никто не публиковал - и он отстал: в реестре лежала 0.15.0,
+    когда программа была уже 0.16.0. Человек, набравший `npx @usekorti/flowlocal`,
+    получал вчерашний установщик и не знал об этом.
+
+    Провал публикации НЕ роняет выпуск: релиз на GitHub уже создан, установщик
+    уже лежит, обновлятор уже его видит. npm - витрина, а не путь доставки.
+
+    Первая публикация пакета с областью (@usekorti/...) требует --access public:
+    иначе npm считает его закрытым и просит платную подписку.
+    """
+    pkg = os.path.join(ROOT, "npm")
+    if not os.path.exists(os.path.join(pkg, "package.json")):
+        return
+    npm = shutil.which("npm") or shutil.which("npm.cmd")
+    if not npm:
+        print("npm не найден - пакет не опубликован (это не мешает выпуску)")
+        return
+
+    who = run([npm, "whoami"], cwd=pkg)
+    if who.returncode != 0:
+        print("npm: не выполнен вход (`npm login`) - пакет не опубликован")
+        return
+
+    r = run([npm, "publish", "--access", "public"], cwd=pkg)
+    if r.returncode == 0:
+        print(f"npm: опубликован @usekorti/flowlocal {__version__} "
+              f"(от имени {who.stdout.strip()})")
+        return
+    out = (r.stderr or r.stdout).strip()
+    if "previously published versions" in out:
+        print(f"npm: {__version__} уже опубликована - пропускаю")
+    elif "auth" in out.lower() or "ENEEDAUTH" in out:
+        # npm whoami отвечает по старому токену, а publish требует свежего и
+        # уводит в браузер. Пройти этот вход за человека нельзя, и делать вид,
+        # что «что-то пошло не так», тоже - пусть знает, что именно нажать.
+        print("npm: нужен вход - выполните в папке npm/:")
+        print("     npm login   (откроется браузер)")
+        print(f"     npm publish --access public")
+    else:
+        print("npm: опубликовать не вышло, выпуск это не отменяет:")
+        print("  " + (out.splitlines()[-1][:200] if out else "(без вывода)"))
 
 
 if __name__ == "__main__":
