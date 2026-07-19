@@ -92,7 +92,7 @@ Card {
                         onEdited: (t) => { rows.setProperty(index, "v", t); table.commit() }
                     }
                     FlowButton {
-                        label: "Убрать"
+                        label: L.t("Убрать")
                         onClicked: { rows.remove(index); table.commit() }
                     }
                 }

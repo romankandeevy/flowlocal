@@ -207,6 +207,10 @@ class OnboardingWindow:
         ctx.setContextProperty("T", self.tokens)
         ctx.setContextProperty("B", self.backend)
         ctx.setContextProperty("OB", self.extra)
+        from theme_qt import Lang
+
+        self.lang = Lang()
+        ctx.setContextProperty("L", self.lang)
         base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
         v.setSource(QUrl.fromLocalFile(os.path.join(base, "qml", "Onboarding.qml")))
         if v.status() == QQuickView.Error:

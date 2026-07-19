@@ -70,13 +70,13 @@ Rectangle {
                 spacing: 8
                 width: parent.width
                 FlowButton {
-                    label: "Новая"
+                    label: L.t("Новая")
                     kind: "primary"
                     onClicked: root.create()
                 }
                 FlowInput {
                     width: parent.width - 90
-                    placeholder: "Найти…"
+                    placeholder: L.t("Найти…")
                     onTextChanged: root.search(text)
                 }
             }
@@ -124,7 +124,7 @@ Rectangle {
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
                     visible: root.items.length === 0
-                    text: "Заметок пока нет.\nНажмите «Новая» и диктуйте прямо сюда."
+                    text: L.t("Заметок пока нет.\nНажмите «Новая» и диктуйте прямо сюда.")
                     font.family: T.sans; font.pixelSize: T.tXs
                     color: T.textMuted
                     lineHeight: 1.4
@@ -172,7 +172,7 @@ Rectangle {
             // Подсказка вместо placeholderText, которого у TextEdit нет.
             Text {
                 visible: editor.text.length === 0
-                text: "Диктуйте или пишите. Сохраняется само."
+                text: L.t("Диктуйте или пишите. Сохраняется само.")
                 font.family: T.sans
                 font.pixelSize: T.tBase
                 color: T.textFaint
@@ -194,12 +194,12 @@ Rectangle {
                       verticalCenter: parent.verticalCenter }
             spacing: 8
             FlowButton {
-                label: root.busy ? "Причёсываю…" : "Привести в порядок"
+                label: root.busy ? L.t("Причёсываю…") : L.t("Привести в порядок")
                 enabled: !root.busy && editor.text.trim().length > 0
                 onClicked: { root.busy = true; root.improve(root.current, editor.text) }
             }
             FlowButton {
-                label: "Скопировать всё"
+                label: L.t("Скопировать всё")
                 enabled: editor.text.trim().length > 0
                 onClicked: root.copy(editor.text)
             }
@@ -207,7 +207,7 @@ Rectangle {
         FlowButton {
             anchors { right: parent.right; rightMargin: 16
                       verticalCenter: parent.verticalCenter }
-            label: "Удалить"
+            label: L.t("Удалить")
             kind: "danger"
             enabled: root.current !== ""
             onClicked: root.remove(root.current)

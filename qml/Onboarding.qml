@@ -60,7 +60,7 @@ Rectangle {
         }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: wiz.step === wiz.last ? "последний шаг"
+            text: wiz.step === wiz.last ? L.t("последний шаг")
                 : wiz.step === wiz.last - 1 ? "почти готово"
                 : ""
             visible: text !== ""
@@ -107,7 +107,7 @@ Rectangle {
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: Math.min(parent.width, 420)
                 horizontalAlignment: Text.AlignHCenter
-                text: "Зажали клавишу - говорите, отпустили - текст вставился туда, где курсор. Звук и текст не покидают этот компьютер."
+                text: L.t("Зажали клавишу - говорите, отпустили - текст вставился туда, где курсор. Звук и текст не покидают этот компьютер.")
                 wrapMode: Text.WordWrap
                 font.family: T.sans; font.pixelSize: T.tMd
                 color: T.textSecondary
@@ -127,29 +127,29 @@ Rectangle {
             spacing: 14
 
             Text {
-                text: "Как вам удобнее?"
+                text: L.t("Как вам удобнее?")
                 font.family: T.sans; font.pixelSize: T.tXl
                 font.weight: Font.DemiBold; color: T.text
             }
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: "Это можно поменять когда угодно - «Диктовка» → «Вид»."
+                text: L.t("Это можно поменять когда угодно - «Диктовка» → «Вид».")
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
             }
 
             Item { width: 1; height: 4 }
 
             Text {
-                text: "ЦВЕТА"
+                text: L.t("ЦВЕТА")
                 font.family: T.sans; font.pixelSize: T.t2xs
                 font.weight: Font.DemiBold; font.letterSpacing: 0.6
                 color: T.textFaint
             }
             Segmented {
-                options: [{label: "как в системе", value: "system"},
-                          {label: "светлая", value: "light"},
-                          {label: "тёмная", value: "dark"}]
+                options: [{label: L.t("как в системе"), value: "system"},
+                          {label: L.t("светлая"), value: "light"},
+                          {label: L.t("тёмная"), value: "dark"}]
                 value: B.get("theme") || "system"
                 onPicked: (v) => B.set("theme", v)
             }
@@ -157,14 +157,14 @@ Rectangle {
             Item { width: 1; height: 8 }
 
             Text {
-                text: "РАСПОЛОЖЕНИЕ"
+                text: L.t("РАСПОЛОЖЕНИЕ")
                 font.family: T.sans; font.pixelSize: T.t2xs
                 font.weight: Font.DemiBold; font.letterSpacing: 0.6
                 color: T.textFaint
             }
             Segmented {
-                options: [{label: "карточками", value: "cards"},
-                          {label: "строками", value: "lines"}]
+                options: [{label: L.t("карточками"), value: "cards"},
+                          {label: L.t("строками"), value: "lines"}]
                 value: B.get("layout") || "cards"
                 onPicked: (v) => B.set("layout", v)
             }
@@ -182,13 +182,13 @@ Rectangle {
                         width: parent.width
                         SettingRow {
                             first: true
-                            title: "Так выглядит настройка"
-                            subtitle: "А так - пояснение под ней"
+                            title: L.t("Так выглядит настройка")
+                            subtitle: L.t("А так - пояснение под ней")
                             Toggle { value: true }
                         }
                         SettingRow {
-                            title: "И следующая за ней"
-                            subtitle: "Разделены линией в обоих видах"
+                            title: L.t("И следующая за ней")
+                            subtitle: L.t("Разделены линией в обоих видах")
                             Toggle { value: false }
                         }
                     }
@@ -214,7 +214,7 @@ Rectangle {
             width: parent.width
             spacing: 12
             Text {
-                text: wiz.modelReady ? "Модель на месте" : "Скачаем модель"
+                text: wiz.modelReady ? L.t("Модель на месте") : L.t("Скачаем модель")
                 font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
                 color: T.text
             }
@@ -222,9 +222,9 @@ Rectangle {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: wiz.modelReady
-                      ? "Она уже на этом компьютере. Дальше интернет для распознавания не нужен."
-                      : "236 МБ, скачается один раз. Дальше распознавание работает без "
-                        + "интернета - ни звук, ни текст никуда не уходят. Видеокарта не нужна."
+                      ? L.t("Она уже на этом компьютере. Дальше интернет для распознавания не нужен.")
+                      : L.t("236 МБ, скачается один раз. Дальше распознавание работает без ")
+                        + L.t("интернета - ни звук, ни текст никуда не уходят. Видеокарта не нужна.")
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
                 lineHeight: 1.4
             }
@@ -241,7 +241,7 @@ Rectangle {
             }
             Text {
                 visible: wiz.modelReady
-                text: "Уже скачано - можно дальше."
+                text: L.t("Уже скачано - можно дальше.")
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.success
             }
         }
@@ -255,13 +255,13 @@ Rectangle {
             spacing: 12
             property var bars: []
             Text {
-                text: "Микрофон"
+                text: L.t("Микрофон")
                 font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
                 color: T.text
             }
             Text {
                 width: parent.width
-                text: "Скажите что-нибудь - волна должна ожить. Если лежит ровно, выберите другой микрофон."
+                text: L.t("Скажите что-нибудь - волна должна ожить. Если лежит ровно, выберите другой микрофон.")
                 wrapMode: Text.WordWrap
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
             }
@@ -318,20 +318,20 @@ Rectangle {
             width: parent.width
             spacing: 12
             Text {
-                text: "Чем включать диктовку?"
+                text: L.t("Чем включать диктовку?")
                 font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
                 color: T.text
             }
             Text {
                 width: parent.width
-                text: "Зажали - говорите, отпустили - вставилось. Кликните по полю и нажмите своё сочетание; подойдёт и боковая кнопка мыши."
+                text: L.t("Зажали - говорите, отпустили - вставилось. Кликните по полю и нажмите своё сочетание; подойдёт и боковая кнопка мыши.")
                 wrapMode: Text.WordWrap
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
             }
             HotkeyField { field: "hotkey_hold" }
             Text {
                 width: parent.width
-                text: "Второй жест - «нажал и говоришь со свободными руками» - настраивается позже, в Настройках."
+                text: L.t("Второй жест - «нажал и говоришь со свободными руками» - настраивается позже, в Настройках.")
                 wrapMode: Text.WordWrap
                 font.family: T.sans; font.pixelSize: T.t2xs; color: T.textFaint
             }
@@ -346,23 +346,23 @@ Rectangle {
             property string result: ""
             id: insStep
             Text {
-                text: "Проверим вставку"
+                text: L.t("Проверим вставку")
                 font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
                 color: T.text
             }
             Text {
                 width: parent.width
-                text: "Нажмите кнопку - текст должен появиться в поле. Если не появился, мешает антивирус."
+                text: L.t("Нажмите кнопку - текст должен появиться в поле. Если не появился, мешает антивирус.")
                 wrapMode: Text.WordWrap
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
             }
             FlowInput {
                 id: insField
                 width: parent.width
-                placeholder: "сюда вставится проверочный текст"
+                placeholder: L.t("сюда вставится проверочный текст")
             }
             FlowButton {
-                label: "Проверить вставку"
+                label: L.t("Проверить вставку")
                 kind: "primary"
                 onClicked: {
                     insField.text = "";
@@ -381,8 +381,8 @@ Rectangle {
                 target: OB
                 function onInsertDone(ok) {
                     insStep.result = ok && insField.text.length > 0
-                        ? "Работает."
-                        : "не сработало - проверьте антивирус или включите режим «посимвольно» в настройках";
+                        ? L.t("Работает.")
+                        : L.t("не сработало - проверьте антивирус или включите режим «посимвольно» в настройках");
                 }
             }
         }
@@ -397,17 +397,17 @@ Rectangle {
             property bool rec: false
             property string result: ""
             Text {
-                text: "Скажите что-нибудь"
+                text: L.t("Скажите что-нибудь")
                 font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
                 color: T.text
             }
             Text {
                 width: parent.width
-                text: "Распознанный текст появится здесь и никуда не вставится."
+                text: L.t("Распознанный текст появится здесь и никуда не вставится.")
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
             }
             FlowButton {
-                label: trialStep.rec ? "Стоп" : "Начать запись"
+                label: trialStep.rec ? L.t("Стоп") : L.t("Начать запись")
                 kind: "primary"
                 onClicked: {
                     if (trialStep.rec) { OB.trialStop(); trialStep.result = "распознаю…" }
@@ -459,7 +459,7 @@ Rectangle {
             property real total: 0
 
             Text {
-                text: llmStep.done ? "Готово" : "Осталось поставить правку текста"
+                text: llmStep.done ? L.t("Готово") : L.t("Осталось поставить правку текста")
                 font.family: T.sans; font.pixelSize: T.tXl; font.weight: Font.DemiBold
                 color: T.text
             }
@@ -467,11 +467,11 @@ Rectangle {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: llmStep.done
-                      ? "Всё готово. Программа понимает поправки на ходу, расставляет знаки "
-                        + "препинания и умеет преобразовывать выделенный текст."
-                      : "Без неё программа работать не будет: она расставляет знаки препинания, "
-                        + "понимает поправки на ходу («встреча в пятницу, нет, в субботу» - "
-                        + "останется суббота) и преобразует выделенный текст по одному нажатию."
+                      ? L.t("Всё готово. Программа понимает поправки на ходу, расставляет знаки ")
+                        + L.t("препинания и умеет преобразовывать выделенный текст.")
+                      : L.t("Без неё программа работать не будет: она расставляет знаки препинания, ")
+                        + L.t("понимает поправки на ходу («встреча в пятницу, нет, в субботу» - ")
+                        + L.t("останется суббота) и преобразует выделенный текст по одному нажатию.")
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
                 lineHeight: 1.4
             }
@@ -491,16 +491,16 @@ Rectangle {
                     width: parent.width - 32
                     spacing: 6
                     Text {
-                        text: "Нужно скачать 3.3 ГБ"
+                        text: L.t("Нужно скачать 3.3 ГБ")
                         font.family: T.sans; font.pixelSize: T.tSm
                         font.weight: Font.DemiBold; color: T.text
                     }
                     Text {
                         width: parent.width
                         wrapMode: Text.WordWrap
-                        text: "Ollama - бесплатная программа, которая считает это на вашем "
-                              + "компьютере, и модель к ней. Всё останется здесь: интернет "
-                              + "нужен только чтобы скачать."
+                        text: L.t("Ollama - бесплатная программа, которая считает это на вашем ")
+                              + L.t("компьютере, и модель к ней. Всё останется здесь: интернет ")
+                              + L.t("нужен только чтобы скачать.")
                         font.family: T.sans; font.pixelSize: T.t2xs; color: T.textMuted
                         lineHeight: 1.4
                     }
@@ -531,7 +531,7 @@ Rectangle {
                 Text {
                     width: parent.width
                     wrapMode: Text.WordWrap
-                    text: "Можно свернуть окно - диктовка уже работает."
+                    text: L.t("Можно свернуть окно - диктовка уже работает.")
                     font.family: T.sans; font.pixelSize: T.t2xs; color: T.textMuted
                 }
             }
@@ -540,7 +540,7 @@ Rectangle {
                 visible: !llmStep.busy && !llmStep.done
                 spacing: 10
                 FlowButton {
-                    label: llmStep.failed ? "Попробовать снова" : "Да, установить"
+                    label: llmStep.failed ? L.t("Попробовать снова") : L.t("Да, установить")
                     kind: "primary"
                     onClicked: {
                         llmStep.failed = false;
@@ -577,8 +577,8 @@ Rectangle {
                     x: 16; y: 12
                     width: parent.width - 32
                     wrapMode: Text.WordWrap
-                    text: "Хорошо. Включить можно потом: «Диктовка» → «Правка текста на ходу», "
-                          + "там та же кнопка и то же объяснение."
+                    text: L.t("Хорошо. Включить можно потом: «Диктовка» → «Правка текста на ходу», ")
+                          + L.t("там та же кнопка и то же объяснение.")
                     font.family: T.sans; font.pixelSize: T.t2xs; color: T.textSecondary
                     lineHeight: 1.4
                 }
@@ -593,8 +593,8 @@ Rectangle {
                 visible: llmStep.failed
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: "Не получилось - " + llmStep.stage + ". Диктовка работает и без этого, "
-                      + "а попробовать снова можно в настройках."
+                text: L.t("Не получилось - ") + llmStep.stage + L.t(". Диктовка работает и без этого, ")
+                      + L.t("а попробовать снова можно в настройках.")
                 font.family: T.sans; font.pixelSize: T.t2xs; color: T.danger
                 lineHeight: 1.4
             }
@@ -624,7 +624,7 @@ Rectangle {
         FlowButton {
             visible: wiz.step > 0
             anchors { left: parent.left; leftMargin: 36; verticalCenter: parent.verticalCenter }
-            label: "Назад"
+            label: L.t("Назад")
             onClicked: wiz.step -= 1
         }
         FlowButton {
@@ -636,11 +636,11 @@ Rectangle {
             // такой программой нельзя.
             enabled: !(wiz.step === wiz.last && !llmStep.done)
             opacity: enabled ? 1 : 0.4
-            label: wiz.step === 0 ? "Начать"
+            label: wiz.step === 0 ? L.t("Начать")
                  : wiz.step === 2 ? (wiz.modelReady ? "Дальше"
                                      : wiz.downloading ? "Скачивается…" : "Скачать модель")
                  : wiz.step === wiz.last ? (llmStep.done ? "Готово" : "Сначала установите")
-                 : "Дальше"
+                 : L.t("Дальше")
             onClicked: {
                 if (wiz.step === 2 && !wiz.modelReady) {
                     if (!wiz.downloading) B.downloadModel(wiz.chosenModel);

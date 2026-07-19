@@ -131,6 +131,10 @@ class Overlay(QObject):
         self.view.setResizeMode(QQuickView.SizeViewToRootObject)
         ctx = self.view.rootContext()
         ctx.setContextProperty("T", self.tokens)
+        from theme_qt import Lang
+
+        self.lang = Lang()
+        ctx.setContextProperty("L", self.lang)
         self.view.setSource(QUrl.fromLocalFile(_qml_path()))
         if self.view.status() == QQuickView.Error:
             raise RuntimeError("; ".join(str(e) for e in self.view.errors()))

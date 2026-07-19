@@ -76,7 +76,7 @@ Item {
     Text {
         anchors.centerIn: parent
         visible: chart.values.length === 0
-        text: "пока пусто"
+        text: L.t("пока пусто")
         font.family: T.sans
         font.pixelSize: T.tSm
         color: T.textFaint

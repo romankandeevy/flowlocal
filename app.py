@@ -94,6 +94,7 @@ import models  # noqa: E402
 import overlay_qt as OV  # noqa: E402
 import theme as T  # noqa: E402
 import updater  # noqa: E402
+import i18n  # noqa: E402
 import recordings  # noqa: E402
 import streaming  # noqa: E402
 import transforms  # noqa: E402
@@ -1352,6 +1353,15 @@ class App:
             self._reload_model_bg()
         # Раскладка - такой же токен оформления, как краска: меняется тем же
         # путём и применяется на лету, без пересборки окна.
+        if old.get("ui_language") != new.get("ui_language"):
+            i18n.set_language(str(new.get("ui_language") or "ru"))
+            # Строки в QML - это привязки к L.t(), и сигнал заставляет их
+            # пересчитаться. Пересобирать окно, как когда-то с темой, не надо.
+            for win in (self.settings, self.onboarding, self.notes_win):
+                lang = getattr(win, "lang", None)
+                if lang is not None:
+                    lang.retranslate()
+            log(f"язык интерфейса: {new.get('ui_language')}")
         if (old.get("theme") != new.get("theme")
                 or old.get("layout") != new.get("layout")):
             self._apply_theme()
@@ -2009,6 +2019,10 @@ class App:
             log("не смог открыть настройки по ярлыку:\n" + traceback.format_exc())
 
     def run(self, silent: bool = False) -> None:
+        # Язык интерфейса ставим ДО первого окна: иначе мастер первого
+        # запуска успеет отрисоваться по-русски и переведётся только
+        # после первой перерисовки.
+        i18n.set_language(str(self.cfg.get("ui_language") or "ru"))
         self._hotkey_bind()
         self._wake = wakeup.WakeWatcher(self._on_wake, log)
         self._wake.start()

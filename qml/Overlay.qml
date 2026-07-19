@@ -77,7 +77,7 @@ Item {
     readonly property color iconColor: state_ === "done"  ? T.success
                                      : state_ === "error" ? T.danger
                                                           : T.accent
-    readonly property string label: isLoading ? "загружаю модель" : message
+    readonly property string label: isLoading ? L.t("загружаю модель") : message
 
     // Появление: прозрачность 0->1 и сдвиг на 8px вверх за 180 мс.
     // Без масштаба и без пружин - Korti разрешает фейды и небольшие сдвиги.
@@ -253,7 +253,7 @@ Item {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: root.isRec && root.silence
-                text: "не слышу микрофон"
+                text: L.t("не слышу микрофон")
                 font.family: T.sans; font.pixelSize: T.px(T.t2xs); font.weight: Font.Medium
                 color: T.textMuted
             }

@@ -1027,6 +1027,11 @@ class SettingsWindow:
         ctx = v.rootContext()
         ctx.setContextProperty("T", self.tokens)
         ctx.setContextProperty("B", self.backend)
+        # Переводчик - в каждое окно: строки интерфейса ходят через L.t().
+        from theme_qt import Lang
+
+        self.lang = Lang()
+        ctx.setContextProperty("L", self.lang)
         base = os.path.dirname(os.path.abspath(__file__))
         import sys
         base = getattr(sys, "_MEIPASS", None) or base

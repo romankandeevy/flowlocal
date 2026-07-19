@@ -38,7 +38,7 @@ Item {
             width: parent.width - 20
             horizontalAlignment: Text.AlignHCenter
             elide: Text.ElideRight
-            text: box.capturing ? "нажмите сочетание…"
+            text: box.capturing ? L.t("нажмите сочетание…")
                  : box.pretty !== "" ? box.pretty : "не назначено"
             // Моноширинный: сочетание клавиш - это голос терминала.
             font.family: T.mono

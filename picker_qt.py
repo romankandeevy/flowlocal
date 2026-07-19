@@ -63,6 +63,10 @@ class Picker(QObject):
         self.view.setColor(QColor(0, 0, 0, 0))
         self.view.setResizeMode(QQuickView.SizeViewToRootObject)
         self.view.rootContext().setContextProperty("T", tokens)
+        from theme_qt import Lang
+
+        self.lang = Lang()
+        self.view.rootContext().setContextProperty("L", self.lang)
         self.view.setSource(QUrl.fromLocalFile(_qml_path()))
         if self.view.status() == QQuickView.Error:
             raise RuntimeError("; ".join(str(e) for e in self.view.errors()))

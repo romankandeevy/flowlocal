@@ -263,3 +263,23 @@ class Tokens(QObject):
     def easeOut(self) -> list:
         """cubic-bezier(.2,.8,.2,1) - единственная кривая системы, без пружин."""
         return [0.2, 0.8, 0.2, 1.0]
+
+
+class Lang(QObject):
+    """Переводчик для QML: L.t("строка").
+
+    Отдельным объектом, а не методом токенов: язык и оформление меняются по
+    разным поводам, и мешать их в одном сигнале значит перерисовывать окно
+    из-за темы, когда сменился язык, и наоборот.
+    """
+
+    changed = Signal()
+
+    @Slot(str, result=str)
+    def t(self, text: str) -> str:
+        import i18n
+
+        return i18n.t(text)
+
+    def retranslate(self) -> None:
+        self.changed.emit()

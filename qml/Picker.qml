@@ -159,7 +159,7 @@ Item {
             Text {
                 anchors { left: parent.left; leftMargin: 18
                           verticalCenter: parent.verticalCenter }
-                text: "цифра или Enter - применить · Esc - отменить"
+                text: L.t("цифра или Enter - применить · Esc - отменить")
                 font.family: T.sans
                 font.pixelSize: T.t2xs
                 color: T.textFaint
