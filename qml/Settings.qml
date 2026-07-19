@@ -967,6 +967,31 @@ Rectangle {
                             onPicked: (v) => B.set("cleanup", v)
                         }
                     }
+                    // Ответ на «чем давить в вайб-кодинге». Не вставкой в
+                    // редактор - вставлять мы и так умеем. Бедой было другое:
+                    // модель обучена на обычной речи и пишет «джейсон» словами.
+                    SettingRow {
+                        title: "Технические термины"
+                        subtitle: "«джейсон» станет JSON, «гитхаб» - GitHub, "
+                                  + "«пул реквест» - pull request. Сто терминов "
+                                  + "разом; попадут в «Слова», можно править поштучно"
+                        Segmented {
+                            options: [{label: "выключены", value: false},
+                                      {label: "включены", value: true}]
+                            value: B.get("tech_terms") || false
+                            onPicked: (v) => B.setTechTerms(v)
+                        }
+                    }
+                    SettingRow {
+                        title: "Заметки открываются"
+                        subtitle: "Продолжить прошлую или каждый раз начинать с чистого листа"
+                        Segmented {
+                            options: [{label: "прошлой", value: "last"},
+                                      {label: "новой", value: "new"}]
+                            value: B.get("notes_open") || "last"
+                            onPicked: (v) => B.set("notes_open", v)
+                        }
+                    }
                     ToggleRow {
                         title: "Останавливать музыку"
                         subtitle: "На время диктовки. Если музыка не играла, "

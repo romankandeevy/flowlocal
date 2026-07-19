@@ -176,6 +176,26 @@ class Backend(QObject):
 
     # ---------- списки для QML ----------
 
+    @Slot(bool)
+    def setTechTerms(self, on: bool) -> None:
+        """Включить или выключить технические термины.
+
+        Термины кладём в те же подстановки, что и свои: механика одна, и
+        человек видит их в «Словах» - может поправить или удалить поштучно.
+        Выключение снимает только наши записи, свои не трогает.
+        """
+        import techdict
+
+        snips = self.cfg.get("snippets") or {}
+        snips = techdict.merge_into(snips) if on else techdict.strip_from(snips)
+        C.set_(self.cfg, "snippets", snips)
+        C.set_(self.cfg, "tech_terms", bool(on))
+        self._flush()
+        self.changed.emit()
+        n = len(techdict.TERMS)
+        self.flashed.emit(f"{n} технических терминов "
+                          + ("добавлено" if on else "убрано"), "accent")
+
     @Slot()
     def openNotes(self) -> None:
         """Открыть окно заметок из панели."""

@@ -74,8 +74,23 @@ class NotesWindow(QObject):
     # ---------- показ ----------
 
     def open(self) -> None:
+        """Показать окно. Что именно открыть - по настройке «notes_open».
+
+        «last» - продолжаем прошлую мысль, «new» - чистый лист. Второе для
+        тех, у кого заметка это разовый черновик, а не дневник: им каждый раз
+        приходилось бы нажимать «Новая», и это ровно тот случай, когда
+        настройка дешевле привычки.
+        """
         self.refresh()
-        if not self.root.property("current"):
+        как = str(self.cfg.get("notes_open") or "last")
+        if как == "new":
+            # Чистый лист заводим только если прошлый не остался пустым:
+            # иначе за десять открытий накопится десять пустых заметок.
+            cur = self.root.property("current")
+            текст = (notes.load(cur) or {}).get("text", "") if cur else "x"
+            if текст.strip():
+                self.create()
+        elif not self.root.property("current"):
             items = notes.listing()
             if items:
                 self.open_note(items[0]["id"])
