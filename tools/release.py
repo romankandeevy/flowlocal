@@ -2,9 +2,13 @@
 
     python tools/build.py cpu --installer     # сперва собрать
     python tools/release.py                   # потом выложить
-    python tools/release.py --otp 123456      # если npm просит код (2FA)
+    python tools/release.py --otp КОД         # если npm просит код (2FA)
     python tools/release.py --npm-only        # дослать пакет, не выпуская
     python tools/release.py --notes "Что нового"
+
+КОД - шесть цифр из приложения-аутентификатора, живут полминуты. Не образец:
+подсказка с готовыми цифрами уже была скопирована как есть, и скрипт честно
+отправил её в npm.
 
 Версия берётся из version.py и нигде больше не пишется. Тег - v{версия}.
 
@@ -246,6 +250,14 @@ def publish_npm(otp: str = "") -> bool:
         print("npm: не выполнен вход (`npm login`) - пакет не опубликован")
         return False
 
+    # Образец из подсказки, отправленный как настоящий код. Ловим здесь, а не
+    # пеняем на невнимательность: подсказку с готовыми цифрами написали мы, а
+    # копировать команду целиком - ровно то, для чего подсказки и нужны.
+    if otp == "123456":
+        print("«123456» - это образец из подсказки, а не код. Возьмите шесть")
+        print("цифр из приложения-аутентификатора и повторите: они живут полминуты.")
+        return False
+
     cmd = [npm, "publish", "--access", "public"]
     if otp:
         cmd += ["--otp", otp]
@@ -260,17 +272,38 @@ def publish_npm(otp: str = "") -> bool:
     print()
     print("!" * 68)
     print(f"npm: пакет НЕ опубликован. В реестре по-прежнему нет {ver}.")
+
+    # Что сказал сам npm - ПЕРВОЙ строкой и всегда. Раньше при включённом 2FA
+    # мы сразу переходили к своему объяснению, и настоящая ошибка не
+    # показывалась вовсе: `npm_needs_otp()` истинен постоянно, поэтому любая
+    # другая беда - занятое имя, упавшая сеть - выглядела бы как «нужен код».
+    # Своя догадка никогда не должна закрывать собой чужое сообщение.
+    err = [ln for ln in out.splitlines()
+           if "error" in ln.lower() and "log of this run" not in ln.lower()]
+    if err:
+        print()
+        print("Дословно от npm:")
+        for ln in err[:3]:
+            print("  " + ln.strip()[:150])
+
+    print()
     if "otp" in low or "one-time" in low or "eotp" in low or npm_needs_otp():
         print()
         print("Причина: у учётки включён код подтверждения на публикацию")
         print("(two-factor auth: auth-and-writes). Ввести его скрипту некуда.")
         print()
-        print("Дальше два пути, оба делаются один раз:")
-        print(f"  1) повторить с кодом:  python tools/release.py --npm-only --otp 123456")
-        print("  2) убрать код из уравнения навсегда - завести токен автоматизации:")
-        print("     npmjs.com -> Access Tokens -> Generate -> Automation,")
-        print("     затем `npm config set //registry.npmjs.org/:_authToken <токен>`.")
-        print("     Токен автоматизации обходит 2FA намеренно, для таких скриптов.")
+        print("Дальше два пути:")
+        print("  1) разово - повторить с настоящим кодом из аутентификатора:")
+        print("       python tools/release.py --npm-only --otp <шесть цифр>")
+        print("     Цифры живут полминуты, образец из этой подсказки не подойдёт.")
+        print("  2) навсегда - токен автоматизации, он обходит 2FA намеренно:")
+        print("       npmjs.com -> Access Tokens -> Generate New Token")
+        print("       -> Classic Token -> Automation")
+        print("       npm config set //registry.npmjs.org/:_authToken ТОКЕН")
+        print("     Проверить, что он подхватился:")
+        print("       npm config get //registry.npmjs.org/:_authToken")
+        print("     Гранулярный токен (Granular Access) тоже годится, но ему")
+        print("     нужно явно выдать право записи на пакет @usekorti/flowlocal.")
     elif "auth" in low or "eneedauth" in low:
         print("Причина: нужен вход. В папке npm/: `npm login` (откроется браузер),")
         print("потом `python tools/release.py --npm-only`.")
