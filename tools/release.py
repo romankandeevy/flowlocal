@@ -247,7 +247,24 @@ def publish_npm(otp: str = "") -> bool:
 
     who = run([npm, "whoami"], cwd=pkg)
     if who.returncode != 0:
-        print("npm: не выполнен вход (`npm login`) - пакет не опубликован")
+        # И здесь тоже сперва дословно, потом догадка. «Не выполнен вход»
+        # было правдой лишь наполовину: вход мог быть выполнен, а токен в
+        # ~/.npmrc - протухнуть, и тогда совет `npm login` уводил не туда.
+        # Строка `_authToken` перебивает браузерную сессию, поэтому мёртвый
+        # токен ломает публикацию, даже когда до него всё работало.
+        err = [ln for ln in (who.stderr or "").splitlines()
+               if "error" in ln.lower() and "log of this run" not in ln.lower()]
+        print("npm: реестр не признал нас - пакет не опубликован.")
+        for ln in err[:2]:
+            print("  " + ln.strip()[:150])
+        if any("401" in ln for ln in err):
+            print("  401 - токен недействителен: не тот, обрезан при копировании")
+            print("  или отозван. Он лежит в ~/.npmrc строкой _authToken и")
+            print("  перебивает вход через браузер, поэтому чинить надо его:")
+            print("    npm config delete //registry.npmjs.org/:_authToken")
+            print("    npm login")
+        else:
+            print("  выполните `npm login` в папке npm/ и повторите --npm-only")
         return False
 
     # Образец из подсказки, отправленный как настоящий код. Ловим здесь, а не
