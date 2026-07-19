@@ -728,6 +728,13 @@ def clean(text: str, cfg: dict, log, process: str = "") -> str:
     process - имя exe окна, куда поедет текст ('outlook.exe'): по нему
     подбирается тон. Пусто - тон не трогаем.
     """
+    # Уровень чистки - быстрый переключатель поверх отдельных настроек.
+    # Человеку проще выбрать одно слово, чем разбираться в пяти галочках;
+    # галочки при этом никуда не делись, и уровень их не переписывает.
+    level = str(cfg.get("cleanup") or "medium")
+    if level == "none":
+        return text
+
     try:
         # Словарь - первым: он чинит осечки распознавания, а все слои ниже
         # (и промпты LLM, и сниппеты) рассчитывают на верные слова.
@@ -740,10 +747,10 @@ def clean(text: str, cfg: dict, log, process: str = "") -> str:
         text = _punctuate(text, cfg)
         global last_punct_sec
         last_punct_sec = time.perf_counter() - _pt
-        if cfg.get("remove_fillers", True):
+        if cfg.get("remove_fillers", True) and level in ("medium", "high"):
             text = _strip_fillers(text)
         llm = cfg.get("llm") or {}
-        if text and llm.get("enabled"):
+        if text and llm.get("enabled") and level == "high":
             text = _llm_polish(text, llm, log)
         # Сниппеты - после полировки, но ДО тона. После полировки: её промпт
         # видит только фразу-триггер («моя почта»), а не подставленный адрес, и
@@ -757,7 +764,7 @@ def clean(text: str, cfg: dict, log, process: str = "") -> str:
         # Ollama. Дёргать её ради одного тона, когда полировку выключили,
         # значило бы тайком включить выключенное - и добавить ещё секунды к
         # задержке, которая сейчас вся ~0.7 с.
-        if text and llm.get("enabled"):
+        if text and llm.get("enabled") and level == "high":
             tone = tone_for(process, cfg)
             if tone:
                 text = _llm_tone(text, tone, llm, log)

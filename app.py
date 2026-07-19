@@ -202,6 +202,7 @@ class App:
         self._update: dict | None = None   # свежая версия с GitHub, если нашлась
         self._wake = None            # слух за сном и разблокировкой экрана
         self.notes_win = None        # окно заметок, создаётся при первом открытии
+        self._music = None           # пауза музыки на время диктовки
         self.picker = None           # список преобразований, создаётся при первом показе
         self._tf_text = ""           # что преобразуем
         self._tf_clip = None         # буфер человека, вернуть после вставки
@@ -743,6 +744,25 @@ class App:
         self.ui(self.overlay.show_recording)
         self._set_tray_state("rec")
         self._stream_start()
+        self._music_pause()
+
+    def _music_pause(self) -> None:
+        """Остановить музыку - в потоке.
+
+        Замер уровня на выходе стоит около 150 мс (два опроса с паузой), и
+        держать на них начало записи нельзя: человек уже говорит.
+        """
+        if not self.cfg.get("pause_music", True):
+            return
+        if self._music is None:
+            import media
+
+            self._music = media.Music(log)
+        threading.Thread(target=self._music.pause, daemon=True).start()
+
+    def _music_resume(self) -> None:
+        if self._music is not None:
+            self._music.resume()
 
     def _stream_start(self) -> None:
         """Разбирать речь, пока человек ещё говорит.
@@ -802,6 +822,9 @@ class App:
             return
         self._recording = False
         audio = self.recorder.stop()
+        # Музыку возвращаем сразу, не дожидаясь распознавания: человек
+        # договорил, и тишина ему больше не нужна.
+        self._music_resume()
         dur = time.time() - self._rec_started_at
         beep(660, 60, self.cfg.get("sounds", True))
         if dur < float(self.cfg.get("min_record_sec", 0.3)) or audio.size == 0:
@@ -933,6 +956,7 @@ class App:
         if not self._recording:
             return
         self._recording = False
+        self._music_resume()
         # Разобранное на ходу выбрасываем вместе с записью: человек передумал,
         # и держать половину его фразы незачем.
         self._stream = None

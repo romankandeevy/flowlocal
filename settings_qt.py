@@ -174,6 +174,42 @@ class Backend(QObject):
 
     # ---------- списки для QML ----------
 
+    @Slot(str, str)
+    def addToDictionary(self, heard: str, correct: str) -> None:
+        """Добавить пару «услышано - правильно» в словарь одним нажатием.
+
+        Смысл в том, чтобы не заставлять человека открывать «Слова» и
+        вспоминать, как пишется слово, которое программа путает. Мы это уже
+        знаем: слово и его исправление лежат в истории.
+        """
+        if not heard or not correct:
+            return
+        words = list(self.cfg.get("dictionary") or [])
+        if correct in words:
+            self.flashed.emit(f"«{correct}» уже в словаре", "")
+            return
+        words.append(correct)
+        C.set_(self.cfg, "dictionary", words)
+        self._flush()
+        self.changed.emit()
+        self.flashed.emit(f"«{correct}» добавлено в словарь", "accent")
+
+    @Slot(result="QVariantMap")
+    def insights(self) -> dict:
+        """Разбор своей речи. Считается здесь же, по накопленной истории."""
+        import insights
+        import stats
+
+        try:
+            rows = stats.load(self.history_path)
+        except OSError:
+            rows = []
+        d = insights.summary(rows)
+        # Часы приводим к виду, который читает человек, а не к числу.
+        h = d.get("hour", -1)
+        d["hourText"] = f"{h}:00-{h + 1}:00" if h >= 0 else ""
+        return d
+
     @Slot(result="QVariantList")
     def savedRecordings(self) -> list:
         """Записи, которые не удалось распознать. Свежие первыми."""

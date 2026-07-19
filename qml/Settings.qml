@@ -940,6 +940,27 @@ Rectangle {
                     // Знаки препинания. Модель по умолчанию их не ставит, и
                     // это выбор между «мгновенно правилами» и «умнее моделью».
                     SettingRow {
+                        first: true
+                        title: "Насколько править"
+                        subtitle: "«Ничего» - как услышали. «Слегка» - знаки и словарь. "
+                                  + "«Обычно» - плюс убрать бубнёж. «Сильно» - плюс "
+                                  + "правка текста моделью, но это дольше"
+                        Segmented {
+                            options: [{label: "ничего", value: "none"},
+                                      {label: "слегка", value: "light"},
+                                      {label: "обычно", value: "medium"},
+                                      {label: "сильно", value: "high"}]
+                            value: B.get("cleanup") || "medium"
+                            onPicked: (v) => B.set("cleanup", v)
+                        }
+                    }
+                    ToggleRow {
+                        title: "Останавливать музыку"
+                        subtitle: "На время диктовки. Если музыка не играла, "
+                                  + "она и не заиграет - вернём только то, что сами остановили"
+                        path: "pause_music"
+                    }
+                    SettingRow {
                         title: "Знаки препинания"
                         subtitle: punctBox.ready
                             ? "Модель скачана - ставит запятые по смыслу и слышит вопрос. "
@@ -1391,6 +1412,101 @@ Rectangle {
                     StatRow { title: "Дней подряд"
                         subtitle: "Диктовали каждый день без пропуска"
                         value: statsPage.s.streak || "-" }
+                }
+
+                // ---- Как вы говорите ----
+                //
+                // Считается по накопленной истории, здесь же, на этой машине.
+                // Пока данных мало - раздел не показывается вовсе: сказать
+                // «ваше любимое слово - «который»» по трём диктовкам значит
+                // соврать с умным видом.
+                SectionTitle { text: "Как вы говорите"; visible: ins.d.rows > 0 }
+                Card {
+                    width: parent.width
+                    visible: ins.d.rows > 0
+                    Item {
+                        id: ins
+                        property var d: ({rows: 0})
+                        Component.onCompleted: d = B.insights()
+                    }
+                    Connections {
+                        target: statsPage
+                        function onVisibleChanged() {
+                            if (statsPage.visible) ins.d = B.insights();
+                        }
+                    }
+
+                    StatRow {
+                        first: true
+                        visible: ins.d.persona !== ""
+                        title: "Ваша манера"
+                        subtitle: ins.d.persona || ""
+                        value: ""
+                    }
+                    StatRow {
+                        visible: ins.d.top_word !== ""
+                        title: "Любимое слово"
+                        subtitle: "Чаще всего повторяется в ваших диктовках"
+                        value: ins.d.top_word + " · " + ins.d.top_word_n
+                    }
+                    StatRow {
+                        visible: ins.d.phrase !== ""
+                        title: "Присказка"
+                        subtitle: "Три слова подряд, которые вы говорите чаще прочих"
+                        value: ins.d.phrase
+                    }
+                    StatRow {
+                        visible: ins.d.hourText !== ""
+                        title: "Часы пик"
+                        subtitle: "Когда вы диктуете больше всего"
+                        value: ins.d.hourText
+                    }
+                    StatRow {
+                        visible: ins.d.fixed > 0
+                        title: "Программа исправила"
+                        subtitle: "Слов, которые программа поправила за вас"
+                        value: ins.d.fixed + ""
+                    }
+                    // Слово, которое путается чаще прочих, - и кнопка, чтобы
+                    // научить программу за одно нажатие. Открывать «Слова» и
+                    // вспоминать написание не нужно: мы его уже знаем.
+                    Repeater {
+                        model: (ins.d.pairs || []).slice(0, 3)
+                        SettingRow {
+                            title: "Путается «" + modelData.heard + "»"
+                            subtitle: "Вы диктуете «" + modelData.fixed + "», а слышится "
+                                      + "иначе. Уже " + modelData.n + " раз"
+                            FlowButton {
+                                label: "Научить"
+                                onClicked: B.addToDictionary(modelData.heard,
+                                                             modelData.fixed)
+                            }
+                        }
+                    }
+                    // Пока не набралось - говорим сколько ещё, а не молчим.
+                    StatRow {
+                        visible: !ins.d.enough
+                        title: "Пока считаем"
+                        subtitle: "Про любимое слово и присказку скажем, когда "
+                                  + "наберётся побольше диктовок"
+                        value: ins.d.words + " слов"
+                    }
+                }
+
+                SectionTitle { text: "Куда диктуете"; visible: (ins.d.where || []).length > 0 }
+                Card {
+                    width: parent.width
+                    visible: (ins.d.where || []).length > 0
+                    Repeater {
+                        model: ins.d.where || []
+                        StatRow {
+                            first: index === 0
+                            title: modelData.kind
+                            subtitle: modelData.words + " слов за "
+                                      + modelData.count + " диктовок"
+                            value: modelData.share + "%"
+                        }
+                    }
                 }
 
                 SectionTitle { text: "По дням"; visible: statsPage.s.hasData === true }

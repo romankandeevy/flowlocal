@@ -72,6 +72,9 @@ jobs:
       - name: заметки
         run: python test_notes.py
 
+      - name: разбор своей речи
+        run: python test_insights.py
+
       - name: вопрос по интонации
         run: python test_intonation.py
 
