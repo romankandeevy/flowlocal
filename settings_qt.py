@@ -19,6 +19,7 @@ Korti (HANDOFF, раздел 4) закрыто само собой.
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 
@@ -78,6 +79,19 @@ def _dur(sec: float) -> str:
 def _opts(pairs) -> list:
     """[(подпись, значение)] -> [{label, value}] для QML."""
     return [{"label": lbl, "value": val} for lbl, val in pairs]
+
+
+def _download_cmd(model_id: str) -> list:
+    """Чем звать загрузчик модели: собранный .exe или свой же исходник.
+
+    В сборке python рядом не лежит - зовём сам .exe со служебным флагом
+    (app.download_model_cli). Из исходников зовём тот же интерпретатор, что
+    выполняет нас: `sys.executable` в этом случае и есть python.
+    """
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--download-model", model_id]
+    return [sys.executable, os.path.join(app_paths.APP_DIR, "app.py"),
+            "--download-model", model_id]
 
 
 class Backend(QObject):
@@ -339,7 +353,13 @@ class Backend(QObject):
 
     @Property("QVariantList", constant=True)
     def insertOptions(self) -> list:
-        return _opts([("вставка", "paste"), ("посимвольно", "type")])
+        """«Посимвольно» человеку ничего не говорит - это слово из кода.
+
+        Владелец назвал формулировку непонятной, и справедливо: выбор здесь не
+        между двумя способами набора, а между «мгновенно» и «медленно, зато
+        доходит везде». Так и подписываем - по результату, а не по механике.
+        """
+        return _opts([("сразу целиком", "paste"), ("по одной букве", "type")])
 
     @Property("QVariantList", constant=True)
     def pillOptions(self) -> list:
@@ -366,6 +386,32 @@ class Backend(QObject):
     @Slot(str, result=str)
     def pretty(self, spec: str) -> str:
         return inputspec.pretty(spec or "")
+
+    @Property(str, notify=changed)
+    def userName(self) -> str:
+        """Как обращаться к человеку на «Главной».
+
+        Берём имя учётной записи Windows: спрашивать его отдельным экраном
+        мастера ради одной строки приветствия - плохая сделка, а имя у системы
+        уже есть. Ключ `name` в конфиге перебивает его для тех, у кого учётка
+        называется «user» или «Admin».
+
+        Возвращаем пустоту, если имя не похоже на имя: «Administrator»,
+        «user», «пользователь» - это не обращение, а строка из системы, и
+        поздороваться с ней хуже, чем не здороваться вовсе. По той же причине
+        не берём слишком длинные и составные: «DESKTOP-4F2K1\\roman» - не имя.
+        """
+        import os
+
+        name = str(self.cfg.get("name") or "").strip()
+        if not name:
+            name = str(os.environ.get("USERNAME") or "").strip()
+        if not name or len(name) > 20 or not name.replace("-", "").isalpha():
+            return ""
+        if name.lower() in ("user", "admin", "administrator", "администратор",
+                            "пользователь", "owner", "default"):
+            return ""
+        return name
 
     @Property(bool, constant=True)
     def ready(self) -> bool:
@@ -421,6 +467,66 @@ class Backend(QObject):
             if k:
                 out[k] = str(r["v"])
         self.set(key, out)
+
+    # ---------- программы, которым слать Enter ----------
+    #
+    # Раньше здесь было поле, куда вписывали `telegram.exe` через запятую.
+    # Владелец спросил: откуда человеку взять это имя? Ниоткуда - он его не
+    # знает и не обязан. Теперь имена берутся из запущенных программ, а
+    # человек выбирает из того, что видит на экране.
+
+    @Slot(result="QVariantList")
+    def runningApps(self) -> list:
+        """Запущенные программы для выбора. Уже выбранные не показываем."""
+        import layered
+
+        chosen = {str(a).lower() for a in (self.cfg.get("auto_enter_apps") or [])}
+        try:
+            apps = layered.visible_apps()
+        except Exception as e:  # noqa: BLE001 - список не стоит окна настроек
+            _log(f"список запущенных программ не собрался: {e}")
+            return []
+        return [{"label": f"{name} · {exe}" if name else exe, "value": exe}
+                for name, exe in apps if exe not in chosen]
+
+    @Property("QVariantList", notify=changed)
+    def autoEnterApps(self) -> list:
+        """Выбранные программы с человеческим именем, если его удалось узнать.
+
+        Имя ищем среди запущенных: программа могла быть выбрана вчера и сейчас
+        не работать - тогда покажем просто exe. Врать про то, чего нет на
+        экране, не будем.
+        """
+        import layered
+
+        try:
+            names = {exe: name for name, exe in layered.visible_apps()}
+        except Exception:  # noqa: BLE001
+            names = {}
+        out = []
+        for exe in (self.cfg.get("auto_enter_apps") or []):
+            exe = str(exe)
+            out.append({"exe": exe, "label": names.get(exe.lower()) or exe})
+        return out
+
+    @Slot(str)
+    def addAutoEnterApp(self, exe: str) -> None:
+        exe = str(exe or "").strip().lower()
+        if not exe:
+            return
+        apps = [str(a) for a in (self.cfg.get("auto_enter_apps") or [])]
+        if exe in apps:
+            return
+        apps.append(exe)
+        self.set("auto_enter_apps", apps)
+        self.changed.emit()
+
+    @Slot(str)
+    def removeAutoEnterApp(self, exe: str) -> None:
+        apps = [str(a) for a in (self.cfg.get("auto_enter_apps") or [])
+                if str(a) != str(exe)]
+        self.set("auto_enter_apps", apps)
+        self.changed.emit()
 
     # ---------- преобразования ----------
     #
@@ -623,18 +729,30 @@ class Backend(QObject):
                 time.sleep(0.4)
 
         def work() -> None:
+            # ОТДЕЛЬНЫМ ПРОЦЕССОМ, а не потоком. Потоком было так: скачивание
+            # идёт по сети (GIL свободен), а следом onnxruntime собирает сессию
+            # в C и держит GIL секундами - и всё это время окно не отвечает.
+            # Владелец на мастере первого запуска увидел ровно это: «после
+            # появления полоски всё зависло». GIL один на процесс, поэтому
+            # лечится только вторым процессом.
             try:
-                import onnx_asr
-
-                # load_model и качает, и грузит; загруженный экземпляр тут же
-                # выбрасывается - это «скачать заранее», а не «включить».
-                onnx_asr.load_model(m.id, path=d, quantization=m.quant,
-                                    providers=["CPUExecutionProvider"])
-                self.modelProgress.emit(model_id, 1.0)
-                self.flashed.emit(f"{m.title} скачана", "")
+                r = subprocess.run(_download_cmd(model_id),
+                                   capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace",
+                                   creationflags=getattr(subprocess,
+                                                         "CREATE_NO_WINDOW", 0))
+                if r.returncode == 0:
+                    self.modelProgress.emit(model_id, 1.0)
+                    self.flashed.emit(f"{m.title} скачана", "")
+                else:
+                    _log("модель не скачалась: "
+                         + (r.stderr or r.stdout or "").strip()[:300])
+                    self.flashed.emit("не удалось скачать - проверьте интернет",
+                                      "danger")
             except Exception as e:  # noqa: BLE001
-                _log(f"модель не скачалась: {e}")
-                self.flashed.emit("не удалось скачать - проверьте интернет", "danger")
+                _log(f"загрузчик модели не запустился: {e}")
+                self.flashed.emit("не удалось скачать - смотрите журнал работы",
+                                  "danger")
             finally:
                 self._downloading.discard(model_id)
                 self.modelsChanged.emit()

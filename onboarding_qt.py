@@ -174,6 +174,14 @@ class _Extra(QObject):
             pass          # не записалось - покажем мастер ещё раз, не страшно
         if self._app.onboarding is not None:
             self._app.onboarding.close()
+        # Теперь можно и модель поднять. На старте её намеренно не греют, пока
+        # мастер на экране: сборка сессии держит GIL и мастер от этого лагает
+        # (app.run, там же и объяснение). Мастер закрылся - греем, чтобы первая
+        # диктовка не ждала лишние две секунды.
+        try:
+            threading.Thread(target=self._app._load_model_bg, daemon=True).start()
+        except Exception as e:  # noqa: BLE001 - прогрев не стоит финиша мастера
+            self._log(f"прогрев после мастера не запустился: {e}")
         # И сразу сказать, чем пользоваться. Мастер закрылся - человек остался
         # один на один с пустым экраном и иконкой в трее, которую Windows ещё и
         # прячет под шеврон. Тот же приём, что у Wispr: подсказку показывают в
@@ -201,7 +209,12 @@ class OnboardingWindow:
         v.setTitle("Добро пожаловать в FlowLocal")
         v.setColor(QColor(*T.BG))
         v.setResizeMode(QQuickView.SizeRootObjectToView)
-        v.resize(640, 560)
+        # 660, а не 560. Прокрутка внутри шага теперь есть (Onboarding.qml), но
+        # прокручиваемый мастер - плохой мастер: человек видит обрезанную
+        # карточку и не догадывается, что под ней что-то есть. Высоты хватает
+        # самому длинному шагу целиком, прокрутка остаётся страховкой на случай
+        # мелкого экрана.
+        v.resize(640, 660)
         v.setMinimumSize(v.size())
         ctx = v.rootContext()
         ctx.setContextProperty("T", self.tokens)
@@ -236,6 +249,31 @@ class OnboardingWindow:
         self.view.show()
         self.view.raise_()
         self.view.requestActivate()
+
+    def retheme(self) -> None:
+        """Перекрасить окно под новую тему. Зовёт app._apply_theme().
+
+        Метода тут не было, и это стоило владельцу непройденного мастера: тему
+        выбирают ВТОРЫМ шагом, приложение её применяло, а окно мастера
+        оставалось со старыми токенами. Перекрашивалось оно наполовину -
+        случайными кусками, - и «Дальше» становилась белой на белом.
+
+        Ровно тот же метод есть у окна настроек. Разница была не в устройстве,
+        а в том, что про мастер забыли: там тему меняют раз в полгода, здесь -
+        на втором экране из восьми, у человека, который видит программу
+        впервые.
+        """
+        self.tokens.retheme()
+        if self.view is None:
+            return
+        self.view.setColor(QColor(*T.BG))
+        try:
+            import layered
+
+            layered.style_titlebar(int(self.view.winId()), T.BG,
+                                   dark=T.mode() == "dark")
+        except Exception:  # noqa: BLE001 - косметика не роняет мастер
+            pass
 
     def close(self) -> None:
         self.backend.cancelCapture()

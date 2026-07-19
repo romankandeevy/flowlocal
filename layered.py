@@ -154,3 +154,79 @@ def foreground_process() -> str:
         return os.path.basename(buf.value).lower()
     finally:
         kernel32.CloseHandle(h)
+
+
+def _process_of(hwnd: int) -> str:
+    """Имя exe по окну. Пустая строка, если не спросить."""
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    if not pid.value:
+        return ""
+    h = kernel32.OpenProcess(0x1000, False, pid.value)
+    if not h:
+        return ""
+    try:
+        size = wintypes.DWORD(260)
+        buf = ctypes.create_unicode_buffer(size.value)
+        if not kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+            return ""
+        return os.path.basename(buf.value).lower()
+    finally:
+        kernel32.CloseHandle(h)
+
+
+# Своё окно и оболочка Windows. Первое - потому что слать Enter себе незачем,
+# второе - потому что «проводник» в списке программ для отправки сообщений
+# сбивает с толку: это рабочий стол, а не переписка.
+_NOT_APPS = {"flowlocal.exe", "explorer.exe", "textinputhost.exe",
+             "applicationframehost.exe", "shellexperiencehost.exe"}
+
+
+def visible_apps() -> list[tuple[str, str]]:
+    """Запущенные программы с окнами: [(имя_окна, exe), ...], без повторов.
+
+    Нужно настройке «Отправлять сообщение»: раньше туда вписывали `telegram.exe`
+    руками, и владелец справедливо спросил, откуда человеку взять это имя.
+    Ниоткуда - он его не знает и знать не должен. Теперь имена берутся отсюда.
+
+    Считаем программой то, у чего есть видимое окно с заголовком. Это грубее,
+    чем перебирать все процессы, и именно поэтому лучше: в списке окажется то,
+    что человек видит на экране, а не сто служебных процессов Windows, среди
+    которых свой мессенджер ещё поискать.
+
+    Заголовок берём у первого встреченного окна процесса - он же обычно
+    главный. Имя exe при этом ключ, а заголовок только подпись: заголовки
+    меняются от вкладки к вкладке, exe - нет.
+    """
+    found: dict[str, str] = {}
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+        # Тот же признак, по которому окно попадает в Alt+Tab: нет владельца и
+        # не служебное. Без него в список лезут накладки и хосты ввода
+        # (nvidia overlay.exe, textinputhost.exe) - они видимы и с заголовком,
+        # но окнами программ их не считает даже Windows.
+        if user32.GetWindow(hwnd, 4):                    # GW_OWNER
+            return True
+        if user32.GetWindowLongW(hwnd, -20) & 0x00000080:  # WS_EX_TOOLWINDOW
+            return True
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        exe = _process_of(hwnd)
+        # Себя не показываем: диктовать в собственное окно настроек и слать
+        # туда Enter - не то, для чего эта настройка.
+        if exe and exe not in found and exe not in _NOT_APPS:
+            found[exe] = buf.value.strip()
+        return True
+
+    try:
+        user32.EnumWindows(each, 0)
+    except OSError:
+        return []
+    return sorted(((name, exe) for exe, name in found.items()),
+                  key=lambda p: p[0].lower())

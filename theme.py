@@ -73,14 +73,63 @@ _PALETTE = {
         "danger": (224, 31, 43),         # --red-500
     },
     "dark": {
+        # Не чистый чёрный, и это не отступление от системы, а её же правило,
+        # применённое честно. Korti строит тему из двух красок, но «бумага» -
+        # это поверхность, а не отсутствие света: на светлой теме она белая и
+        # даёт всему остальному, на чём лежать. Чистый (0,0,0) такой опоры не
+        # даёт - карточка, фон и тень сливаются в одно поле, и владелец,
+        # пройдя мастер вслух, сказал ровно это: «ничего не видно, всё как-то
+        # странно». Двадцать единиц серого возвращают поверхность, оставаясь
+        # чёрным для глаза.
         "ink": (255, 255, 255),
-        "paper": (0, 0, 0),
+        "paper": (20, 20, 20),
         "accent": (110, 155, 255),       # --blue-400
         "accent_hover": (143, 180, 255),
         "accent_fg": (11, 18, 32),
         "success": (52, 208, 125),       # --green-400
         "danger": (255, 90, 97),         # --red-400
+        # Своя лестница прозрачностей. Одна на обе темы не работает, и это
+        # видно не на глаз, а по замеру: подпись flat(0.32) на белом даёт
+        # контраст 5.7:1, на чёрном - 2.6:1. Того же серого на тёмном фоне
+        # просто не хватает, потому что глаз меряет разницу, а её меньше.
+        #
+        # Сильнее всего страдал не текст, а `fill_strong`: на нём стоит
+        # дорожка выключенного переключателя. Десять процентов белого на почти
+        # чёрном - это ничто, поэтому «не видно, что он переключился» было
+        # чистой правдой, а не придиркой.
+        "alpha": {
+            "text_secondary": 0.74,
+            "text_muted": 0.60,
+            "text_faint": 0.44,
+            "border": 0.20,
+            "border_strong": 0.34,
+            "fill_subtle": 0.06,
+            "fill": 0.10,
+            "fill_strong": 0.20,
+        },
     },
+}
+
+# Лестница светлой темы. Тёмная переопределяет её ключом "alpha".
+#
+# Три значения подняты против канона Korti, и вот почему. Тёмную тему чинили
+# по жалобе владельца, а чинить взялись замером (test_theme.py) - и замер тут
+# же показал, что на СВЕТЛОЙ теме дела были хуже: подпись под строкой давала
+# 3.45:1 при норме 4.5:1, самый тихий текст - 2.24:1 при 3.0:1. Жалобы не было
+# только потому, что чёрное на белом кажется читаемым и тогда, когда уже нет.
+#
+# Это тот случай, когда «сверяться с системой, а не рисовать на глаз»
+# уступает правилу «замер сильнее мнения»: канон здесь не измерял контраст, а
+# мы измерили. Расхождение с Korti осознанное и одно - три прозрачности.
+_ALPHA = {
+    "text_secondary": 0.64,   # канон, 6.69:1 - проходит
+    "text_muted": 0.58,       # было 0.46 -> 3.45:1
+    "text_faint": 0.45,       # было 0.32 -> 2.24:1
+    "border": 0.13,
+    "border_strong": 0.24,
+    "fill_subtle": 0.04,
+    "fill": 0.06,
+    "fill_strong": 0.14,      # было 0.10: дорожка выключенного переключателя
 }
 
 _mode = "dark"
@@ -140,6 +189,9 @@ def _apply(p: dict) -> None:
     global PRIMARY, PRIMARY_FG, ACCENT, ACCENT_HOVER, ACCENT_FG, SUCCESS, DANGER
 
     INK, PAPER = p["ink"], p["paper"]
+    # Лестница прозрачностей: своя у темы, если задана, иначе канон.
+    a = dict(_ALPHA)
+    a.update(p.get("alpha") or {})
 
     BG = PAPER                    # --bg
     SURFACE = PAPER               # --surface: карточки живут на фоне страницы,
@@ -147,23 +199,23 @@ def _apply(p: dict) -> None:
     SURFACE_SUNKEN = flat(0.03)   # --surface-sunken
 
     TEXT = INK                    # --text-primary
-    TEXT_SECONDARY = flat(0.64)   # --text-secondary
-    TEXT_MUTED = flat(0.46)       # --text-muted
-    TEXT_FAINT = flat(0.32)       # --text-faint
+    TEXT_SECONDARY = flat(a["text_secondary"])
+    TEXT_MUTED = flat(a["text_muted"])
+    TEXT_FAINT = flat(a["text_faint"])
     TEXT_INVERSE = PAPER          # --text-inverse
 
-    BORDER = ink(0.13)            # --border      (RGBA: кладём поверх)
-    BORDER_STRONG = ink(0.24)     # --border-strong
-    FILL_SUBTLE = ink(0.04)       # --fill-subtle
-    FILL = ink(0.06)              # --fill
-    FILL_STRONG = ink(0.10)       # --fill-strong
+    BORDER = ink(a["border"])            # RGBA: кладём поверх
+    BORDER_STRONG = ink(a["border_strong"])
+    FILL_SUBTLE = ink(a["fill_subtle"])
+    FILL = ink(a["fill"])
+    FILL_STRONG = ink(a["fill_strong"])
 
     # сплавленные варианты тех же токенов - для tkinter
-    BORDER_FLAT = flat(0.13)
-    BORDER_STRONG_FLAT = flat(0.24)
-    FILL_SUBTLE_FLAT = flat(0.04)
-    FILL_FLAT = flat(0.06)
-    FILL_STRONG_FLAT = flat(0.10)
+    BORDER_FLAT = flat(a["border"])
+    BORDER_STRONG_FLAT = flat(a["border_strong"])
+    FILL_SUBTLE_FLAT = flat(a["fill_subtle"])
+    FILL_FLAT = flat(a["fill"])
+    FILL_STRONG_FLAT = flat(a["fill_strong"])
 
     PRIMARY = INK                 # --primary: главное действие - это чернила
     PRIMARY_FG = PAPER            # --primary-fg

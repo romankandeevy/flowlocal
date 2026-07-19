@@ -121,6 +121,14 @@ HISTORY_MAX = 4 * 1024 * 1024
 # Шесть часов: релиз выходит не чаще, а узнать о нём в тот же день - достаточно.
 _UPDATE_EVERY = 6 * 60 * 60 * 1000
 
+# С какой длины диктовка остаётся в буфере обмена после вставки.
+#
+# Триста знаков - это примерно абзац, полминуты речи. Короче - фраза в чат,
+# её проще сказать заново, чем искать; длиннее - работа, потерять которую
+# обидно по-настоящему. Порог грубый намеренно: точное число тут ничего не
+# решает, решает сам факт, что у длинного текста есть второй след.
+_KEEP_IN_CLIPBOARD_CHARS = 300
+
 
 def log(msg: str) -> None:
     line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n"
@@ -182,6 +190,12 @@ class App:
         # смене устройства в настройках, а оверлей должен видеть новый
         self.overlay = Overlay(level_fn=lambda: self.recorder.drain_levels())
         self.overlay.set_position(str(self.cfg.get("overlay_position") or "bottom"))
+        # Куда пилюлю утащили в прошлый раз - и чем запомнить новое место.
+        # Пишем сразу в конфиг: перетаскивание должно пережить перезапуск, а
+        # случается оно раз в жизни, так что склеивать записи не за чем.
+        self.overlay.set_custom_pos(self.cfg.get("overlay_x"),
+                                    self.cfg.get("overlay_y"),
+                                    save=self._save_overlay_pos)
         self.transcriber = Transcriber(self.cfg, log)
         self.settings = None
         self.onboarding = None
@@ -1062,11 +1076,27 @@ class App:
                               and not want_enter else "")
                 self._inserting = True
                 _t = time.perf_counter()
+                # Длинную диктовку оставляем в буфере обмена, даже если человек
+                # просил возвращать скопированное.
+                #
+                # Владелец спросил: надиктовал много, а не вставилось - что ему
+                # делать? Ответа не было. В режиме «сразу целиком» мы шлём
+                # Ctrl+V и не можем узнать, дошёл ли он: окно могло потерять
+                # фокус, поле могло не принимать вставку, программа могла идти
+                # от администратора. Мы считали такую диктовку вставленной и
+                # возвращали в буфер то, что человек копировал раньше, - то
+                # есть своими руками стирали последний след его десяти минут.
+                #
+                # Теперь для длинного текста уборка отменяется: пропажа абзаца
+                # дороже, чем не возвращённая ссылка. Ctrl+V спасает, ничего не
+                # открывая, и пилюля про это говорит.
+                long_text = len(out) >= _KEEP_IN_CLIPBOARD_CHARS
                 try:
                     ok = insert(
                         out,
                         mode=self.cfg.get("insert_mode", "paste"),
-                        restore=self.cfg.get("restore_clipboard", True),
+                        restore=(self.cfg.get("restore_clipboard", True)
+                                 and not long_text),
                     )
                     if ok and want_enter:
                         time.sleep(0.05)   # дать окну дожевать вставку
@@ -1098,10 +1128,14 @@ class App:
                 # любой другой исход означает, что её ещё можно спасти.
                 recordings.drop(saved)
                 saved = ""
+                # Про буфер говорим только когда там правда лежит диктовка:
+                # обещание «и в буфере» на коротком тексте было бы враньём.
                 self.ui(self.overlay.show_done,
-                        f"{n} {plural(n, 'слово', 'слова', 'слов')}")
+                        f"{n} {plural(n, 'слово', 'слова', 'слов')}"
+                        + (" · и в буфере" if long_text else ""))
             else:
-                self.ui(self.overlay.show_error, "не удалось вставить")
+                self.ui(self.overlay.show_error,
+                        "не вставилось - текст в буфере, нажмите Ctrl+V")
         except Exception as e:  # noqa: BLE001
             log(f"process error: {e}")
             if saved:
@@ -1388,6 +1422,16 @@ class App:
         self._set_tray_state(self._tray_state)
         if self.settings is not None:
             self.settings.retheme()
+        # Мастер первого запуска - тоже окно, и тему в нём выбирают ВТОРЫМ
+        # шагом. Про него забыли, и получилось так: человек нажимает «тёмная»,
+        # краски приложения меняются, а окно мастера остаётся со старыми
+        # токенами - перекрашивается наполовину, случайными кусками.
+        #
+        # Владелец описал это как «нажал переключатель - всё пропало, кнопка
+        # «Дальше» исчезла», и до конца мастер не прошёл. Кнопка никуда не
+        # девалась: она стала белой на белом.
+        if getattr(self, "onboarding", None) is not None:
+            self.onboarding.retheme()
         log(f"theme: {self.cfg.get('theme')} -> {mode}")
 
     def _reload_model_bg(self) -> None:
@@ -1975,13 +2019,31 @@ class App:
             return
         self._ipc.newConnection.connect(self._on_ipc)
 
-    def _heal_autostart(self) -> None:
-        """Команда автозапуска в реестре устарела - перезаписать.
+    def _save_overlay_pos(self, x, y) -> None:
+        """Запомнить, куда утащили пилюлю. None - вернуть на штатное место."""
+        self.cfg["overlay_x"] = x
+        self.cfg["overlay_y"] = y
+        try:
+            C.save(self.cfg)
+        except OSError as e:
+            log(f"положение пилюли не сохранилось: {e}")
 
-        Записывается она один раз, галочкой в настройках, и после этого живёт
-        своей жизнью: папку перенесли, Python обновили, у нас появился флаг
-        `--silent`. Пока запись старая, вход в систему будет открывать окно
-        настроек - ровно то, чего мы избегаем.
+    def _heal_autostart(self) -> None:
+        """Автозапуск: поставить, если его нет, и обновить, если устарел.
+
+        Галочки в настройках больше нет - владелец сказал «должно быть всегда»,
+        и это верно для программы, которая всё время ждёт в трее: диктовка,
+        которую надо сначала запустить, не выручает в тот момент, когда она
+        нужна. Поэтому собранная сборка прописывает себя сама, молча и при
+        каждом старте.
+
+        Запись живёт своей жизнью: папку перенесли, Python обновили, у нас
+        появился флаг `--silent`. Пока она старая, вход в систему будет
+        открывать окно настроек - ровно то, чего мы избегаем.
+
+        Выключить по-прежнему можно, и это не спрятанная лазейка, а честный
+        выход: `FlowLocal.exe --autostart off`. Ключ реестра там же, руками
+        снимается так же.
         """
         # Но НЕ из исходников поверх установленной сборки. Иначе запуск рабочей
         # копии молча уводит автозапуск на себя, и после перезагрузки стартует
@@ -1993,14 +2055,19 @@ class App:
         # которому это правда нужно, ставит запись руками через --autostart on.
         frozen = bool(getattr(sys, "frozen", False))
         try:
-            if not app_paths.autostart_command_stale():
-                return
             if not frozen and ".exe" in str(app_paths.autostart_command_current()).lower():
                 log("автозапуск: в реестре стоит собранная сборка - "
                     "из исходников не трогаю")
                 return
+            # Из исходников себя в автозапуск НЕ прописываем. Рабочее дерево
+            # запускают десятки раз на дню и не для того, чтобы оно поселилось
+            # в реестре; у владельца там должна стоять установленная сборка.
+            if not frozen:
+                return
+            if app_paths.autostart_enabled() and not app_paths.autostart_command_stale():
+                return
             set_autostart(True)
-            log("автозапуск: команда в реестре обновлена")
+            log("автозапуск: запись в реестре поставлена или обновлена")
         except Exception as e:  # noqa: BLE001 - реестр не должен ронять запуск
             log(f"autostart heal failed: {e}")
 
@@ -2029,7 +2096,20 @@ class App:
         self._start_tray()
         self._start_ipc()
         self._heal_autostart()
-        threading.Thread(target=self._load_model_bg, daemon=True).start()
+        # Модель НЕ греем, пока идёт мастер первого запуска.
+        #
+        # Загрузка модели - это сборка сессии onnxruntime, и делает её C-код,
+        # который держит GIL пачками по несколько секунд. Поток тут не спасает:
+        # GIL один на процесс, и всё это время окно Qt не получает управления.
+        # Владелец на первом запуске сказал «сильно лагает» - это оно и было:
+        # мастер открывался через 600 мс, ровно в разгар загрузки.
+        #
+        # Мастеру модель не нужна до предпоследнего шага («Скажите
+        # что-нибудь»), а там она поднимется сама - тем же ленивым путём, что
+        # и на первой диктовке. Скачивание на шаге 2 идёт отдельным процессом
+        # (download_model_cli), окна оно не касается вовсе.
+        if self.cfg.get("onboarded"):
+            threading.Thread(target=self._load_model_bg, daemon=True).start()
         threading.Thread(target=self._autoconfig_llm_bg, daemon=True).start()
         self._forget_old_history()
         threading.Thread(target=self._check_update_bg, daemon=True).start()
@@ -2183,7 +2263,60 @@ def poke_running_instance() -> bool:
     return True
 
 
+def download_model_cli() -> int:
+    """Скачать модель и выйти. Служебный режим, человеку не показывается.
+
+        FlowLocal.exe --download-model gigaam-v2-ctc
+
+    Зачем отдельный процесс. Раньше модель качалась потоком внутри окна
+    настроек, и владелец, проходя мастер первого запуска, написал: «после
+    появления полоски скачивания всё зависло - никуда не перейти, ничего не
+    нажать». Так и было. Скачивание - это половина работы; вторая половина -
+    сборка сессии onnxruntime, а она идёт в C и держит GIL секундами. Пока она
+    держит, поток Qt не получает управления вовсе: окно не перерисовывается и
+    не отвечает на нажатия. Для Windows это «программа не отвечает».
+
+    Потоком эту беду не вылечить - GIL один на процесс. Отдельный процесс
+    лечит её целиком и заодно бесплатно: упасть он может только сам по себе,
+    окно от этого не пострадает.
+
+    Прогресс наружу не отдаём: его и так видно по тому, как растёт папка
+    модели, и настройки считают именно так (settings_qt.downloadModel). Один
+    способ мерить вместо двух, которые однажды разойдутся.
+    """
+    model_id = sys.argv[2] if len(sys.argv) >= 3 else ""
+    if not model_id:
+        print("использование: --download-model <идентификатор>")
+        return 2
+    import models
+    from transcriber import model_dir
+
+    m = models.get(model_id)
+    if m is None:
+        print(f"нет такой модели: {model_id}")
+        return 2
+    d = model_dir(m.id, m.quant)
+    os.makedirs(d, exist_ok=True)
+    try:
+        import onnx_asr
+
+        # load_model и качает, и собирает сессию. Собранную тут же выбрасываем:
+        # нам нужны файлы на диске, а не рабочая модель. Зато так мы уверены,
+        # что скачано ровно то и в том виде, что попросит настоящая загрузка.
+        onnx_asr.load_model(m.id, path=d, quantization=m.quant,
+                            providers=["CPUExecutionProvider"])
+    except Exception as e:  # noqa: BLE001 - сюда приходит что угодно из сети
+        log(f"скачивание {model_id} не вышло: {e}")
+        print(f"не скачалось: {e}")
+        return 1
+    log(f"скачано: {model_id}")
+    print("готово")
+    return 0
+
+
 def main() -> None:
+    if len(sys.argv) >= 2 and sys.argv[1] == "--download-model":
+        sys.exit(download_model_cli())
     if len(sys.argv) >= 2 and sys.argv[1] == "--autostart":
         mode = sys.argv[2] if len(sys.argv) >= 3 else ""
         if mode not in ("on", "off"):

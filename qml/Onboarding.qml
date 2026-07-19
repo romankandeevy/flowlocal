@@ -58,23 +58,58 @@ Rectangle {
                 }
             }
         }
+        // Номер шага словами, а не только точками.
+        //
+        // Точки говорят «сколько всего» и «где-то тут», но не отвечают на
+        // вопрос «на каком я». Владелец сказал прямо: не видно, где
+        // находишься. Восемь точек по 8 пикселей глазом не пересчитываются -
+        // это работа, а не подсказка.
+        //
+        // К концу пути подпись меняется на «почти готово» и «последний шаг»:
+        // там важнее не номер, а то, что осталось немного. Ровно то, ради
+        // чего подпись и заводилась.
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: wiz.step === wiz.last ? L.t("последний шаг")
-                : wiz.step === wiz.last - 1 ? "почти готово"
-                : ""
-            visible: text !== ""
+                : wiz.step === wiz.last - 1 ? L.t("почти готово")
+                : L.t("шаг ") + (wiz.step + 1) + L.t(" из ") + (wiz.last + 1)
             font.family: T.sans; font.pixelSize: T.t2xs
             color: T.textMuted
-            opacity: visible ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: T.durBase * 1000 } }
         }
     }
 
     // ---------- содержимое шагов ----------
-    Item {
+    //
+    // Прокрутка нужна не «на всякий случай». Окно у мастера маленькое (640x560),
+    // а шаги разной высоты: у одного заголовок и кнопка, у другого выбор темы,
+    // образец настроек и объяснение. Пока содержимое лезло за край, оно
+    // наезжало на «Назад» и «Дальше» - кнопки оказывались ПОД текстом, и это
+    // ровно то, что владелец описал как «нажал переключатель, всё пропало».
+    //
+    // Высоту считаем по видимому шагу, а не по самому высокому: иначе на
+    // коротких экранах прокручивалась бы пустота, а полоса намекала бы, что
+    // внизу что-то есть.
+    Flickable {
+        id: scroll
         anchors { top: dots.bottom; left: parent.left; right: parent.right
                   bottom: footer.top; margins: 36 }
+        clip: true
+        contentHeight: {
+            var h = 0;
+            for (var i = 0; i < steps.children.length; i++) {
+                var c = steps.children[i];
+                if (c.visible) h = Math.max(h, c.implicitHeight);
+            }
+            return h + 8;
+        }
+        interactive: contentHeight > height
+        // Новый шаг - с начала: прокрутка одного не должна доставаться другому.
+        onContentHeightChanged: contentY = 0
+
+    Item {
+        id: steps
+        width: scroll.width
+        height: scroll.contentHeight
 
         // Заголовок каждого шага стоит на ОДНОЙ высоте: шаги привязаны к верху,
         // а не центрируются по вертикали.
@@ -156,22 +191,38 @@ Rectangle {
 
             Item { width: 1; height: 8 }
 
+            // Было «РАСПОЛОЖЕНИЕ: карточками / строками». Владелец спросил
+            // «расположение чего?» - и правильно спросил: ничего никуда не
+            // переставляется, меняется только фон под настройками. Так же
+            // называется и в самих настройках, одними словами.
             Text {
-                text: L.t("РАСПОЛОЖЕНИЕ")
+                text: L.t("ФОН ПОД НАСТРОЙКАМИ")
                 font.family: T.sans; font.pixelSize: T.t2xs
                 font.weight: Font.DemiBold; font.letterSpacing: 0.6
                 color: T.textFaint
             }
             Segmented {
-                options: [{label: L.t("карточками"), value: "cards"},
-                          {label: L.t("строками"), value: "lines"}]
+                options: [{label: L.t("есть"), value: "cards"},
+                          {label: L.t("нет"), value: "lines"}]
                 value: B.get("layout") || "cards"
                 onPicked: (v) => B.set("layout", v)
             }
 
-            // Показываем разницу тут же, а не описываем словами: «карточками»
-            // и «строками» человеку ничего не говорят, пока он их не увидел.
+            // Показываем разницу тут же, а не описываем словами: «с фоном» и
+            // «без фона» человеку ничего не говорят, пока он их не увидел.
+            //
+            // И подписываем, что это образец. Раньше здесь просто стояли две
+            // настройки без объяснения, и владелец спросил, зачем этот блок
+            // вообще нужен: он выглядел как настоящие настройки, которые
+            // почему-то ничего не делают.
             Item { width: 1; height: 6 }
+            Text {
+                text: L.t("Образец - чтобы увидеть разницу. Эти два переключателя ни на что не влияют:")
+                width: parent.width
+                wrapMode: Text.WordWrap
+                font.family: T.sans; font.pixelSize: T.tXs
+                color: T.textMuted
+            }
             Card {
                 width: parent.width
                 Item {
@@ -184,12 +235,24 @@ Rectangle {
                             first: true
                             title: L.t("Так выглядит настройка")
                             subtitle: L.t("А так - пояснение под ней")
-                            Toggle { value: true }
+                            Toggle {
+                                id: demoOne
+                                value: true
+                                // Живой, а не мёртвый: неподвижный образец не
+                                // показывает главного - что переключение
+                                // ВИДНО. Ровно этого владелец и не увидел в
+                                // тёмной теме.
+                                onToggled: (v) => demoOne.value = v
+                            }
                         }
                         SettingRow {
                             title: L.t("И следующая за ней")
                             subtitle: L.t("Разделены линией в обоих видах")
-                            Toggle { value: false }
+                            Toggle {
+                                id: demoTwo
+                                value: false
+                                onToggled: (v) => demoTwo.value = v
+                            }
                         }
                     }
                 }
@@ -223,21 +286,80 @@ Rectangle {
                 wrapMode: Text.WordWrap
                 text: wiz.modelReady
                       ? L.t("Она уже на этом компьютере. Дальше интернет для распознавания не нужен.")
-                      : L.t("236 МБ, скачается один раз. Дальше распознавание работает без ")
-                        + L.t("интернета - ни звук, ни текст никуда не уходят. Видеокарта не нужна.")
+                      : L.t("Это то, что превращает вашу речь в текст. Она работает прямо ")
+                        + L.t("здесь, поэтому её надо принести целиком - один раз.")
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
                 lineHeight: 1.4
             }
-            // Прогресс скачивания выбранной модели
-            Item {
-                width: parent.width; height: 18
+
+            // Экран был пустым: заголовок, одна строка про мегабайты - и всё.
+            // Владелец назвал это абсурдом, и он прав: человека просят подождать
+            // несколько минут и ничего не говорят о том, чего он ждёт.
+            //
+            // Три строки отвечают на три настоящих вопроса: сколько ждать, что
+            // будет потом и не уедет ли что-нибудь наружу.
+            Item { width: 1; height: 4; visible: !wiz.modelReady }
+            Column {
+                visible: !wiz.modelReady
+                width: parent.width
+                spacing: 9
+                Repeater {
+                    model: [
+                        {t: L.t("236 МБ, две-три минуты"),
+                         s: L.t("Скачивается один раз. Дальше не понадобится")},
+                        {t: L.t("Дальше - без интернета"),
+                         s: L.t("Распознавание идёт на этом компьютере, в самолёте и на даче тоже")},
+                        {t: L.t("Видеокарта не нужна"),
+                         s: L.t("Хватает обычного процессора: 8 секунд речи - меньше секунды работы")}
+                    ]
+                    Row {
+                        spacing: 10
+                        width: parent.width
+                        Rectangle {
+                            width: 5; height: 5; radius: 2.5; y: 7
+                            color: T.textFaint
+                        }
+                        Column {
+                            spacing: 1
+                            width: parent.width - 15
+                            Text {
+                                text: modelData.t
+                                font.family: T.sans; font.pixelSize: T.tSm
+                                font.weight: Font.Medium; color: T.text
+                            }
+                            Text {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                text: modelData.s
+                                font.family: T.sans; font.pixelSize: T.tXs
+                                color: T.textMuted
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Прогресс скачивания: полоса плюс проценты словами. Без числа
+            // полоса на 236 мегабайтах выглядит замершей - «зависло», сказал
+            // владелец, и по одной полосе отличить это было невозможно.
+            Item { width: 1; height: 4; visible: wiz.downloading }
+            Column {
                 visible: wiz.downloading
-                Rectangle { anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width; height: 4; radius: 2; color: T.fillStrong }
-                Rectangle { anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width * wiz.dlFrac; height: 4; radius: 2
-                            color: T.accent
-                            Behavior on width { NumberAnimation { duration: 300 } } }
+                width: parent.width
+                spacing: 6
+                Item {
+                    width: parent.width; height: 8
+                    Rectangle { anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width; height: 4; radius: 2; color: T.fillStrong }
+                    Rectangle { anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width * wiz.dlFrac; height: 4; radius: 2
+                                color: T.accent
+                                Behavior on width { NumberAnimation { duration: 300 } } }
+                }
+                Text {
+                    text: Math.round(wiz.dlFrac * 100) + L.t("% · качается, можно не смотреть")
+                    font.family: T.sans; font.pixelSize: T.tXs; color: T.textMuted
+                }
             }
             Text {
                 visible: wiz.modelReady
@@ -613,6 +735,7 @@ Rectangle {
                 }
             }
         }
+    }
     }
 
     // ---------- низ: назад / дальше ----------

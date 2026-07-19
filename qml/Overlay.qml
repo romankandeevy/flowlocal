@@ -58,6 +58,14 @@ Item {
     // сколько ждать, ни идёт ли вообще что-нибудь - за 70 МБ картинка не
     // менялась ни разу.
     property real   progress: -1
+
+    // Перетаскивание: QML говорит, на сколько сдвинуть окно, двигает Python
+    // (overlay_qt.PillOverlay). Здесь окна нет и быть не должно - QML про
+    // экраны и границы не знает, а прижимать пилюлю к краю надо.
+    signal dragged(real dx, real dy)
+    signal dragReset()
+    // Где сидит капсула внутри окна - для попадания мышью. Читает Python.
+    property rect capsule: Qt.rect(0, 0, 0, 0)
     readonly property bool hasProgress: isProc && progress >= 0
     // Есть ли Qt6QuickEffects.dll. Без него MultiEffect не просто не даёт
     // тени - он способен закрасить пилюлю чёрным прямоугольником. Тень это
@@ -100,6 +108,12 @@ Item {
         height: T.pillH
         radius: height / 2                    // --radius-full: пилюля есть пилюля
         color: T.paper
+        // Отдаём свои координаты наружу: по ним Python решает, попала мышь в
+        // капсулу или в пустое поле под тень. Капсула дышит по ширине, поэтому
+        // прямоугольник живой, а не посчитанный один раз.
+        onXChanged: root.capsule = Qt.rect(x, y, width, height)
+        onWidthChanged: root.capsule = Qt.rect(x, y, width, height)
+        Component.onCompleted: root.capsule = Qt.rect(x, y, width, height)
         // Волосяная линия вместо заливки - основной приём системы.
         border.width: 1
         border.color: T.border
@@ -111,6 +125,36 @@ Item {
         Behavior on width { NumberAnimation { duration: T.durBase * 1000
                                               easing.type: Easing.Bezier
                                               easing.bezierCurve: T.easeOut } }
+
+        // ------- перетаскивание -------
+        //
+        // «Пилюля должна перетаскиваться мышью, посмотри как у Wispr», -
+        // сказал владелец. Мешало одно: окно оверлея объявлено прозрачным для
+        // мыши целиком (WS_EX_TRANSPARENT), иначе поле под тень - полтораста
+        // пикселей у края экрана - съедало бы чужие клики. Теперь прозрачность
+        // решается не флагом на всё окно, а попаданием в капсулу: окно
+        // отвечает на WM_NCHITTEST «меня здесь нет» везде, кроме этого
+        // прямоугольника (overlay_qt._HitFilter).
+        //
+        // Курсор - «рука», а не «перетащить»: капсула не разделяет мир на
+        // «схватить» и «отпустить», она просто едет за мышью.
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            property real grabX: 0
+            property real grabY: 0
+            onPressed: (m) => { grabX = m.x; grabY = m.y }
+            onPositionChanged: (m) => {
+                if (!pressed) return;
+                // Двигаем ОКНО, а не капсулу внутри него: капсула центрирована
+                // и на следующем же кадре вернулась бы на место.
+                root.dragged(m.x - grabX, m.y - grabY);
+            }
+            // Двойной клик возвращает пилюлю на место. Без этого утащенную за
+            // край пилюлю пришлось бы искать мышью по всему экрану, а она
+            // маленькая.
+            onDoubleClicked: root.dragReset()
+        }
 
         // ------- содержимое: запись и распознавание -------
         Row {

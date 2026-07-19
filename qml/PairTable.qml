@@ -22,6 +22,11 @@ Card {
     // Строки без ключа не сохранятся - об этом надо сказать вслух, иначе
     // человек напишет значение, закроет окно и потеряет его.
     property int blanks: 0
+    // Показывать пустую строку, когда записей нет. Пустая таблица с одной
+    // серой надписью не объясняет, что это вообще такое: человек видит
+    // сообщение, а не форму. Живая строка с двумя полями и стрелкой между
+    // ними объясняет устройство сама, без единого слова.
+    property bool showBlankRow: false
 
     Component.onCompleted: reload()
 
@@ -30,6 +35,8 @@ Card {
         var items = B.pairs(storeKey);
         for (var i = 0; i < items.length; i++)
             rows.append({k: items[i].k, v: items[i].v});
+        if (rows.count === 0 && showBlankRow)
+            rows.append({k: "", v: ""});
         recount();
     }
     function add() { rows.append({k: "", v: ""}); recount() }
@@ -37,6 +44,11 @@ Card {
         var n = 0;
         for (var i = 0; i < rows.count; i++)
             if (rows.get(i).k.trim() === "") n++;
+        // Единственная пустая строка - это наше приглашение (showBlankRow), а
+        // не забытая человеком запись. Предупреждать «она не сохранится» про
+        // строку, которую он не заводил, значит ругать его за нашу же затею.
+        if (n === 1 && rows.count === 1 && rows.get(0).v.trim() === "")
+            n = 0;
         blanks = n;
     }
     function commit() {

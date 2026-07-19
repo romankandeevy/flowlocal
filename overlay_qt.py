@@ -36,6 +36,25 @@ from PySide6.QtQuick import QQuickView
 import theme as T
 from theme_qt import Tokens
 
+# Windows: попадание мыши в окно. HTTRANSPARENT - «меня здесь нет, отдайте
+# клик тому, кто ниже»; ровно этим окно пилюли и притворяется везде, кроме
+# самой капсулы (см. Overlay._install_hit_filter).
+_WM_NCHITTEST = 0x0084
+_HTTRANSPARENT = -1
+_HTCLIENT = 1
+
+
+class _MSG(ctypes.Structure):
+    """MSG из windows.h - ровно те поля, что нам нужны, в том же порядке."""
+
+    _fields_ = [("hWnd", ctypes.c_void_p),
+                ("message", ctypes.c_uint),
+                ("wParam", ctypes.c_size_t),
+                ("lParam", ctypes.c_ssize_t),
+                ("time", ctypes.c_uint),
+                ("pt_x", ctypes.c_long),
+                ("pt_y", ctypes.c_long)]
+
 
 def _preload_qml_deps() -> bool:
     """Втянуть в процесс Qt6QuickEffects.dll до загрузки QML.
@@ -100,6 +119,8 @@ class Overlay(QObject):
     """Тот же публичный API, что у overlay.Overlay, - чтобы app.py не заметил
     подмены, когда дойдёт черёд его переворачивать."""
 
+    _hit_filter = None                   # держим ссылку: Qt её не удерживает
+
     def __init__(self, level_fn=None) -> None:
         super().__init__()
         self.level_fn = level_fn
@@ -119,14 +140,15 @@ class Overlay(QObject):
         self.view = QQuickView()
         # Тот самый набор флагов. WindowDoesNotAcceptFocus обязателен: без него
         # пилюля заберёт фокус у окна, куда диктуют, и Ctrl+V уедет не туда.
-        # WindowTransparentForInput - это WS_EX_TRANSPARENT: клики проходят
-        # насквозь. Пилюля ничего не ловит (в Overlay.qml нет ни одной
-        # MouseArea), а окно у неё с полем под тень - без этого флага оно
-        # съедало клики полосой в полтораста пикселей у края экрана. Внизу это
-        # над строкой состояния, сверху - ровно вкладки браузера.
+        # WindowTransparentForInput (это WS_EX_TRANSPARENT) здесь БОЛЬШЕ НЕТ.
+        # Он выключал мышь для всего окна, а окно у пилюли заметно больше
+        # капсулы: вокруг лежит поле под тень, полтораста пикселей у края
+        # экрана - внизу над строкой состояния, сверху ровно по вкладкам
+        # браузера. Без флага это поле съедало чужие клики, с флагом нельзя
+        # схватить и саму пилюлю, а владелец попросил её перетаскивать.
+        # Вместо флага - точечная прозрачность по попаданию, _install_hit_filter.
         self.view.setFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-                           | Qt.Tool | Qt.WindowDoesNotAcceptFocus
-                           | Qt.WindowTransparentForInput)
+                           | Qt.Tool | Qt.WindowDoesNotAcceptFocus)
         self.view.setColor(QColor(0, 0, 0, 0))
         self.view.setResizeMode(QQuickView.SizeViewToRootObject)
         ctx = self.view.rootContext()
@@ -140,6 +162,14 @@ class Overlay(QObject):
             raise RuntimeError("; ".join(str(e) for e in self.view.errors()))
         self.root = self.view.rootObject()
         self.root.setProperty("shadowOk", _EFFECTS_OK)
+        # Перетаскивание: QML говорит, на сколько сдвинуть, двигаем мы. Границы
+        # экрана знает Qt, а не QML, поэтому и прижимает к краю эта сторона.
+        self.root.dragged.connect(self._drag_by)
+        self.root.dragReset.connect(self._drag_reset)
+        # Своё место, если пилюлю утащили. None - стоит там, где велит настройка.
+        self._custom: tuple[int, int] | None = None
+        self._save_pos = None            # чем сохранить положение в конфиг
+        self._install_hit_filter()
 
         self._done_timer = QTimer()
         self._done_timer.setSingleShot(True)
@@ -159,6 +189,98 @@ class Overlay(QObject):
         # его хука 300 мс на ответ, иначе Windows роняет ввод в лаги.
         self._tick = QTimer()
         self._tick.timeout.connect(self._frame)
+
+    def _install_hit_filter(self) -> None:
+        """Сделать окно прозрачным для мыши везде, кроме капсулы.
+
+        У Windows для этого есть штатный ответ: на WM_NCHITTEST окно говорит
+        HTTRANSPARENT - «меня в этой точке нет», и система отдаёт клик тому,
+        кто под нами. Отвечаем так везде, кроме прямоугольника капсулы, который
+        QML отдаёт свойством `capsule`.
+
+        Не встал фильтр - возвращаем прежний флаг на всё окно: пилюля останется
+        неперетаскиваемой, но чужие клики съедать не начнёт. Косметика не имеет
+        права ронять диктовку.
+        """
+        try:
+            from PySide6.QtCore import QAbstractNativeEventFilter
+            from PySide6.QtGui import QGuiApplication as _App
+
+            overlay = self
+
+            class _HitFilter(QAbstractNativeEventFilter):
+                def nativeEventFilter(self, kind, message):
+                    try:
+                        if bytes(kind) != b"windows_generic_MSG":
+                            return False, 0
+                        msg = ctypes.cast(int(message),
+                                          ctypes.POINTER(_MSG)).contents
+                        if msg.message != _WM_NCHITTEST:
+                            return False, 0
+                        if msg.hWnd != int(overlay.view.winId()):
+                            return False, 0
+                        return overlay._hit(msg.lParam)
+                    except Exception:  # noqa: BLE001 - фильтр висит на всех
+                        return False, 0   # сообщениях процесса, падать нельзя
+
+            Overlay._hit_filter = _HitFilter()
+            _App.instance().installNativeEventFilter(Overlay._hit_filter)
+        except Exception as e:  # noqa: BLE001
+            self.view.setFlags(self.view.flags() | Qt.WindowTransparentForInput)
+            print(f"пилюля: фильтр попаданий не встал ({e}) - без перетаскивания")
+
+    def _hit(self, lparam: int) -> tuple:
+        """Ответ на WM_NCHITTEST: попала мышь в капсулу или мимо неё."""
+        # lParam - две 16-битные координаты ЭКРАНА со знаком.
+        x = ctypes.c_short(lparam & 0xFFFF).value
+        y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
+        cap = self.root.property("capsule")
+        if cap is None:
+            return True, _HTTRANSPARENT
+        pos = self.view.position()
+        left = pos.x() + cap.x()
+        top = pos.y() + cap.y()
+        inside = (left <= x <= left + cap.width()
+                  and top <= y <= top + cap.height())
+        return True, (_HTCLIENT if inside else _HTTRANSPARENT)
+
+    @staticmethod
+    def _clamp(x: float, y: float, w: float, h: float, geo) -> tuple:
+        """Не дать утащить пилюлю за край экрана.
+
+        Оставляем видимой хотя бы четверть окна: пилюля маленькая, и уехавшую
+        целиком за край нечем было бы вернуть, кроме правки конфига руками.
+        """
+        keep = w / 4
+        x = max(geo.left() - w + keep, min(geo.right() - keep, x))
+        y = max(geo.top(), min(geo.bottom() - h / 4, y))
+        return int(x), int(y)
+
+    def _drag_by(self, dx: float, dy: float) -> None:
+        """Сдвинуть окно пилюли на столько, на сколько уехала мышь."""
+        screen = QGuiApplication.screenAt(self.view.position()) or \
+            QGuiApplication.primaryScreen()
+        pos = self.view.position()
+        x, y = self._clamp(pos.x() + dx, pos.y() + dy,
+                           self.root.width(), self.root.height(),
+                           screen.availableGeometry())
+        self._custom = (x, y)
+        self.view.setPosition(x, y)
+        if self._save_pos is not None:
+            self._save_pos(x, y)
+
+    def _drag_reset(self) -> None:
+        """Двойной клик - вернуть пилюлю на штатное место."""
+        self._custom = None
+        if self._save_pos is not None:
+            self._save_pos(None, None)
+        self._place()
+
+    def set_custom_pos(self, x, y, save=None) -> None:
+        """Место из конфига плюс чем его сохранять. Зовёт app при старте."""
+        self._save_pos = save
+        self._custom = ((int(x), int(y))
+                        if x is not None and y is not None else None)
 
     # ---------- публичный API ----------
 
@@ -295,6 +417,13 @@ class Overlay(QObject):
         geo = screen.availableGeometry()
         w = self.root.width()
         h = self.root.height()
+        # Утащили мышью - слушаемся нового места, а не настройки: возвращать
+        # пилюлю на «своё» при каждом показе значило бы отменять решение
+        # человека по десять раз на дню.
+        if self._custom is not None:
+            x, y = self._clamp(self._custom[0], self._custom[1], w, h, geo)
+            self.view.setGeometry(x, y, int(w), int(h))
+            return
         if self._position == "top":
             # Зеркально низу: видимая капсула на том же отступе от края.
             y = geo.top() + T.PILL_BOTTOM * self.tokens.scale - T.PILL_PAD
