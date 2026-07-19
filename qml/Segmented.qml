@@ -69,7 +69,13 @@ Item {
                     Text {
                         id: lbl
                         anchors.centerIn: parent
-                        text: modelData.label
+                        // Подписи приходят из двух мест: собранные тут же (уже
+                        // через L.t) и готовые списки из Python (B.themeOptions
+                        // и прочие) - вот эти до сих пор оставались русскими
+                        // при английском интерфейсе. L.t идемпотентен: то, что
+                        // уже переведено, ключом не является и проходит как
+                        // есть, - поэтому одно место, а не два.
+                        text: L.t(modelData.label)
                         font.family: T.sans
                         font.pixelSize: T.tSm
                         font.weight: Font.Medium

@@ -31,7 +31,7 @@ Item {
         Text {
             anchors { left: parent.left; leftMargin: 10; right: chev.left; rightMargin: 6
                       verticalCenter: parent.verticalCenter }
-            text: sel.labelOf(sel.value)
+            text: L.t(sel.labelOf(sel.value))
             elide: Text.ElideRight
             font.family: T.sans
             font.pixelSize: T.tSm
@@ -79,7 +79,7 @@ Item {
                 Text {
                     anchors { left: parent.left; leftMargin: 8; right: parent.right
                               rightMargin: 8; verticalCenter: parent.verticalCenter }
-                    text: modelData.label
+                    text: L.t(modelData.label)
                     elide: Text.ElideRight
                     font.family: T.sans
                     font.pixelSize: T.tSm

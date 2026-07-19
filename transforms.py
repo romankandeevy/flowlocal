@@ -160,6 +160,37 @@ def _clean_custom(raw) -> list[dict]:
     return out
 
 
+def custom_of(cfg: dict) -> list[dict]:
+    """Только свои преобразования, без готовых. Для окна настроек."""
+    return _clean_custom(cfg.get("transforms"))
+
+
+def pack_custom(rows) -> list[dict]:
+    """Строки из окна настроек -> записи конфига.
+
+    Идентификаторы раздаём сами и заново при каждом сохранении: человек правит
+    название прямо на месте, и держать за строкой прежний id значило бы решать,
+    та же это запись или новая. Ответ никому не нужен - на id тут никто не
+    ссылается, спрятанные лежат отдельным списком и только по готовым.
+
+    Подсказку не спрашиваем. У готовых она есть, потому что их писали мы; у
+    своих её заменяет само название. Просить человека сочинить вторую строку
+    про то же самое - лишнее поле в форме, а форму заполняют один раз.
+    """
+    out: list[dict] = []
+    for i, r in enumerate(rows or []):
+        item = r if isinstance(r, dict) else {}
+        title = str(item.get("title") or "").strip()
+        instruction = str(item.get("instruction") or "").strip()
+        if not title or not instruction:
+            continue
+        out.append({"id": f"custom{i + 1}", "title": title[:40],
+                    "hint": "", "instruction": instruction})
+        if len(out) >= MAX_CUSTOM:
+            break
+    return out
+
+
 def all_for(cfg: dict) -> list[dict]:
     """Что показать в списке: готовые (кроме спрятанных) плюс свои.
 

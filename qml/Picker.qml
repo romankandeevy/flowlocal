@@ -123,8 +123,12 @@ Item {
                               leftMargin: 40; rightMargin: 16
                               verticalCenter: parent.verticalCenter }
                     spacing: 1
+                    // Готовые названия переводятся, свои - нет: их писал
+                    // человек, и переводить его слова нам нечем и незачем.
+                    // L.t() отдаёт непереведённое как есть, поэтому одно
+                    // правило работает для обоих случаев.
                     Text {
-                        text: modelData.title
+                        text: L.t(modelData.title)
                         font.family: T.sans
                         font.pixelSize: T.tSm
                         font.weight: parent.parent.active ? Font.DemiBold : Font.Normal
@@ -132,7 +136,7 @@ Item {
                     }
                     Text {
                         width: parent.width
-                        text: modelData.hint || ""
+                        text: modelData.hint ? L.t(modelData.hint) : ""
                         visible: text !== ""
                         elide: Text.ElideRight
                         maximumLineCount: 1

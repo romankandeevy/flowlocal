@@ -1,248 +1,315 @@
 # FlowLocal
 
-**Hold a key. Speak. Release. Your words land in the window you were already typing in.**
+**Зажали клавишу. Сказали. Отпустили. Слова уже в том окне, где вы печатали.**
 
-A free, local, open-source alternative to [Wispr Flow](https://wisprflow.ai) for Windows.
-Audio and text never leave your machine — no account, no cloud, no subscription.
+Бесплатная локальная замена [Wispr Flow](https://wisprflow.ai) для Windows, с
+открытым кодом. Звук и текст не покидают компьютер: ни аккаунта, ни облака, ни
+подписки.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="tools/demo_dark.gif">
-    <img src="tools/demo.gif" width="820" alt="Holding the hotkey, a live waveform on the pill, then the sentence lands in the message: 'Стратегическая сессия начинается в пятницу в 10:00 утра.'">
+    <img src="tools/demo.gif" width="820" alt="Зажали сочетание, на пилюле живая волна, затем фраза встала в письмо: «Стратегическая сессия начинается в пятницу в 10:00 утра.»">
   </picture>
 </p>
 
 <p align="center">
-  <sub>Real pill, real waveform, real model — 5 seconds of speech transcribed in
-  0.22 s on a CPU, punctuation and <code>10:00</code> included. The audio comes
-  from <code>test.wav</code> rather than a microphone so that
-  <a href="tools/demo_gif.py"><code>tools/demo_gif.py</code></a> gives the same
-  result on any machine; the mail window is a mock, because a real one cannot be
-  filmed without filming someone's mail.</sub>
+  <sub>Пилюля настоящая, волна настоящая, распознавание настоящее: 5 секунд
+  речи за 0.22 с на процессоре, вместе со знаками препинания и «10:00». Звук
+  берётся из <code>test.wav</code>, а не с микрофона, чтобы
+  <a href="tools/demo_gif.py"><code>tools/demo_gif.py</code></a> давал один и
+  тот же результат на любой машине; окно почты поддельное - настоящее не снять,
+  не сняв заодно чужую переписку.</sub>
 </p>
 
-## Why another dictation app
+*English version - [README.en.md](README.en.md).*
 
-Because every local dictation tool runs Whisper, and Whisper only got good at
-*some* languages.
+## Почему не ещё одна диктовка на Whisper
 
-FlowLocal defaults to **[GigaAM v3](https://huggingface.co/ai-sage/GigaAM-v3)**
-(MIT, by SberDevices) — a 240M Conformer trained on 700,000 hours of Russian
-speech. Per its model card it averages **8.4% WER across domains where Whisper
-averages 25.1%**. It is 226 MB instead of 1.6 GB, it punctuates and normalises
-numbers on its own, and — because RNN-T has no autoregressive decoder — it
-**cannot hallucinate on silence**. No "Thanks for watching!" during your pauses.
+Потому что Whisper хорош не на всех языках, а локальные диктовки почти все
+сделаны на нём.
 
-It also runs faster on a CPU than Whisper-large-v3-turbo does on an RTX 4090.
-No GPU required. On this machine, 8 seconds of speech becomes text in ~0.7 s.
+FlowLocal распознаёт **[GigaAM](https://huggingface.co/ai-sage/GigaAM)** (MIT,
+SberDevices) - модель, обученную на 700 000 часах русской речи. По карточке
+модели она ошибается **втрое реже Whisper на русском** (8.4% против 25.1% по
+доменам), весит 236 МБ вместо 1.6 ГБ и **не выдумывает текст на тишине**:
+у неё нет генератора, которому надо что-то сказать в паузу. Никаких «Спасибо за
+просмотр!» посреди раздумья.
 
-Speak something else? The model catalogue also carries **Parakeet TDT** (25
-European languages, auto-detect), **Whisper large-v3-turbo** and **base** (99+
-languages), and **Vosk** — all through [onnx-asr](https://github.com/istupakov/onnx-asr),
-all downloadable from inside the app, all swappable without a restart.
+Видеокарта не нужна. На процессоре 8 секунд речи превращаются в текст примерно
+за 0.7 с, а с разбором на ходу ждать почти не приходится вовсе - смотрите ниже.
 
-> **Honest caveat:** the WER figures above are the model card's, not ours, and
-> we are not going to pretend otherwise. Our own harness (`tools/bench_asr.py`)
-> measures WER, latency, RAM and disk across the catalogue, and on the one
-> synthetic phrase we have it puts GigaAM at 0.0% against Whisper-turbo's 9.1%
-> — a sample of one, quoted as such. Believe the direction, not the decimal.
+> **Честная оговорка.** Цифры выше - из карточки модели, не наши, и делать вид,
+> что мы их померили сами, мы не будем. Свой стенд (`tools/bench_asr.py`) меряет
+> точность, задержку, память и место на диске, но живых записей ему не давали:
+> решение о GigaAM принято и подтверждено ежедневной работой. Верьте
+> направлению, а не десятым долям.
 
-## Install
+**Моделей в списке две, а не девять.** «Обычная» и «Внимательная» - обе GigaAM,
+обе русские, разница в аккуратности с окончаниями и редкими словами. Девять
+вариантов - это витрина, а не выбор: человек, которому программу поставили, не
+отличит CTC от RNN-T и не должен. Убранные модели достаются из истории репозитория.
 
-[**Download the installer**](https://github.com/romankandeevy/flowlocal/releases/latest)
-— 70 MB, no administrator rights, no UAC prompt. Windows 10/11.
+## Установка
 
-It is not code-signed, so SmartScreen will show its blue card once: *More info*
-→ *Run anyway*. From source instead:
+[**Скачать установщик**](https://github.com/romankandeevy/flowlocal/releases/latest)
+- 70 МБ, без прав администратора и без окна UAC. Windows 10 или 11.
+
+Подписи у него нет, поэтому SmartScreen один раз покажет синюю карточку:
+«Подробнее» → «Выполнить в любом случае». Из исходников:
 
 ```powershell
 git clone https://github.com/romankandeevy/flowlocal
 cd flowlocal
 pip install -r requirements.txt
-python app.py           # first run downloads GigaAM (226 MB) into models/
+python app.py           # первый запуск скачает GigaAM (236 МБ) в models/
 ```
 
-Python 3.14 or 3.13, Windows 10/11. First launch opens a seven-screen setup:
-language and model, microphone with a live waveform, your hotkey, a paste
-check, a "say something" trial that shows the text without inserting it, and
-finally the offer to install text polishing. There is no skip button — a
-dictation app you don't know the gesture for is a dictation app that doesn't
-work.
+Python 3.14 или 3.13, Windows 10/11. Первый запуск открывает мастер из восьми
+экранов: приветствие, оформление, модель, микрофон с живой волной, ваше
+сочетание, проверка вставки, пробная диктовка (текст покажем, никуда не
+вставим) и в конце предложение доустановить правку текста. Кнопки «пропустить»
+нет намеренно: диктовка, жеста которой вы не знаете, - это диктовка, которая не
+работает.
 
 <p align="center">
-  <img src="tools/preview_onboarding.png" width="620" alt="All seven setup screens: welcome, language and model, microphone, hotkey, paste check, trial, text polishing">
+  <img src="tools/preview_onboarding.png" width="620" alt="Все восемь экранов мастера: приветствие, оформление, модель, микрофон, сочетание, проверка вставки, пробная диктовка, правка текста">
 </p>
 
-Run it in the background with `pythonw app.py`. Start with Windows: a checkbox
-in Settings, or `python app.py --autostart on`.
+Фоном без консоли - `pythonw app.py`. Запуск вместе с Windows - галочка в
+настройках или `python app.py --autostart on`.
 
-## Settings
+## Как этим пользоваться
 
-Six doors, both themes, everything applies as you change it. The model
-catalogue is deliberately not one of them — it opens from *Dictation*, because
-a person writing letters has no business meeting a zoo of ASR models.
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="tools/preview_settings_qt_dark.png">
-    <img src="tools/preview_settings_qt_light.png" alt="All six settings pages: home, dictation, words, history, stats, about">
-  </picture>
-</p>
-
-The look is a design system called Korti, ported by hand rather than eyeballed:
-two inks (paper and ink, everything else is ink over paper at some opacity),
-hairlines instead of fills, blue accent reserved for the genuinely special,
-green and red for status only, motion at 120/180/280 ms on one curve and no
-springs. Tokens live in `theme.py` as a single source of truth and are bridged
-into QML, so switching themes repaints the window live instead of rebuilding it.
-
-## Use it
-
-Hold **Ctrl+Shift+Space**, talk, let go. The pill at the bottom of the screen
-shows a live waveform and a timer while you speak, then `распознаю`, then the
-word count — and the text is in place.
+Зажмите **Ctrl+Shift+Space**, говорите, отпустите. Внизу экрана пилюля: живая
+волна и таймер, пока говорите, потом `распознаю`, потом число слов - и текст
+уже на месте.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="tools/preview_overlay_qt.png">
-    <img src="tools/preview_overlay_qt_light.png" width="300" alt="Every state of the pill: loading, recording with a live waveform, transcribing, done, the toggle-mode hint, 'microphone is silent', and an error">
+    <img src="tools/preview_overlay_qt_light.png" width="300" alt="Все состояния пилюли: загрузка, запись с живой волной, распознавание, готово, подсказка режима, «микрофон молчит» и ошибка">
   </picture>
 </p>
 
-Two independent bindings, not a mode switch — keep both and pick per situation:
+Сочетаний два, и это не переключатель режима - держите оба и выбирайте по
+случаю:
 
-- **Hold and talk** — press, speak, release, it's inserted.
-- **Press and talk** — press once to start, again to stop. Hands free for long
-  dictation; **Esc** throws the recording away.
+- **Удерживать и говорить** - зажали, сказали, отпустили, вставилось.
+- **Нажать и говорить** - нажали, говорите со свободными руками, нажали ещё
+  раз - остановились. **Esc** выбрасывает запись.
 
-Either binding can be a mouse button, modifiers included (`Ctrl+Mouse 4`).
-Left and right buttons are refused on purpose: dictation on LMB would make the
-mouse unusable, and you'd have nothing left to undo the setting with.
+Любое из двух может быть кнопкой мыши, в том числе с модификатором
+(`Ctrl+Мышь 4`). Левая и правая кнопки не принимаются намеренно: диктовка на
+ЛКМ сделала бы мышь неуправляемой, и отменить настройку было бы уже нечем.
 
-## What's in it
+## Что она умеет
 
 | | |
 |---|---|
-| **Dictionary** | Names and terms, fixed by Levenshtein distance with a threshold ladder. Won't touch your inflections. |
-| **Snippets** | Say a phrase, get a block of text. Whole words, case-insensitive. |
-| **Voice commands** | "с новой строки", "нажми энтер" — line breaks and Enter, spoken. |
-| **Undo** | Its own hotkey. Backspaces exactly what was inserted — and only if you haven't typed since. |
-| **Retry** | The last recording stays in memory; re-run it from the tray if something went wrong. |
-| **History & stats** | Every dictation, click to copy, plus a per-day chart of how much you've saved. |
-| **Mic failover** | Chosen microphone dies → record from the system default, with a note on the pill. |
-| **Filler removal** | "Ну вот, короче, я думаю, типа, надо сделать" → "Я думаю, надо сделать." No model, no download, no latency — see below. |
-| **Snippets that write themselves** | It watches what you repeat and offers to give it a short phrase. You supply the name — a machine can find the repetition, but only you know whether that address is "my email" or "the billing one". |
-| **Auto-submit** | List the apps where a dictation ends in Enter (`telegram.exe`). Saying "нажми энтер" still works everywhere. |
-| **Continuing a thought** | Dictate a second sentence right after the first and it joins properly — a space, and no capital letter mid-sentence. Not after a full stop, not in another window, not half an hour later. |
-| **Backup** | Save your dictionary, snippets, tone rules and hotkeys to a file, and load them back on another machine. Loading **adds** — it never overwrites what you already have. |
-| **Forgetting** | History can be kept forever, or for a year, six months, or a month. |
-| **Tone per app** | `outlook.exe` → formal, chat → loose. *Needs Ollama.* |
-| **LLM polish** | Applies self-corrections ("Friday — no, Saturday" → "Saturday"). *Needs Ollama — and installing it is one button now: FlowLocal downloads it, installs it, fetches the model and switches polish on.* |
+| **Разбор речи на ходу** | Программа начинает работать, пока вы ещё говорите. Ждать после клавиши почти не приходится, даже если диктовали пятнадцать минут. |
+| **Чистка от бубнежа** | «Ну вот, короче, я думаю, типа, надо сделать» → «Я думаю, надо сделать». Без модели, без скачивания, без задержки - как именно, ниже. |
+| **Знаки препинания** | Запятые по правилам за сотые доли миллисекунды или по смыслу фразы - обученной моделью на 30 МБ, если скачаете её кнопкой. |
+| **Слышит вопрос** | «Ты придёшь» и «Ты придёшь?» - одни и те же слова, разница только в голосе. Голос у нас есть: запись никуда не делась. |
+| **Свои слова** | Фамилии, названия, термины. Чинятся по расстоянию Левенштейна с лестницей порогов, ваши падежи не трогаются. |
+| **Подстановки** | Сказали фразу - вставился кусок текста. Целыми словами, без учёта регистра. |
+| **Подстановки, которые находятся сами** | Программа замечает, что вы повторяете, и предлагает дать этому короткую фразу. Имя даёте вы: повтор машина найдёт, а «мой адрес» это или «рабочий» - знаете только вы. |
+| **Технические термины** | «джейсон» станет JSON, «гитхаб» - GitHub, «пул реквест» - pull request. Сто терминов одним переключателем. |
+| **Голосовые команды** | «с новой строки», «нажми энтер» - переносы и Enter, сказанные вслух. |
+| **Преобразования текста** | Выделили, нажали, выбрали из списка: короче, строже, списком, задание для ИИ, техзадание. Свои пишутся в настройках. *Нужна Ollama.* |
+| **Правка выделенного голосом** | Выделили, зажали, сказали «сделай короче» - выделенное заменилось. *Нужна Ollama.* |
+| **Заметки** | Отдельное окно, куда диктуют длинно, не целясь в чужое поле. Сохраняется само, ищется по словам, приводится в порядок одной кнопкой. |
+| **Отмена** | Своё сочетание. Стирает ровно вставленное - и только если вы после этого ничего не печатали. |
+| **Повтор** | Последняя запись остаётся в памяти: если что-то пошло не так, распознайте её заново из трея. |
+| **История и статистика** | Каждая диктовка, клик копирует. Плюс график по дням и сколько времени это сберегло. |
+| **Как вы говорите** | Любимое слово, присказка, часы пик, куда чаще всего диктуете. Считается здесь же, по своей истории; пока данных мало - программа молчит, а не выдумывает. |
+| **Пауза музыки** | На время диктовки. Если музыка не играла - она и не заиграет: возвращаем только то, что сами остановили. |
+| **Запасной микрофон** | Выбранный отвалился - пишем с системного и говорим об этом на пилюле. |
+| **Отправка сообщения** | Перечислите программы, где диктовка заканчивается Enter (`telegram.exe`). Сказанное «нажми энтер» работает и так везде. |
+| **Продолжение мысли** | Вторая фраза сразу за первой приклеится правильно: пробел и без заглавной посреди предложения. Не после точки, не в другом окне, не через полчаса. |
+| **Резервная копия** | Словарь, подстановки, тон и сочетания - в файл и обратно на другой машине. Загрузка **добавляет**, а не затирает. |
+| **Забывание** | История хранится вечно, год, полгода или месяц - на выбор. |
+| **Тон под приложение** | `outlook.exe` - строго, чат - свободно. *Нужна Ollama.* |
+| **Понимание поправок** | «в пятницу, нет, в субботу» → «в субботу». *Нужна Ollama, и ставится она одной кнопкой: программа скачает, установит, заберёт модель и включит.* |
+| **Английский интерфейс** | Переключается на лету, окно перерисовывается само. Распознавание остаётся русским: английский нужен, чтобы отдать программу тому, кто по-русски не читает. |
+| **Обновления** | Программа сама видит новый выпуск и ставит его; список изменений - в окне «О программе», без интернета. |
 
-### Filler removal without a model
+### Чистка от бубнежа без всякой модели
 
-A filler isn't given away by the word — it's given away by the **commas around
-it**. You can't just delete "вот": *"вот дом"* is an ordinary sentence. But
-GigaAM puts a comma wherever the speaker hesitated, which means the hesitations
-are **already marked up in the text**. Read the punctuation instead of guessing
-the meaning, and *"И вот, короче, я"* gives itself away while *"Вот дом"* stays
-untouched.
+Слово-паразит выдаёт не само слово, а **запятые вокруг него**. Просто удалить
+«вот» нельзя: *«вот дом»* - обычная фраза. Но запятая ставится там, где человек
+запнулся, а значит, запинки **уже размечены в тексте**. Читаем пунктуацию
+вместо того, чтобы угадывать смысл, - и *«И вот, короче, я»* выдаёт себя, а
+*«Вот дом»* остаётся нетронутым.
 
-This costs zero megabytes, zero milliseconds, and — crucially — **cannot lose
-your words**: nothing is generated, only marked-up tokens are struck out.
+Это стоит ноль мегабайт, ноль миллисекунд и - главное - **не может потерять
+ваши слова**: ничего не генерируется, вычёркиваются только размеченные куски.
 
-We tried the obvious thing first and it failed. Qwen3-0.6B int4 (1 GB, in-app,
-via onnxruntime-genai) turned *"Вот дом, в котором я живу"* into **"дом"**.
-Qwen3-1.7B with reasoning spent 53 seconds and turned *"Выручка выросла на 15%
-за квартал"* into *"Выручка выросла за квартал"* — it deleted the number the
-sentence existed for. A generator can return anything by construction; a
-deleter cannot. Self-corrections and tone genuinely do need a model, and that's
-what Ollama is for.
+Очевидное пробовали первым, и оно провалилось. Qwen3-0.6B int4 (1 ГБ, в
+коробке) сделала из *«Вот дом, в котором я живу»* слово **«дом»**. Qwen3-1.7B с
+рассуждением потратила 53 секунды и превратила *«Выручка выросла на 15% за
+квартал»* в *«Выручка выросла за квартал»* - выбросила число, ради которого
+фраза и существовала. Генератор по своему устройству может вернуть что угодно,
+удалятор - не может. А вот самоисправления и тон без модели не сделать, и
+ровно для них нужна Ollama.
 
-## How it works
+### Разбор речи на ходу
 
-| File | Job |
+Сказанное минуту назад уже не изменится - значит, ждать конца фразы, чтобы
+начать работу, незачем. Программа разбирает речь, пока вы говорите, и к моменту
+отпускания клавиши остаётся хвост в пару секунд. Ожидание перестаёт зависеть от
+длины: пятнадцать минут готовы примерно за то же время, что и полминуты.
+
+Побочное следствие оказалось важнее самой скорости: **модель теперь можно
+выбирать по точности, а не по скорости** - пока идёт речь, успевает любая.
+
+Выключается в «Диктовке» → «Разбирать речь на ходу».
+
+### Свои преобразования
+
+Готовых десять, и они закрывают почти всё: короче, строже, проще, списком,
+письмом, по шагам, техзадание, только ошибки, задание для ИИ, на английский.
+Ненужные прячутся переключателем, чтобы не искать своё среди чужого.
+
+Свои пишутся в «Словах» → «Свои преобразования»: слева название, справа что
+сделать с текстом - **словами, как объяснили бы человеку**. Указание уходит в
+модель как есть; переписывать вашу формулировку под свой формат мы не будем.
+
+## Настройки
+
+Шесть дверей, обе темы, всё применяется по ходу правки. Кнопки «Применить» нет
+намеренно - лишний шаг, о котором легко забыть.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="tools/preview_settings_qt_dark.png">
+    <img src="tools/preview_settings_qt_light.png" alt="Все шесть страниц настроек: главная, диктовка, слова, история, статистика, о программе">
+  </picture>
+</p>
+
+| Страница | Что там |
 |---|---|
-| `app.py` | The glue: hotkey, threads, tray, the record → text → insert pipeline |
-| `recorder.py` | Microphone, ring pre-buffer, levels for the waveform |
-| `transcriber.py` | onnx-asr: model loading, CPU/GPU with fallback, warm-up |
-| `models.py` | Catalogue: sizes, languages, licences, pick-by-language |
-| `cleaner.py` | Dictionary, filler removal, optional Ollama polish and tone |
-| `inserter.py` | Insertion: clipboard + Ctrl+V, or character by character |
-| `overlay_qt.py`, `qml/Overlay.qml` | The pill |
-| `settings_qt.py`, `qml/Settings.qml` | Settings: data in Python, layout in QML |
-| `theme.py`, `theme_qt.py` | Design tokens — one source of truth, bridged into QML |
+| **Главная** | Как диктовать, находки, сколько сберегли, последние диктовки |
+| **История** | Всё надиктованное, клик копирует; вести или не вести, что забывать |
+| **Статистика** | Итоги, «как вы говорите», куда диктуете, график по дням |
+| **Диктовка** | Сочетания, микрофон, чистка, вставка, распознавание, вид, система |
+| **Слова** | Свои слова, подстановки, тон под приложение, преобразования |
+| **О программе** | Резервная копия, нераспознанные записи, список версий, служебное |
 
-The pill must never steal focus: if it did, your Ctrl+V would go to the wrong
-window. Qt gives us that with `WindowDoesNotAcceptFocus`, which becomes
-`WS_EX_NOACTIVATE` on Windows. Waveform data travels as a C++ signal inside the
-process — no IPC, no serialisation, so 60 fps costs nothing.
+**Настройки, которую видно только в `config.json`, для человека не существует.**
+Это правило, а не пожелание: всё, что программа умеет, имеет место в окне.
+Служебные пороги - исключение, они живут в комментариях `config.py`, потому что
+их незачем крутить.
 
-## Limitations
+Оформление - дизайн-система **Korti**: две краски (бумага и чернила, остальное -
+чернила поверх бумаги с прозрачностью), волосяные линии вместо заливок, синий
+акцент только для по-настоящему особенного, зелёный и красный только для
+состояния, движение на 120/180/280 мс по одной кривой и без пружин. Токены
+лежат в `theme.py` одним источником правды и пробрасываются в QML, поэтому
+смена темы перекрашивает окно на лету, а не пересобирает его.
 
-- **Windows only.** macOS is on the roadmap and is a genuine 10–15 weeks, not a weekend.
-- `paste` mode overwrites non-text clipboard content (files, images); only text is restored.
-- Insertion fails into apps running as administrator unless FlowLocal is too (Windows UIPI).
-- The pill isn't visible over exclusive-fullscreen games.
-- Undo won't fire if you typed after inserting — that's a guard, not a bug.
+Два осознанных отступления от системы, оба вынужденные:
 
-## Tests
+- **Шрифт интерфейса - Onest, а не Hanken Grotesk.** В фирменном нет кириллицы
+  (проверено по таблице cmap), и весь русский интерфейс превращался в ряды ▯▯▯.
+  Onest повторяет геометрию и высоту строчных, но умеет кириллицу.
+- **Точка записи зелёная, а не красная.** В Korti красный - «ошибка», и мигать
+  им во время обычной диктовки значило бы врать.
 
-Eight fast tests run on every push (`.github/workflows/tests.yml`). They touch
-nothing: no microphone, no keyboard, no network, no model.
+## Как это устроено
+
+| Файл | Зачем |
+|---|---|
+| `app.py` | склейка: хоткей, потоки, трей, конвейер запись → текст → вставка |
+| `recorder.py` | микрофон, кольцевой пре-буфер, замер громкости для волны |
+| `streaming.py` | разбор речи, пока человек ещё говорит |
+| `transcriber.py` | onnx-asr: загрузка модели, процессор или видеокарта, прогрев |
+| `models.py` | каталог моделей: размеры, языки, лицензии |
+| `cleaner.py` | словарь, чистка от бубнежа, тон и правка через Ollama |
+| `punct_rules.py`, `punct_model.py` | знаки препинания: правилами и моделью |
+| `intonation.py` | вопросительный знак по голосу |
+| `transforms.py` | преобразования текста: готовые и свои |
+| `insights.py` | разбор своей речи для «Статистики» |
+| `inserter.py` | вставка в активное окно (буфер + Ctrl+V либо посимвольно) |
+| `overlay_qt.py`, `qml/Overlay.qml` | пилюля |
+| `settings_qt.py`, `qml/Settings.qml` | настройки: данные в Python, вёрстка в QML |
+| `notes_qt.py`, `notes.py` | окно заметок |
+| `i18n.py` | английский интерфейс; ключ перевода - сама русская строка |
+| `theme.py`, `theme_qt.py` | токены Korti - один источник правды, мост в QML |
+
+Пилюля не имеет права забирать фокус: заберёт - и ваш Ctrl+V уедет не в то
+окно. Qt даёт это флагом `WindowDoesNotAcceptFocus`, который на Windows
+разворачивается в `WS_EX_NOACTIVATE`. Данные на волну идут C++-сигналом внутри
+процесса - ни IPC, ни сериализации, поэтому 60 кадров в секунду не стоят ничего.
+
+## Чего она не умеет
+
+- **Только Windows.** macOS в планах, и это честные 10-15 недель, а не выходные.
+- Вставка через буфер перезаписывает нетекстовое его содержимое (файлы,
+  картинки) - обратно восстанавливается только текст.
+- В программы, запущенные от администратора, вставить не выйдет, если сам
+  FlowLocal запущен без прав (ограничение Windows, UIPI).
+- Пилюля не видна поверх игр в полноэкранном эксклюзивном режиме.
+- Отмена не сработает, если после вставки вы успели что-то напечатать. Это
+  защита, а не недоделка: иначе Backspace съел бы ваш текст.
+
+## Тесты
+
+Шестнадцать быстрых тестов идут на каждый пуш
+([`.github/workflows/tests.yml`](.github/workflows/tests.yml)). Они не трогают
+ничего: ни микрофона, ни клавиатуры, ни сети, ни модели.
 
 ```powershell
-$env:PYTHONIOENCODING="utf-8"   # or Cyrillic in the console is mojibake
-python test_clean.py        # filler removal and the dictionary — half the cases are traps
-python test_suggest.py      # snippets found in history — 8 of 12 cases are traps
-python test_join.py         # joining dictations and auto-submit — 9 of 16 are traps
-python test_backup.py       # backup, restore, and that restoring never overwrites
-python test_inputspec.py    # hotkey parsing — the deterministic half of test_hotkey
+$env:PYTHONIOENCODING="utf-8"   # иначе кириллица в консоли - мусор
+python test_clean.py        # чистка и словарь: половина случаев - ловушки
+python test_stream.py       # разбор речи на ходу
+python test_transforms.py   # преобразования: список, свои, спрятанные
+python test_suggest.py      # находки по истории: 8 ловушек из 12
+python test_join.py         # склейка диктовок и автоввод: 9 из 16 - ловушки
+python test_insights.py     # разбор своей речи: молчит, пока данных мало
+python test_backup.py       # выгрузка, загрузка и то, что загрузка не затирает
 ```
 
-These two send real keystrokes and move the mouse, so they stay out of CI and
-off a machine you are using:
+А эти шлют настоящие нажатия и двигают мышь, поэтому не в CI и не на машине,
+за которой вы работаете:
 
 ```powershell
-python test_insert.py both  # insertion into a real EDIT control
-python test_hotkey.py       # binding, rebinding, capture, rollback of a broken one
+python test_insert.py both  # вставка в настоящий EDIT
+python test_hotkey.py       # привязка, смена, захват, откат битого
 ```
 
-Tests send real keystrokes and move the mouse — don't touch the keyboard while
-they run, and close a running instance first or it will eat the test's hotkeys.
+Живой экземпляр программы на время прогона лучше закрыть - он перехватит
+хоткеи у теста.
 
-## Roadmap
+## Что дальше
 
-Done: the move to onnx-asr and GigaAM, filler removal without a model, command
-mode, the installer, in-app updates, one-button Ollama, snippets found in your
-own history, backup and restore, auto-submit, smart joining.
+Сделано: переезд на onnx-asr и GigaAM, чистка без модели, разбор речи на ходу,
+знаки препинания, преобразования, заметки, установщик, обновления из
+программы, Ollama одной кнопкой, находки по своей истории, резервная копия,
+автоввод, склейка фраз, пауза музыки, английский интерфейс.
 
-Shipping a small LLM in the box was **tried and rejected twice** — the second
-time on the full 20-case harness, where Qwen3-1.7B scored 10/20 against
-Ollama's 18/20 and *lost words in two cases*. The measurement is the reason,
-not the taste.
+Своя LLM в коробке **пробовалась дважды и отвергнута дважды** - второй раз на
+полном стенде из 20 случаев, где Qwen3-1.7B дала 10/20 против 18/20 у Ollama
+и *потеряла слова в двух случаях*. Причина - замер, а не вкус.
 
-What is left:
+Осталось: **macOS**. Честная цена - 10-15 недель, и прежде чем её платить, три
+вечера проб на живом Маке решат, возможно ли это вообще. Взнос Apple $99 в год,
+как выяснилось, **не нужен**: он покупает раздачу через скачивание, а этот
+проект так не раздаётся.
 
-1. Pausing music while you dictate.
-2. macOS. The honest cost is 10–15 weeks; before spending it, three evenings of
-   probes on a real Mac decide whether it is possible at all. The $99/year
-   Apple fee turns out **not** to be required — it buys distribution by
-   download, which this project does not do.
+Это инструмент, которым автор пользуется каждый день, а не продукт, гоняющийся
+за звёздами. Возможности появляются, когда стоят того дня, который на них уйдёт.
 
-This is a tool its author uses every day, not a product chasing stars. Features
-land when they are worth the day they cost.
+## Лицензия
 
-## Licence
+[MIT](LICENSE). Шрифты - под OFL, в `assets/fonts/`. PySide6 под LGPLv3:
+сборки идут папкой, Qt в них - заменяемые библиотеки, тексты лицензий приложены
+в `licenses/`. Модель GigaAM - MIT от SberDevices, качается при первом запуске
+и в репозиторий не попадает.
 
-[MIT](LICENSE). Fonts under the OFL, in `assets/fonts/`. PySide6 is LGPLv3 —
-builds ship as onedir with Qt as replaceable libraries, licence texts included.
-Parakeet is CC-BY-4.0 and requires attribution if you use it.
+Шрифты интерфейса - Onest и JetBrains Mono, отдаются Windows только своему
+процессу (`AddFontResourceEx` + `FR_PRIVATE`): в систему ничего не ставится, а
+настольной программе нечего ходить на CDN, чтобы себя нарисовать.
 
-Interface fonts are Onest and JetBrains Mono, loaded per-process with
-`AddFontResourceEx(FR_PRIVATE)` — nothing is installed into your system, and a
-desktop app has no business calling a CDN to draw itself.
-
----
-
-Русская версия — [README.ru.md](README.ru.md).
+«Замена Wispr Flow» здесь - сравнение для понятности, не более: проект не связан
+с Wispr AI и ничего у них не заимствует.

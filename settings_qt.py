@@ -162,6 +162,9 @@ class Backend(QObject):
         m = models.get(model_id)
         C.set_(self.cfg, "quantization", models.quant_for(model_id))
         self.set("model", model_id)
+        # Строка «используется» стоит рядом, на той же карточке, и обязана
+        # переехать вместе с выбором - иначе она врёт до закрытия окна.
+        self.modelsChanged.emit()
         size = f"{m.size_mb} МБ, {m.langs}. " if m else ""
         self.flashed.emit(f"{size}Загружается в фоне, перезапуск не нужен", "accent")
 
@@ -320,9 +323,11 @@ class Backend(QObject):
     def modelOptions(self) -> list:
         return _opts([(m.title, m.id) for m in models.CATALOG])
 
-    @Property("QVariantList", constant=True)
-    def langOptions(self) -> list:
-        return _opts([("авто", None), ("русский", "ru"), ("английский", "en")])
+    # Выбора языка распознавания здесь нет намеренно, и это не пропущенная
+    # настройка. В каталоге остались две модели, обе русские (models.py), и
+    # ключ `language` читает только загрузчик многоязычных - для тех, кто
+    # вернёт Whisper обратно. Показывать переключатель, который сейчас ни на
+    # что не влияет, хуже, чем не показывать ничего.
 
     @Property("QVariantList", constant=True)
     def deviceOptions(self) -> list:
@@ -344,9 +349,14 @@ class Backend(QObject):
     def micOptions(self) -> list:
         """Один физический микрофон PortAudio показывает по разу на каждый
         host-api, поэтому имя без api - это три одинаковые строки и гадание."""
+        import i18n
         from recorder import default_input_name, list_input_devices
 
-        out = [{"label": f"по умолчанию · {default_input_name()}", "value": None}]
+        # Имя микрофона внутри строки - от системы, его не перевести. Переводим
+        # только своё слово перед ним, иначе L.t в QML не найдёт ключ: там
+        # строка целиком, вместе с «Микрофон (Realtek High Definition)».
+        out = [{"label": f"{i18n.t('по умолчанию')} · {default_input_name()}",
+                "value": None}]
         for i, name, api in list_input_devices():
             out.append({"label": f"{name} · {api}", "value": i})
         return out
@@ -411,6 +421,53 @@ class Backend(QObject):
             if k:
                 out[k] = str(r["v"])
         self.set(key, out)
+
+    # ---------- преобразования ----------
+    #
+    # До этого свои преобразования правились только руками в config.json, а
+    # спрятать готовое было нельзя вовсе. Список открывается по хоткею посреди
+    # работы - значит и собирать его надо в окне, а не в текстовом редакторе.
+
+    @Slot(result="QVariantList")
+    def transformPresets(self) -> list:
+        """Готовые преобразования и то, показываем ли каждое.
+
+        Спрятать - не то же, что удалить: список задан кодом, удалять из него
+        нечего. Но тот, кто никогда не переводит на английский, не обязан
+        видеть этот пункт вечно.
+        """
+        import transforms
+
+        hidden = set(self.cfg.get("transforms_hidden") or [])
+        return [{"id": p["id"], "title": p["title"], "hint": p["hint"],
+                 "shown": p["id"] not in hidden} for p in transforms.PRESETS]
+
+    @Slot(str, bool)
+    def setTransformShown(self, tid: str, shown: bool) -> None:
+        hidden = [i for i in (self.cfg.get("transforms_hidden") or []) if i != tid]
+        if not shown:
+            hidden.append(tid)
+        self.set("transforms_hidden", hidden)
+
+    @Slot(result="QVariantList")
+    def customTransforms(self) -> list:
+        import transforms
+
+        return [{"title": t["title"], "instruction": t["instruction"]}
+                for t in transforms.custom_of(self.cfg)]
+
+    @Slot("QVariantList")
+    def setCustomTransforms(self, rows) -> None:
+        import transforms
+
+        self.set("transforms", transforms.pack_custom(
+            [dict(r) for r in (rows or [])]))
+
+    @Property(int, constant=True)
+    def maxTransforms(self) -> int:
+        import transforms
+
+        return transforms.MAX_CUSTOM
 
     # ---------- история ----------
 
@@ -929,6 +986,25 @@ class Backend(QObject):
         if value and value not in declined:
             declined.append(value)
             self.set("snippets_declined", declined)
+        self.changed.emit()
+
+    @Property(int, notify=changed)
+    def declinedCount(self) -> int:
+        return len(self.cfg.get("snippets_declined") or [])
+
+    @Slot()
+    def clearDeclined(self) -> None:
+        """Забыть отказы, чтобы находки предложились заново.
+
+        «Не надо» запоминается навсегда - иначе программа спрашивала бы одно и
+        то же каждую неделю. Но навсегда без пути назад означало бы, что один
+        промах мыши стоит человеку находки, о которой он больше не узнает.
+        """
+        n = len(self.cfg.get("snippets_declined") or [])
+        self.set("snippets_declined", [])
+        self.changed.emit()
+        self.flashed.emit(f"{n} {plural(n, 'находка', 'находки', 'находок')} "
+                          "вернутся, если повторятся снова", "accent")
 
     @Slot(str, str)
     def acceptSuggestion(self, phrase: str, value: str) -> None:

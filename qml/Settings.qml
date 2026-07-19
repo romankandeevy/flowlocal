@@ -6,8 +6,13 @@
 //
 // Дверей шесть, а не десять (исследование конкурентов, IMPROVEMENTS §2.3):
 // Основное+Распознавание+Ввод слились в «Диктовку», Словарь+Замены - в
-// «Слова». «Модели» с панели убраны - туда ведёт кнопка «Другие языки и
-// модели»: человеку, который просто пишет письма, зоопарк моделей не нужен.
+// «Слова». Отдельной страницы «Модели» нет: в каталоге осталось две модели,
+// и обе живут строкой в «Распознавании» - экран под два варианта был бы
+// лишней дверью.
+//
+// Правило страниц: если возможность есть в коде, у неё есть место здесь.
+// Настройка, которую видно только в config.json, для человека, которому
+// программу отдали, не существует - сколько бы кода за ней ни стояло.
 
 import QtQuick
 
@@ -702,6 +707,12 @@ Rectangle {
                         HotkeyField { field: "hotkey_transform"; allowClear: true }
                     }
                     SettingRow {
+                        title: L.t("Открыть заметки")
+                        subtitle: L.t("Отдельное окно, куда удобно диктовать длинно, ")
+                                  + L.t("не целясь в чужое поле. Есть и в панели слева")
+                        HotkeyField { field: "hotkey_notes"; allowClear: true }
+                    }
+                    SettingRow {
                         title: L.t("Отменить последнюю диктовку")
                         subtitle: L.t("Уберёт вставленный текст, если вы после этого ничего не печатали")
                         HotkeyField { field: "undo_hotkey"; allowClear: true }
@@ -1108,6 +1119,17 @@ Rectangle {
                             onPicked: (v) => B.setModel(v)
                         }
                     }
+                    // Разбор на ходу. Раньше жил только в config.json, хотя
+                    // это он делает длинную диктовку быстрой: выключить его
+                    // человек не мог, а понять, почему пятнадцать минут речи
+                    // готовы так же быстро, как полминуты, - тем более.
+                    ToggleRow {
+                        title: L.t("Разбирать речь на ходу")
+                        subtitle: L.t("Программа начинает работать, пока вы ещё говорите. ")
+                                  + L.t("Тогда ждать после клавиши почти не приходится, ")
+                                  + L.t("даже если диктовали долго")
+                        path: "stream_asr"
+                    }
                     SettingRow {
                         title: L.t("Устройство")
                         subtitle: L.t("Оставьте «авто» - программа выберет сама")
@@ -1115,6 +1137,40 @@ Rectangle {
                             options: B.deviceOptions
                             value: B.get("device")
                             onPicked: (v) => B.setRestart("device", v)
+                        }
+                    }
+
+                    // Что лежит на диске. Строка отвечает на два вопроса
+                    // сразу: сколько места занято и что будет, если
+                    // переключиться на вторую модель (скачается 238 МБ, и
+                    // лучше знать это заранее, чем в дороге).
+                    Repeater {
+                        model: modelDisk.rows
+                        SettingRow {
+                            title: modelData.title
+                            subtitle: modelData.active
+                                ? L.t("используется") + " · " + modelData.onDiskMb + " " + L.t("МБ на диске")
+                                : modelData.downloading
+                                  ? L.t("качается…")
+                                  : modelData.installed
+                                    ? L.t("скачана, лежит про запас") + " · " + modelData.onDiskMb + " " + L.t("МБ")
+                                    : L.t("не скачана - скачается") + " " + modelData.sizeMb + " " + L.t("МБ при первом включении")
+                            FlowButton {
+                                visible: !modelData.active && !modelData.downloading
+                                label: modelData.installed ? L.t("Удалить") : L.t("Скачать")
+                                onClicked: modelData.installed
+                                    ? B.deleteModel(modelData.id)
+                                    : B.downloadModel(modelData.id)
+                            }
+                        }
+                    }
+                    Item {
+                        id: modelDisk
+                        property var rows: B.modelsInfo()
+                        Connections {
+                            target: B
+                            function onModelsChanged() { modelDisk.rows = B.modelsInfo() }
+                            function onChanged() { modelDisk.rows = B.modelsInfo() }
                         }
                     }
                 }
@@ -1234,6 +1290,24 @@ Rectangle {
                           + L.t("справа что появится.")
                           + (snips.blanks > 0 ? "  Пустых строк: " + snips.blanks + " - они не сохранятся." : "")
                 }
+                // «Не надо» на находке запоминается навсегда - иначе программа
+                // спрашивала бы одно и то же каждую неделю. Но дверь назад
+                // нужна: промах мыши не должен стоить находки, о которой потом
+                // не узнаешь. Строки нет, пока отказываться было не от чего.
+                Row {
+                    visible: B.declinedCount > 0
+                    spacing: 10
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: L.t("Отклонённых находок:") + " " + B.declinedCount
+                        font.family: T.sans; font.pixelSize: T.tSm
+                        color: T.textMuted
+                    }
+                    FlowButton {
+                        label: L.t("Предложить снова")
+                        onClicked: B.clearDeclined()
+                    }
+                }
 
                 SectionHeader {
                     text: L.t("Тон под приложение"); buttonLabel: L.t("Добавить")
@@ -1250,6 +1324,54 @@ Rectangle {
                 Note {
                     text: B.toneNote
                           + (tones.blanks > 0 ? "  Строк без программы: " + tones.blanks + " - не сохранятся." : "")
+                }
+
+                // ---- Преобразования ----
+                // Список, который открывается по сочетанию «Преобразовать
+                // текст». Готовые написали мы, свои пишет человек - и до сих
+                // пор мог написать их только в config.json, то есть никак.
+                SectionHeader {
+                    text: L.t("Свои преобразования")
+                    buttonLabel: tf.full ? "" : L.t("Добавить")
+                    buttonKind: "primary"
+                    onAction: tf.add()
+                }
+                TransformTable {
+                    id: tf
+                    width: parent.width
+                }
+                Note {
+                    text: L.t("Выделите текст, нажмите сочетание «Преобразовать текст» - ")
+                          + L.t("и выберите нужное. Слева название, справа что сделать: ")
+                          + L.t("пишите словами, как объяснили бы человеку.")
+                          + (tf.full ? "  " + L.t("Больше не поместится: список выбирают цифрами.") : "")
+                          + (tf.blanks > 0 ? "  " + L.t("Незаполненных строк:") + " " + tf.blanks
+                                             + " - " + L.t("они не сохранятся.") : "")
+                }
+
+                SectionTitle { text: L.t("Готовые преобразования") }
+                Card {
+                    width: parent.width
+                    Repeater {
+                        model: presets.rows
+                        SettingRow {
+                            first: index === 0
+                            title: L.t(modelData.title)
+                            subtitle: L.t(modelData.hint)
+                            Toggle {
+                                value: modelData.shown
+                                onToggled: (v) => B.setTransformShown(modelData.id, v)
+                            }
+                        }
+                    }
+                    Item {
+                        id: presets
+                        property var rows: B.transformPresets()
+                    }
+                }
+                Note {
+                    text: L.t("Выключенное просто не показывается в списке - ")
+                          + L.t("чтобы не искать своё среди того, чем не пользуетесь.")
                 }
             }
 
