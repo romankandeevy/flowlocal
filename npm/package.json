@@ -1,6 +1,6 @@
 {
   "name": "@usekorti/flowlocal",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "Приватная диктовка для Windows: зажал клавишу, сказал, отпустил - текст в активном окне. Голос не покидает компьютер.",
   "keywords": [
     "dictation",
