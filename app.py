@@ -1259,7 +1259,8 @@ class App:
                 do_update=self._do_update,
                 llm_install=self.install_ollama,
                 llm_busy=self.ollama_busy,
-                redo_fn=self._redo_recording)
+                redo_fn=self._redo_recording,
+                notes_fn=self.open_notes)
         self.settings.open()
 
     def _redo_recording(self, path: str) -> None:

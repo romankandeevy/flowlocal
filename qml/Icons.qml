@@ -35,6 +35,12 @@ QtObject {
     // info
     readonly property string about:
         "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM12 16v-4M12 8h.01"
+    // notebook-pen - «Заметки». Отдельное окно, но дверь в панели: без неё
+    // человек его просто не находит - именно так и вышло на живой проверке.
+    readonly property string notes:
+        "M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"
+        + "M2 6h4M2 10h4M2 14h4M2 18h4"
+        + "M21.4 2.6a2 2 0 0 1 0 2.8l-6.8 6.8-3 .6.6-3 6.8-6.8a2 2 0 0 1 2.4 0Z"
     // settings - вход в настройки, внизу панели
     readonly property string settings:
         "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
@@ -73,6 +79,7 @@ QtObject {
         case "История":       return history;
         case "Статистика":    return stats;
         case "О программе":   return about;
+        case "Заметки":       return notes;
         case "Настройки":     return settings;
         case "Назад":         return back;
         }

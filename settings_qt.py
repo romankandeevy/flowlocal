@@ -98,7 +98,8 @@ class Backend(QObject):
     def __init__(self, on_change, on_hotkey_capture, info_fn,
                  history_path: str, log_path: str, on_onboarding=None,
                  update_fn=None, do_update=None,
-                 llm_install=None, llm_busy=None, redo_fn=None) -> None:
+                 llm_install=None, llm_busy=None, redo_fn=None,
+                 notes_fn=None) -> None:
         super().__init__()
         self._on_change = on_change
         self._on_hotkey_capture = on_hotkey_capture
@@ -110,6 +111,7 @@ class Backend(QObject):
         self._llm_busy_fn = llm_busy
         self._redo_fn = redo_fn      # распознать сохранённую запись заново
         self._punct_busy = False     # идёт ли скачивание модели знаков
+        self._notes_fn = notes_fn    # открыть окно заметок
         self.history_path = history_path
         self.log_path = log_path
         self.cfg = C.load()
@@ -173,6 +175,12 @@ class Backend(QObject):
         self._on_change(dict(self.cfg))
 
     # ---------- списки для QML ----------
+
+    @Slot()
+    def openNotes(self) -> None:
+        """Открыть окно заметок из панели."""
+        if self._notes_fn is not None:
+            self._notes_fn()
 
     @Slot(str, str)
     def addToDictionary(self, heard: str, correct: str) -> None:
@@ -978,12 +986,13 @@ class SettingsWindow:
     def __init__(self, on_change, on_hotkey_capture, info_fn,
                  history_path: str, log_path: str, on_onboarding=None,
                  update_fn=None, do_update=None,
-                 llm_install=None, llm_busy=None, redo_fn=None) -> None:
+                 llm_install=None, llm_busy=None, redo_fn=None,
+                 notes_fn=None) -> None:
         self.backend = Backend(on_change, on_hotkey_capture, info_fn,
                                history_path, log_path, on_onboarding=on_onboarding,
                                update_fn=update_fn, do_update=do_update,
                                llm_install=llm_install, llm_busy=llm_busy,
-                               redo_fn=redo_fn)
+                               redo_fn=redo_fn, notes_fn=notes_fn)
         self.tokens = Tokens()
         self.view: QQuickView | None = None
         self._filter = _CloseFilter(self.backend.cancelCapture)

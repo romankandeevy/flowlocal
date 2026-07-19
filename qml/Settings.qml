@@ -116,6 +116,19 @@ Rectangle {
                 }
             }
 
+            // «Заметки» - отдельное ОКНО, а не страница, поэтому пункт не
+            // подсвечивается и не меняет win.page. Но дверь ему нужна здесь:
+            // пока её не было, скретчпад можно было найти только в трее, и
+            // владелец его не нашёл. Функция, которую не видно, всё равно что
+            // не сделана.
+            NavItem {
+                visible: !win.inSettings
+                label: "Заметки"
+                icon: ic.forPage("Заметки")
+                active: false
+                onClicked: B.openNotes()
+            }
+
             Item { width: 1; height: 10; visible: !win.inSettings }
 
             NavItem {
