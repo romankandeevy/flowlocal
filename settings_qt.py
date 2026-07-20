@@ -850,6 +850,59 @@ class Backend(QObject):
         return [{"title": t["title"], "instruction": t["instruction"]}
                 for t in transforms.custom_of(self.cfg)]
 
+    @Slot(result="QVariantList")
+    def pickerItems(self) -> list:
+        """Что показать в списке преобразований - с идентификаторами.
+
+        Не customTransforms: тот отдаёт только название и указание, потому что
+        обслуживает таблицу правки на странице «Слова», где id ни к чему. А
+        выбор без id молча уходит в никуда - применять-то нечего.
+
+        Берём transforms.all_for, то есть ровно тот же список, по которому
+        работает Python. Собирать его на странице нельзя: готовые лежат кодом,
+        спрятанные - в конфиге, и второй сборщик разъехался бы с первым в
+        первый же день.
+        """
+        import transforms
+
+        return [dict(x) for x in transforms.all_for(self.cfg)]
+
+    @Slot(str, str, result=str)
+    def saveText(self, text: str, suggest: str = "") -> str:
+        """Спросить, куда сохранить, и сохранить. Возвращает путь или пустое.
+
+        Диалог выбора файла живёт в Python и жить будет: у страницы нет
+        доступа к диску, а «сохранить как» из браузера отдаёт файл в загрузки,
+        а не туда, куда человек показал.
+
+        Имя предлагаем от исходного, если его дали: человек, расшифровавший
+        десять голосовых, иначе получил бы десять «Новый текстовый документ».
+        """
+        import time
+
+        from PySide6.QtWidgets import QFileDialog
+
+        import i18n
+
+        stem = (os.path.splitext(suggest)[0]
+                or time.strftime("Расшифровка-%Y-%m-%d"))
+        path, _ = QFileDialog.getSaveFileName(
+            None, i18n.t("Куда сохранить"), stem + ".txt",
+            i18n.t("Текст") + " (*.txt)")
+        if not path:
+            return ""
+        try:
+            # Переводы строк windows-овские: файл откроют Блокнотом, а он до
+            # сих пор показывает одинокий \n одной длинной строкой.
+            with open(path, "w", encoding="utf-8", newline="\r\n") as f:
+                f.write(text)
+        except OSError as e:
+            _log(f"не сохранилось: {e}")
+            self.flashed.emit(i18n.t("файл не сохранился"), "danger")
+            return ""
+        self.flashed.emit(i18n.t("сохранено"), "")
+        return path
+
     @Slot("QVariantList")
     def setCustomTransforms(self, rows) -> None:
         import transforms

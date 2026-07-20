@@ -18,6 +18,8 @@ import { setLanguage } from "./i18n";
 import "./index.css";
 import { Wizard } from "./onboarding/wizard";
 import { Showcase } from "./ui/showcase";
+import { PickerView } from "./windows/picker-view";
+import { TranscriptView } from "./windows/transcript-view";
 
 // Итог подъёма моста кладём в window: по нему проверяет
 // tools/probe_webshell.py, что мост собрался в НАСТОЯЩЕМ вебвью, а не только
@@ -40,6 +42,10 @@ function view(name: string): ReactNode {
   switch (name) {
     case "wizard":
       return <Wizard />;
+    case "picker":
+      return <PickerView />;
+    case "transcript":
+      return <TranscriptView />;
     case "settings":
     default:
       return <App />;

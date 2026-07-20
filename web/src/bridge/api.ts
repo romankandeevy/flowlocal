@@ -275,6 +275,10 @@ export function pickModel(a0: string): Promise<string> {
   return call("pickModel", a0) as Promise<string>;
 }
 
+export function pickerItems(): Promise<unknown[]> {
+  return call("pickerItems") as Promise<unknown[]>;
+}
+
 export function pretty(a0: string): Promise<string> {
   return call("pretty", a0) as Promise<string>;
 }
@@ -317,6 +321,10 @@ export function runningApps(): Promise<unknown[]> {
 
 export function saveNote(a0: string, a1: string): Promise<void> {
   return call("saveNote", a0, a1) as Promise<void>;
+}
+
+export function saveText(a0: string, a1: string): Promise<string> {
+  return call("saveText", a0, a1) as Promise<string>;
 }
 
 export function savedRecordings(): Promise<unknown[]> {
