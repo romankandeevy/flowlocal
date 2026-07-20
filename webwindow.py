@@ -35,7 +35,15 @@ import sys
 # первой и выглядит как «вебвью не работает вовсе». Разобрано в PLAN, фаза 0.
 import PySide6
 
-os.add_dll_directory(os.path.dirname(PySide6.__file__))
+if hasattr(os, "add_dll_directory"):
+    # Проверка не для красоты: `os.add_dll_directory` существует ТОЛЬКО на
+    # Windows. Без неё импорт этого модуля падал бы на macOS с AttributeError -
+    # то есть ровно тем классом отказа, который на ветке port/macos уже
+    # вычищали из layered, media и wakeup. Новый код принёс его обратно.
+    #
+    # На macOS вебвью тоже работает, но другим бэкендом - WKWebView вместо
+    # WebView2, - и никакой возни с путями к библиотекам ему не нужно.
+    os.add_dll_directory(os.path.dirname(PySide6.__file__))
 
 from PySide6.QtCore import QMetaObject, QSize, QTimer, QUrl, Qt  # noqa: E402
 from PySide6.QtGui import QColor  # noqa: E402
