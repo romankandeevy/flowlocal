@@ -20,6 +20,7 @@ import os
 import re
 import time
 
+import stats
 from app_paths import APP_DIR
 
 DIR = os.path.join(APP_DIR, "notes")
@@ -47,6 +48,21 @@ def title_of(text: str) -> str:
     if not first:
         return "Без названия"
     return first[:TITLE_MAX - 1] + "…" if len(first) > TITLE_MAX else first
+
+
+# Превью для карточки списка: первая строка целиком, до этой длины. Заголовок
+# уже урезан до 60 (TITLE_MAX) и стоит крупно; под ним видно начало подлиннее.
+PREVIEW_MAX = 120
+
+
+def preview_of(text: str) -> str:
+    """Первая непустая строка со схлопнутыми пробелами, до PREVIEW_MAX знаков."""
+    first = ""
+    for line in (text or "").splitlines():
+        if line.strip():
+            first = " ".join(line.split())
+            break
+    return first[:PREVIEW_MAX - 1] + "…" if len(first) > PREVIEW_MAX else first
 
 
 def save(note_id: str, text: str) -> str:
@@ -119,6 +135,12 @@ def listing(query: str = "") -> list[dict]:
             "id": d["id"],
             "title": d["title"],
             "updated": d.get("updated", ""),
+            # Момент словами - той же строкой, что карточка «Истории»: один вид
+            # даты на всю программу (stats.human_moment).
+            "when": stats.human_moment(d.get("updated", "")),
+            # Первая строка подлиннее заголовка - чтобы в списке было видно, о
+            # чём заметка, а не только её обрезанное начало.
+            "preview": preview_of(text),
             "note": f"{words} {_plural(words)}" if words else "пусто",
         })
     return out

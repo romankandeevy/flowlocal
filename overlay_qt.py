@@ -34,7 +34,8 @@ from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtQuick import QQuickView
 
 import theme as T
-from theme_qt import Tokens
+from theme_qt import Tokens, effects_ok
+from util import plural
 
 # Windows: попадание мыши в окно. HTTRANSPARENT - «меня здесь нет, отдайте
 # клик тому, кто ниже»; ровно этим окно пилюли и притворяется везде, кроме
@@ -56,38 +57,9 @@ class _MSG(ctypes.Structure):
                 ("pt_y", ctypes.c_long)]
 
 
-def _preload_qml_deps() -> bool:
-    """Втянуть в процесс Qt6QuickEffects.dll до загрузки QML.
-
-    Грабли PySide6, стоившие часа. QML-плагин (qml/QtQuick/Effects/
-    effectsplugin.dll) грузится штатным загрузчиком Windows, а тот ищет
-    зависимости по обычным путям - и не видит папку PySide6, которую Python
-    прописал себе через os.add_dll_directory. Работает поэтому только то, чей
-    Qt6*.dll УЖЕ загружен в процесс импортом Python-модуля.
-
-    Отсюда странная картина: `import QtQuick` живёт (его Qt6Quick.dll притащил
-    `from PySide6.QtQuick import QQuickView`), а `import QtQuick.Effects` падает
-    с «Не найден указанный модуль» - у MultiEffect Python-модуля нет, тянуть
-    его нечем. Правка PATH не помогает и делает хуже: она ломает и базовый
-    QtQuick.
-
-    Лечится тем же способом, каким Python тянет остальные: загрузить DLL руками.
-    """
-    base = getattr(sys, "_MEIPASS", None)
-    if base is None:
-        import PySide6
-        base = os.path.dirname(PySide6.__file__)
-    dll = os.path.join(base, "Qt6QuickEffects.dll")
-    try:
-        ctypes.WinDLL(dll)
-        return True
-    except OSError:
-        # Без него не будет тени, но пилюля покажется. Оверлей не должен
-        # ронять приложение - тем более из-за украшения.
-        return False
-
-
-_EFFECTS_OK = _preload_qml_deps()
+# Подъём Qt6QuickEffects.dll переехал в theme_qt.effects_ok() - тень нужна уже
+# двоим (пилюле и карточкам окна настроек), а грабли и лечение у них общие.
+_EFFECTS_OK = effects_ok()
 
 LOADING = "loading"
 RECORDING = "recording"
@@ -135,6 +107,8 @@ class Overlay(QObject):
         self._silence = False
         self._position = "bottom"        # bottom | top | off
         self._last_progress = -1.0       # чтобы не дёргать QML на каждый килобайт
+        self._words = 0                  # слов разобрано на ходу
+        self._hwnd = 0                   # окно пилюли, кэш; см. _install_hit_filter
 
         self.tokens = Tokens(1.0)
         self.view = QQuickView()
@@ -217,7 +191,21 @@ class Overlay(QObject):
                                           ctypes.POINTER(_MSG)).contents
                         if msg.message != _WM_NCHITTEST:
                             return False, 0
-                        if msg.hWnd != int(overlay.view.winId()):
+                        # Своё окно узнаём по числу, спрошенному один раз.
+                        # Кэш безопасен: HWND выдаётся окну при создании и
+                        # держится до его закрытия - за жизнь окна он не
+                        # меняется, и устареть тут нечему.
+                        #
+                        # А спрашивать заново дорого именно здесь. Фильтр
+                        # висит на всём приложении, и WM_NCHITTEST прилетает
+                        # на КАЖДОЕ движение мыши над любым нашим окном -
+                        # то есть сотнями в секунду, пока человек просто
+                        # ведёт курсор. Вызов winId() на каждое из них - это
+                        # заход в Qt из-под фильтра ради числа, которое мы
+                        # уже знаем.
+                        if not overlay._hwnd:
+                            overlay._hwnd = int(overlay.view.winId())
+                        if msg.hWnd != overlay._hwnd:
                             return False, 0
                         return overlay._hit(msg.lParam)
                     except Exception:  # noqa: BLE001 - фильтр висит на всех
@@ -309,10 +297,47 @@ class Overlay(QObject):
     def show_loading(self) -> None:
         self._to(LOADING)
 
+    def set_words(self, n: int) -> None:
+        """Сколько слов разобрано, пока человек ещё говорит.
+
+        Число только растёт. Куски приходят из рабочего потока, и отставший
+        меньший откатил бы счётчик назад - на глаз это читается как «часть
+        речи потерялась», хотя не потерялось ничего.
+        """
+        n = max(0, int(n))
+        if n <= self._words:
+            return
+        self._words = n
+        self.root.setProperty("words", n)
+        # Согласование числительного считаем здесь: в QML для этого нет ничего,
+        # а «23 слово» на пилюле человек прочитает как поломку.
+        #
+        # В английском согласование другое и проще - две формы вместо трёх, -
+        # поэтому язык решает не переводом готовой строки, а выбором правила.
+        # Прогнать через словарь готовое «23 слова» нельзя: ключом была бы
+        # строка с числом, и словарь пришлось бы вести до бесконечности.
+        import i18n
+
+        if i18n.language() == "en":
+            word = "word" if n == 1 else "words"
+        else:
+            word = plural(n, "слово", "слова", "слов")
+        self.root.setProperty("wordsLabel", f"{n} {word}")
+
     def show_recording(self) -> None:
         self._rec_at = time.perf_counter()
         self._peak = 0.02
         self._bars = [0.0] * T.WAVE_BARS
+        # Счётчик обнуляем на старте, а не в конце: диктовка кончается по-
+        # разному (ошибкой, отменой, «готово»), а начинается всегда одинаково.
+        #
+        # Оба свойства, а не одно число. Подпись живёт своей жизнью, и
+        # оставленное «23 слова» от прошлой диктовки сейчас не видно только
+        # потому, что QML прячет счётчик по words > 0. Держать чистоту своих
+        # данных на условии в чужом файле нельзя: поправят там - вылезет тут.
+        self._words = 0
+        self.root.setProperty("words", 0)
+        self.root.setProperty("wordsLabel", "")
         self._last_level_at = self._rec_at
         self._last_voice_at = self._rec_at
         self._set_silence(False)
@@ -482,4 +507,4 @@ class Overlay(QObject):
 
 def _qml_path() -> str:
     base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base, "qml", "Overlay.qml")
+    return os.path.join(base, "qml", "windows", "Overlay.qml")

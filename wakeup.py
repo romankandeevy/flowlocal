@@ -89,7 +89,28 @@ class WakeWatcher:
     def _create_window(self) -> None:
         u32 = self._u32
         k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+        # Типы объявляем ЯВНО, все до одного. Без этого ctypes догадывается, а
+        # на 64-битной Windows догадка неверна: у функции без `restype` он
+        # считает ответ 32-битным `int`, и хэндл модуля - настоящий указатель -
+        # приезжает обрезанным. Дальше он же уходит одиннадцатым аргументом в
+        # CreateWindowExW, и вызов падает с «argument 11: OverflowError: int too
+        # long to convert».
+        #
+        # Ловилось это только на живой машине и только в журнале одной строкой
+        # «пробуждение: не слежу»: `start()` глушит исключение намеренно - слух
+        # о пробуждении не стоит запуска программы. Тихо, но дорого: без этого
+        # окна не приходит WM_POWERBROADCAST, то есть после сна и блокировки
+        # никто не чистит залипшие клавиши, а ломалось там уже дважды.
+        k32.GetModuleHandleW.restype = wt.HMODULE
+        k32.GetModuleHandleW.argtypes = [wt.LPCWSTR]
+        u32.RegisterClassW.restype = wt.ATOM
+        u32.RegisterClassW.argtypes = [ctypes.POINTER(_WNDCLASS)]
         u32.CreateWindowExW.restype = wt.HWND
+        u32.CreateWindowExW.argtypes = [
+            wt.DWORD, wt.LPCWSTR, wt.LPCWSTR, wt.DWORD,
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            wt.HWND, wt.HMENU, wt.HINSTANCE, wt.LPVOID]
         u32.DefWindowProcW.restype = ctypes.c_longlong
 
         wc = _WNDCLASS()

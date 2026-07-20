@@ -58,7 +58,12 @@ from theme_qt import Tokens
 from util import plural
 
 # Канон Korti (templates/app-shell) свёрстан под 1280x820; нам хватает
-# скромнее, но 900 узко: ряд из трёх метрик на главной становился тесным.
+# скромнее, но 900 узко: широкие подписи настроек становились тесными.
+#
+# Окно ОДНО на всю программу. Был день, когда его разделили надвое и «Главная»
+# с «Историей» и «Статистикой» уехали в 460x560 рядом с треем; владелец
+# запустил, увидел маленькое окно и сказал убрать. Второй размер здесь заводить
+# больше не надо.
 W, H = 1060, 700
 MIN_W, MIN_H = 940, 620
 
@@ -76,9 +81,36 @@ def _dur(sec: float) -> str:
     return f"{h} ч {m:02d} мин"
 
 
+def _card_dur(sec) -> str:
+    """Длительность для карточки «Истории»: «5.4 с», а дальше минуты.
+
+    Секунды с одним знаком - их так и пишет app (round(dur, 1)), и на короткой
+    фразе десятая доля видна. На минутах доли - шум, там отдаёт _dur («3 мин»)."""
+    try:
+        sec = float(sec)
+    except (TypeError, ValueError):
+        return ""
+    return f"{sec:.1f} с" if sec < 60 else _dur(sec)
+
+
+def _card_words(text: str) -> str:
+    """«8 слов» со склонением. Русские числительные живут в Python (plural),
+    как и в _note рядом: собрать их в QML - верный способ получить «1 слов»."""
+    n = len((text or "").split())
+    return f"{n} {plural(n, 'слово', 'слова', 'слов')}"
+
+
 def _opts(pairs) -> list:
     """[(подпись, значение)] -> [{label, value}] для QML."""
     return [{"label": lbl, "value": val} for lbl, val in pairs]
+
+
+# На чём считает распознавание - словом, а не кодом провайдера. В интерфейсе
+# нет ни `cpu`, ни `cuda`: человек, который просто пишет письма, их не
+# опознает (CLAUDE.md, «для кого это»). Слова те же, что в выборе устройства
+# на странице «Диктовка» (deviceOptions), - одна пара слов на всю программу,
+# и переводятся они одним ключом в i18n.
+_DEVICE_WORDS = {"cpu": "процессор", "cuda": "видеокарта", "dml": "видеокарта"}
 
 
 def _download_cmd(model_id: str) -> list:
@@ -103,17 +135,24 @@ class Backend(QObject):
     # Установка Ollama прямо из настроек: этап словами, доля, общий размер.
     llmStage = Signal(str, float, float)
     llmDone = Signal(bool)
+    # Видеокарта через DirectML: этап словами и доля; на выходе - вышло ли,
+    # фраза об отказе и сам замер (секунды до/после, чем считала).
+    dmlStage = Signal(str, float)
+    dmlDone = Signal(bool, str, "QVariantMap")
     # Приватный: им колбэк из потока keyboard перебрасывает результат в главный
     # поток. Прямо из чужого потока трогать нельзя ничего - ни QTimer.start()
     # в set(), ни QML. Сигнал с авто-соединением кладётся в очередь получателя,
     # и это ровно то же, чем в tkinter-версии был after(0, ...).
     _captured = Signal(str)
+    # Тот же приём и по той же причине: замер видеокарты кончается в своём
+    # потоке, а решение по нему пишет конфиг - то есть дёргает QTimer в set().
+    _dml_ready = Signal("QVariantMap")
 
     def __init__(self, on_change, on_hotkey_capture, info_fn,
                  history_path: str, log_path: str, on_onboarding=None,
                  update_fn=None, do_update=None,
                  llm_install=None, llm_busy=None, redo_fn=None,
-                 notes_fn=None) -> None:
+                 notes_fn=None, transcribe_fn=None) -> None:
         super().__init__()
         self._on_change = on_change
         self._on_hotkey_capture = on_hotkey_capture
@@ -126,6 +165,7 @@ class Backend(QObject):
         self._redo_fn = redo_fn      # распознать сохранённую запись заново
         self._punct_busy = False     # идёт ли скачивание модели знаков
         self._notes_fn = notes_fn    # открыть окно заметок
+        self._transcribe_fn = transcribe_fn   # расшифровать перетащенный файл
         self.history_path = history_path
         self.log_path = log_path
         self.cfg = C.load()
@@ -139,7 +179,9 @@ class Backend(QObject):
         self._mouse_hook = None
         self._mods: list[str] = []
         self._downloading: set[str] = set()
+        self._dml_busy = False       # идёт ли проба видеокарты
         self._captured.connect(self._finish)
+        self._dml_ready.connect(self._dml_apply)
 
     # ---------- конфиг ----------
 
@@ -187,7 +229,7 @@ class Backend(QObject):
             C.save(self.cfg)
         except OSError as e:
             _log(f"настройки не сохранились: {e}")
-            self.flashed.emit("не удалось сохранить - смотрите журнал работы", "danger")
+            self.flashed.emit("настройка не сохранилась", "danger")
             return
         self._on_change(dict(self.cfg))
 
@@ -321,7 +363,7 @@ class Backend(QObject):
             self._punct_busy = False
             if err:
                 _log(f"модель знаков не скачалась: {err}")
-                self.flashed.emit("не скачалось - смотрите журнал работы", "danger")
+                self.flashed.emit("модель знаков не скачалась", "danger")
             else:
                 self.set("punctuation", "model")
                 self.flashed.emit("модель знаков готова", "accent")
@@ -428,6 +470,45 @@ class Backend(QObject):
         except Exception:  # noqa: BLE001 - главная не должна падать из-за точки
             return False
 
+    @Slot(result="QVariantMap")
+    def statusInfo(self) -> dict:
+        """Строка состояния «Главной»: готов ли, чем распознаёт, на чём считает.
+
+        Одним заходом и из приложения, а не из своей копии конфига. Модель
+        меняют в СОСЕДНЕМ окне (настройки), у которого свой Backend, и своя
+        копия узнала бы об этом только со следующего открытия. `info_fn` -
+        это живое приложение: оно перегружает модель на лету
+        (app._reload_model_bg) и знает, что сейчас загружено на самом деле.
+
+        Ключи с подчёркиванием служебные - см. app._info(): наружу, в «О
+        программе», они не идут, их читает только эта страница.
+        """
+        try:
+            info = self._info_fn() or {}
+        except Exception:  # noqa: BLE001 - главная не должна падать из-за строки
+            info = {}
+        state = str(info.get("состояние", ""))
+        m = models.get(str(info.get("_model") or ""))
+        return {
+            # Готовность - отрицанием: состояний «работает» много («готов ·
+            # Ctrl + Shift + Space», «не назначено сочетание»), а неготовность
+            # ровно одна - модель ещё едет. Проверять список хороших значило бы
+            # чинить точку каждый раз, когда добавится новая фраза.
+            "ready": not (state.startswith("просыпаюсь")
+                          or state.startswith("загрузка")),
+            "model": m.title if m else "",
+            "device": _DEVICE_WORDS.get(str(info.get("_device") or ""), ""),
+        }
+
+    @Slot(str, result=str)
+    def ago(self, ts: str) -> str:
+        """«2 минуты назад» для карточки последней диктовки.
+
+        Считает stats: там уже живёт разбор истории и её формат времени, и
+        второго мнения о том, что такое «вчера», в программе быть не должно.
+        """
+        return stats.ago(ts)
+
     @Property(str, notify=changed)
     def toneNote(self) -> str:
         """Тон целиком зависит от Ollama - если полировка выключена, правила
@@ -454,7 +535,11 @@ class Backend(QObject):
     @Slot(str, result="QVariantList")
     def pairs(self, key: str) -> list:
         d = C.get(self.cfg, key, {}) or {}
-        return [{"k": str(k), "v": str(v)} for k, v in d.items()]
+        # Фразы включённых заготовок прячем из таблицы «Подстановки»: они уже
+        # показаны блоком «Готовые» выше, и дублировать их там - ровно то, чего
+        # задача велит не делать. Живут они при этом в тех же snippets.
+        hide = self._preset_says() if key == "snippets" else set()
+        return [{"k": str(k), "v": str(v)} for k, v in d.items() if k not in hide]
 
     @Slot(str, "QVariantList")
     def setPairs(self, key: str, rows) -> None:
@@ -466,7 +551,107 @@ class Backend(QObject):
             k = str(r["k"]).strip()
             if k:
                 out[k] = str(r["v"])
+        # Заготовки в таблице не показаны (pairs их спрятал), но живут в тех же
+        # snippets - вернём их, иначе пересборка словаря из ОДНИХ видимых строк
+        # тихо стёрла бы включённую почту-подпись человека.
+        if key == "snippets":
+            cur = C.get(self.cfg, "snippets", {}) or {}
+            for say in self._preset_says():
+                if say not in out and say in cur:
+                    out[say] = cur[say]
         self.set(key, out)
+
+    def _preset_says(self) -> set:
+        """Фразы включённых готовых подстановок (config.snippets_presets_on).
+
+        Одно место, где список id превращается в набор фраз: и pairs, и setPairs
+        решают по нему, что прятать из таблицы и что сохранить сверх неё.
+        """
+        import techdict
+
+        on = set(self.cfg.get("snippets_presets_on") or [])
+        return {p["say"] for p in techdict.PRESETS if p["id"] in on}
+
+    @Slot(result="QVariantList")
+    def snippetPresets(self) -> list:
+        """Готовые подстановки-заготовки для блока «Готовые» на «Словах».
+
+        Список - данными (techdict.PRESETS), не разметкой: тот же приём, что у
+        техтерминов (techdict.TERMS) и готовых преобразований (transforms.PRESETS).
+
+        Значение отдаём текущее из snippets (человек мог вписать своё), а до
+        включения - заготовочное. preview - что вставится с раскрытыми
+        переменными: для готовых заготовок это и есть подпись «Вставит: …».
+        """
+        import cleaner
+        import techdict
+
+        on = set(self.cfg.get("snippets_presets_on") or [])
+        snips = self.cfg.get("snippets") or {}
+        out = []
+        for p in techdict.PRESETS:
+            enabled = p["id"] in on
+            value = str(snips.get(p["say"], p["put"])) if enabled else p["put"]
+            out.append({
+                "id": p["id"], "say": p["say"], "put": p["put"],
+                # Пустую заготовку человек заполняет сам, у готовой значение есть.
+                "fill": p["put"] == "",
+                "enabled": enabled,
+                "value": value,
+                # \n в подпись не тащим - там она разорвала бы строку.
+                "preview": cleaner._fill_vars(p["put"]).replace("\n", " ")
+                           if p["put"] else "",
+            })
+        return out
+
+    @Slot(str, bool)
+    def setSnippetPreset(self, pid: str, on: bool) -> None:
+        """Включить или выключить готовую подстановку.
+
+        Механика - как у setTechTerms: заготовка падает в те же snippets, и
+        человек правит её там же. Отличие одно - у заготовки есть id, и он
+        копится в snippets_presets_on (как transforms_hidden у преобразований):
+        по нему блок «Готовые» знает, что показать включённым, а таблица
+        «Подстановки» - что не дублировать.
+
+        Не затираем чужое (merge_into) и не сносим правленое (strip_from):
+        включение чужой уже заведённой фразы берёт её значение, а выключение
+        снимает только нетронутую заготовку - заполненная остаётся обычной
+        подстановкой, чтобы промах по тумблеру не стоил вписанной почты.
+        """
+        import techdict
+
+        p = techdict.preset(pid)
+        if p is None:
+            return
+        ids = [i for i in (self.cfg.get("snippets_presets_on") or []) if i != pid]
+        snips = dict(self.cfg.get("snippets") or {})
+        if on:
+            ids.append(pid)
+            if p["say"] not in snips:
+                snips[p["say"]] = p["put"]
+        elif snips.get(p["say"]) == p["put"]:
+            snips.pop(p["say"], None)
+        C.set_(self.cfg, "snippets_presets_on", ids)
+        C.set_(self.cfg, "snippets", snips)
+        self._flush()
+        self.changed.emit()
+
+    @Slot(str, str)
+    def setSnippetPresetValue(self, pid: str, value: str) -> None:
+        """Человек вписывает своё значение в заготовку прямо в блоке «Готовые».
+
+        Пишем в те же snippets - второго хранилища нет. set() уже склеивает
+        частые правки таймером и не дёргает changed, поэтому набор в поле не
+        перерисовывает блок под курсором."""
+        import techdict
+
+        p = techdict.preset(pid)
+        if p is None:
+            return
+        snips = dict(self.cfg.get("snippets") or {})
+        snips[p["say"]] = value
+        self.set("snippets", snips)
 
     # ---------- программы, которым слать Enter ----------
     #
@@ -594,8 +779,24 @@ class Backend(QObject):
 
     @staticmethod
     def _rows(rows: list[dict]) -> list:
-        return [{"ts": str(r.get("ts", "")), "sec": r.get("sec", 0),
-                 "text": str(r.get("text", ""))} for r in reversed(rows[-400:])]
+        # `src` - откуда речь. Пусто у всего, что надиктовано в микрофон, то
+        # есть у подавляющего большинства строк; помечаем только исключение.
+        # Помечать заодно и «с микрофона» значило бы дописать одинаковое слово
+        # к каждой строке истории - шум, по которому ничего не отличить.
+        #
+        # `when`/`dur`/`words` - готовые строки для карточки «Истории»: дата
+        # словами и склонение слов держатся в Python (тот же довод, что у
+        # _note и stats), а не собираются в QML, где русского склонения нет.
+        out = []
+        for r in reversed(rows[-400:]):
+            text = str(r.get("text", ""))
+            out.append({"ts": str(r.get("ts", "")), "sec": r.get("sec", 0),
+                        "text": text,
+                        "fromFile": str(r.get("src", "")) == "file",
+                        "when": stats.human_moment(r.get("ts", "")),
+                        "dur": _card_dur(r.get("sec", 0)),
+                        "words": _card_words(text)})
+        return out
 
     @staticmethod
     def _note(rows: list) -> str:
@@ -621,7 +822,7 @@ class Backend(QObject):
             open(self.history_path, "w", encoding="utf-8").close()
         except OSError as e:
             _log(f"история не очистилась: {e}")
-            self.flashed.emit("не удалось очистить - смотрите журнал работы", "danger")
+            self.flashed.emit("история не очистилась", "danger")
             return
         self.flashed.emit("история очищена", "")
 
@@ -641,8 +842,13 @@ class Backend(QObject):
 
     def _stats(self, rows: list[dict]) -> dict:
         s = stats.summary(rows)
-        days = stats.by_day(rows, 30)
-        top = max((v for _d, v in days), default=0)
+        # Неделя, а не тридцать дней. Тридцать столбиков в 372 пикселя - это
+        # 12 пикселей на день, и подпись под ними не помещается никакая:
+        # график был красивой полоской без единой подписи, по которой нельзя
+        # сказать даже, где вчера. Семь дней дают 47 пикселей на столбик -
+        # хватает и на «пн», и на попадание мышью ради подсказки.
+        week = stats.week(rows)
+        best = stats.best_day(rows)
 
         # Личный множитель «во сколько раз речь быстрее печати» - замер по
         # истории, а не лозунг из рекламы. На паре коротких фраз число ещё
@@ -651,6 +857,12 @@ class Backend(QObject):
         enough = s["seconds"] >= 60 and s["words"] >= 50
         ratio = s["speech_wpm"] / stats.TYPING_WPM
         streak = s["streak_days"]
+
+        # Средние слова за день недели - для линии среднего на графике.
+        # Считаем здесь, в Python, а не в QML: правило проекта - числа считает
+        # Python, QML их рисует. По семи дням, включая нулевые: это средний
+        # день недели, а не средний из «дней, когда диктовал».
+        week_avg = round(sum(d["words"] for d in week) / len(week), 1) if week else 0
 
         return {
             # Признак «есть что показывать» считаем здесь, а не разбираем в QML
@@ -666,10 +878,31 @@ class Backend(QObject):
                      if enough else "-",
             "userWpm": round(s["speech_wpm"]),
             "streak": f"{streak} {plural(streak, 'день', 'дня', 'дней')}",
-            "values": [v for _d, v in days],
-            "range": (f"{days[0][0]} - {days[-1][0]}   ·   пик {top} "
-                      f"{plural(top, 'слово', 'слова', 'слов')} в день") if days
-                     else "",
+            # Число отдельно от подписи: в метрике наверху «Статистики» слово
+            # стоит подписью под цифрой, и «3 дня» под подписью «дней подряд»
+            # сказало бы «дней» дважды.
+            "streakDays": streak,
+            # Рекорд серии - потолок дуги «дней подряд»: текущая серия рисуется
+            # долей от него, полная дуга значит «вы на своём рекорде».
+            "streakBest": s["best_streak"],
+            # Средний день недели - высота линии среднего на графике.
+            "weekAvg": week_avg,
+            # Столбики недели. Подсказка собрана здесь, а не в QML: русское
+            # склонение числительных живёт в Python (plural), и заводить его
+            # второй раз на JavaScript - верный способ получить «1 слов».
+            "week": [{
+                "label": d["label"],
+                "value": d["words"],
+                "today": d["today"],
+                "hint": (f"{d['human']} · {d['words']} "
+                         f"{plural(d['words'], 'слово', 'слова', 'слов')}"),
+            } for d in week],
+            # Рекорд: пусто - ключа хватит проверить в QML одним условием.
+            "hasBest": best is not None,
+            "bestWords": (f"{best['words']} "
+                          f"{plural(best['words'], 'слово', 'слова', 'слов')}"
+                          if best else ""),
+            "bestDate": best["human"] if best else "",
             "typingWpm": stats.TYPING_WPM,
         }
 
@@ -751,8 +984,7 @@ class Backend(QObject):
                                       "danger")
             except Exception as e:  # noqa: BLE001
                 _log(f"загрузчик модели не запустился: {e}")
-                self.flashed.emit("не удалось скачать - смотрите журнал работы",
-                                  "danger")
+                self.flashed.emit("не вышло начать скачивание", "danger")
             finally:
                 self._downloading.discard(model_id)
                 self.modelsChanged.emit()
@@ -780,7 +1012,7 @@ class Backend(QObject):
                 shutil.rmtree(d)
         except OSError as e:
             _log(f"модель не удалилась: {e}")
-            self.flashed.emit("не удалось удалить - смотрите журнал работы", "danger")
+            self.flashed.emit("модель не удалилась", "danger")
             return
         self.flashed.emit(f"удалена, освобождено {freed:.0f} МБ", "")
         self.modelsChanged.emit()
@@ -802,7 +1034,12 @@ class Backend(QObject):
 
     @Slot(result=str)
     def about(self) -> str:
-        return "\n".join(f"{k}: {v}" for k, v in (self._info_fn() or {}).items())
+        # Ключи с подчёркиванием пропускаем: это служебное для статус-строки
+        # «Главной» (statusInfo), а не строки для чтения. Ровно за такое
+        # «устройство: cpu / int8» когда-то и убрали с этой страницы -
+        # человеку, который просто пишет письма, оно не говорит ничего.
+        return "\n".join(f"{k}: {v}" for k, v in (self._info_fn() or {}).items()
+                         if not k.startswith("_"))
 
     @Slot(result="QVariantMap")
     def pendingUpdate(self) -> dict:
@@ -1003,6 +1240,36 @@ class Backend(QObject):
             })
         return out
 
+    @Slot(result="QVariantList")
+    def oldVersions(self) -> list:
+        """Прежние версии (архив 0.x) для выплывающей панели на «О программе».
+
+        В CHANGELOG.md весь 0.x схлопнут в одну строку «1.0» - и правильно
+        схлопнут, человеку с новой установкой не нужен список того, чего он не
+        видел. Полная история лежит в docs/history-0.x.md, и владелец захотел
+        её видеть: показываем по кнопке, выплывающей панелью.
+
+        Путь - тем же механизмом, что у CHANGELOG.md (changelog.path): база это
+        _MEIPASS в сборке, иначе папка кода. В сборке файл кладётся под docs/
+        (flowlocal.spec), поэтому и здесь docs/ - одно выражение пути на оба
+        случая. Разбираем тем же парсером (changelog.parse), второго слоя нет.
+
+        Нет файла (старая сборка, где его не клали) - пустой список, и кнопка
+        на странице просто не появится. Никакой ошибки: архив - украшение.
+        """
+        import changelog as CL
+
+        base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base, "docs", "history-0.x.md")
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            return []
+        return [{"version": r["version"], "date": r["date"],
+                 "title": r["title"], "items": r["items"]}
+                for r in CL.parse(text)]
+
     # ---------- выгрузка и загрузка личного ----------
 
     @Slot(bool, result=str)
@@ -1033,13 +1300,67 @@ class Backend(QObject):
             n = backup.save(path, self.cfg, history)
         except OSError as e:
             _log(f"выгрузка не сохранилась: {e}")
-            self.flashed.emit("не сохранилось - смотрите журнал работы", "danger")
+            self.flashed.emit("файл не сохранился", "danger")
             return ""
         what = f"{n} {plural(n, 'настройка', 'настройки', 'настроек')}"
         if history:
             what += (f" и {len(history)} "
                      f"{plural(len(history), 'диктовка', 'диктовки', 'диктовок')}")
         self.flashed.emit(f"сохранено: {what}", "accent")
+        return path
+
+    @Slot("QVariant")
+    def dropFile(self, url) -> None:
+        """На окно перетащили файл - отдать его приложению на расшифровку.
+
+        Приезжает QUrl, а не путь: перетаскивание в Qt всегда про URL. Путь
+        достаём через toLocalFile() - ручной разбор строки «file:///C:/...»
+        споткнулся бы на первом же пробеле в имени папки, а у людей они
+        сплошь («Рабочий стол», «Мои документы»).
+
+        Разбираться, годится ли файл, здесь не начинаем: этим занимается
+        audiofile.check в приложении, и он там один на обе двери - и на
+        перетаскивание, и на пункт трея. Второе мнение о том, какие файлы мы
+        открываем, рано или поздно разошлось бы с первым.
+        """
+        if self._transcribe_fn is None:
+            return
+        try:
+            path = url.toLocalFile() if hasattr(url, "toLocalFile") else str(url)
+        except Exception as e:  # noqa: BLE001 - чужая ссылка не должна ронять окно
+            _log(f"перетащили что-то нечитаемое: {e}")
+            return
+        if not path:
+            # Перетащили ссылку из браузера, а не файл с диска. Молчать нельзя -
+            # человек ждёт хоть какого-то ответа на своё действие.
+            self.flashed.emit("это не файл с диска", "danger")
+            return
+        self._transcribe_fn(path)
+
+    @Slot(result=str)
+    def pickInboxPath(self) -> str:
+        """Выбрать файл для диктовки в файл. Возвращает путь или пусто.
+
+        Диалог именно СОХРАНЕНИЯ, а не открытия, хотя файл чаще всего уже
+        существует. Причина - в том, что инбокс можно завести с нуля: диалог
+        открытия не даёт вписать имя несуществующего файла, и человеку пришлось
+        бы сначала создавать пустой .md в проводнике. Существующий файл
+        getSaveFileName выбирает так же, только спросит про замену - а замены не
+        будет: inbox.append дописывает в конец, а не перезаписывает.
+        """
+        from PySide6.QtWidgets import QFileDialog
+
+        start = str(self.cfg.get("inbox_path") or "").strip()
+        if not start:
+            start = os.path.join(os.path.expanduser("~"), "входящие.md")
+        path, _ = QFileDialog.getSaveFileName(
+            None, "Файл для диктовки", start,
+            "Заметка (*.md *.txt);;Все файлы (*)",
+            options=QFileDialog.DontConfirmOverwrite)
+        if not path:
+            return ""
+        self.set("inbox_path", path)
+        self.changed.emit()
         return path
 
     @Slot(result=str)
@@ -1141,7 +1462,21 @@ class Backend(QObject):
         """Всё ли уже готово: сервер отвечает и модель на месте."""
         import ollama_setup as O
 
-        return O.serving() and O.has_model(O.DEFAULT_MODEL)
+        return O.state() == O.STATE_READY
+
+    @Slot(result=str)
+    def llmState(self) -> str:
+        """Почему правки текста нет: ready / sleeping / no_model / absent.
+
+        Окну мало «да/нет»: заголовок и подпись кнопки у «не установлена» и у
+        «установлена, но молчит» разные, а действие одно и то же (ensure сам
+        разберётся, что доделать). Раньше оба случая назывались «не
+        установлена», и человеку с уснувшей Ollama предлагали скачать три
+        гигабайта поверх трёх имеющихся.
+        """
+        import ollama_setup as O
+
+        return O.state()
 
     @Slot()
     def llmInstall(self) -> None:
@@ -1160,9 +1495,17 @@ class Backend(QObject):
         self._llm_install(self._llm_stage)
 
     def _llm_stage(self, stage: str, frac: float, total: float, done) -> None:
-        """Колбэк из потока установки. Сигнал сам перебросит в главный поток."""
+        """Колбэк из потока установки. Сигнал сам перебросит в главный поток.
+
+        Этапы приезжают из ollama_setup готовыми русскими фразами - переводим
+        здесь, на границе с окном, как и этапы пробы видеокарты (dmlRun). В
+        самом ollama_setup i18n нет намеренно: он работает и из консоли, где
+        язык интерфейса ни при чём.
+        """
+        import i18n
+
         if done is None:
-            self.llmStage.emit(stage, frac, float(total))
+            self.llmStage.emit(i18n.t(stage), frac, float(total))
         else:
             self.llmDone.emit(bool(done))
 
@@ -1172,6 +1515,91 @@ class Backend(QObject):
         без этого оно показало бы кнопку «Установить», как будто ничего не
         происходит, и человек нажал бы второй раз."""
         return bool(self._llm_busy_fn()) if self._llm_busy_fn else False
+
+    # ---------- видеокарта: DirectML одной кнопкой (PLAN 10) ----------
+
+    @Slot(result="QVariantMap")
+    def dmlState(self) -> dict:
+        """Что показать в ряду до первого нажатия.
+
+        why - непустая строка, если кнопку нажимать бессмысленно (сборка, не
+        Windows). active - считает ли видеокарта ПРЯМО СЕЙЧАС; спрашиваем живое
+        приложение через info_fn, а не свой процесс: у окна настроек модели
+        нет, и «на чём считает» знает только оно.
+        """
+        import dml_setup as D
+
+        try:
+            dev = str((self._info_fn() or {}).get("_device") or "")
+        except Exception:  # noqa: BLE001 - страница не должна падать из-за строки
+            dev = ""
+        return {"why": D.blocked(), "installed": D.installed(),
+                "active": dev in ("dml", "cuda")}
+
+    @Slot()
+    def dmlRun(self) -> None:
+        """Замерить, поставить колесо, замерить снова. Всё - в своём потоке.
+
+        Хозяин здесь один и он же единственный (в отличие от Ollama, которую
+        зовут ещё и из мастера), поэтому поток свой, а не в app.py. Тяжёлое всё
+        равно уходит в отдельные процессы - и pip, и оба замера, - так что GIL
+        этого окна занят не будет: ровно та беда, из-за которой скачивание
+        модели переехало в процесс (см. downloadModel).
+        """
+        import dml_setup as D
+        import i18n
+
+        if self._dml_busy:
+            return
+        self._dml_busy = True
+        self.dmlStage.emit(i18n.t("начинаю"), 0.02)
+
+        def work() -> None:
+            try:
+                # Этапы приезжают из dml_setup готовыми русскими фразами -
+                # переводим здесь, на границе с окном. В самом dml_setup i18n
+                # нет намеренно: он работает и из консоли, где язык интерфейса
+                # ни при чём.
+                res = D.setup(on_stage=lambda n, f: self.dmlStage.emit(i18n.t(n), f),
+                              log=_log)
+            except Exception as e:  # noqa: BLE001 - ускорение не роняет диктовку
+                _log(f"dml: {type(e).__name__}: {e}")
+                res = {"ok": False, "error": "не вышло - смотрите журнал работы"}
+            self._dml_busy = False
+            # Через сигнал, а не вызовом: решение пишет конфиг, а конфиг
+            # заводит QTimer - из чужого потока это запрещено (см. _captured).
+            self._dml_ready.emit(res)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _dml_apply(self, res: dict) -> None:
+        """Записать вывод замера в конфиг и сказать человеку цифрами.
+
+        Главное правило: проигравшую видеокарту НЕ оставляем в пути. Если
+        короткая фраза на ней медленнее, прибиваем `device: cpu` - иначе после
+        перезапуска «авто» взяло бы DirectML и диктовка молча стала бы
+        медленнее, а виноватой выглядела бы программа.
+        """
+        import dml_setup as D
+        import i18n
+
+        if res.get("error"):
+            self.dmlDone.emit(False, i18n.t(str(res["error"])), res)
+            return
+        if res.get("ok"):
+            # «авто» само возьмёт DirectML после перезапуска (transcriber.
+            # _providers). Ставим его явно: у человека мог стоять «процессор».
+            self.set("device", "auto")
+        else:
+            # Колесо оставляем: на длинной записи оно всё равно втрое быстрее,
+            # и человек может переключить «Распознавание медленное?» на
+            # «видеокарта» сам. А умолчание - процессор, он тут быстрее.
+            self.set("device", "cpu")
+        _log(f"dml: {'быстрее' if res.get('ok') else 'медленнее'} - "
+             f"видеокарта {res.get('gpu')}, процессор {res.get('cpu')}, "
+             f"было {res.get('before')} ({res.get('before_device')}); "
+             f"колесо {D.PACKAGE} {'на месте' if res.get('installed') else 'снято'}")
+        self.dmlDone.emit(bool(res.get("ok")), "", res)
 
 
 
@@ -1190,23 +1618,30 @@ class _CloseFilter(QObject):
 
 
 class SettingsWindow:
-    """Окно. Открывается и закрывается, но не пересоздаётся: смена темы теперь
-    не требует пересборки - QML перечитывает токены по сигналу.
+    """Окно программы: Главная, История, Статистика и настройки одной панелью.
+
+    Открывается и закрывается, но не пересоздаётся: смена темы не требует
+    пересборки - QML перечитывает токены по сигналу.
 
     В tkinter-версии окно приходилось собирать заново на каждую смену темы:
     часть красок впечатывалась в виджеты при создании. У QML краски - привязки,
-    и пересборка не нужна вовсе."""
+    и пересборка не нужна вовсе.
+
+    Окно единственное: и клик по трею, и ярлык из «Пуска», и пункт меню
+    «Настройки…» ведут сюда. Имя класса осталось прежним - переименовывать
+    его значило бы трогать app.py, витрину и сборку ради слова."""
 
     def __init__(self, on_change, on_hotkey_capture, info_fn,
                  history_path: str, log_path: str, on_onboarding=None,
                  update_fn=None, do_update=None,
                  llm_install=None, llm_busy=None, redo_fn=None,
-                 notes_fn=None) -> None:
+                 notes_fn=None, transcribe_fn=None) -> None:
         self.backend = Backend(on_change, on_hotkey_capture, info_fn,
                                history_path, log_path, on_onboarding=on_onboarding,
                                update_fn=update_fn, do_update=do_update,
                                llm_install=llm_install, llm_busy=llm_busy,
-                               redo_fn=redo_fn, notes_fn=notes_fn)
+                               redo_fn=redo_fn, notes_fn=notes_fn,
+                               transcribe_fn=transcribe_fn)
         self.tokens = Tokens()
         self.view: QQuickView | None = None
         self._filter = _CloseFilter(self.backend.cancelCapture)
@@ -1229,7 +1664,7 @@ class SettingsWindow:
         base = os.path.dirname(os.path.abspath(__file__))
         import sys
         base = getattr(sys, "_MEIPASS", None) or base
-        v.setSource(QUrl.fromLocalFile(os.path.join(base, "qml", "Settings.qml")))
+        v.setSource(QUrl.fromLocalFile(os.path.join(base, "qml", "windows", "Settings.qml")))
         if v.status() == QQuickView.Error:
             raise RuntimeError("; ".join(e.toString() for e in v.errors()))
         # Окно могут закрыть прямо во время захвата - тогда хук keyboard остался
@@ -1266,6 +1701,17 @@ class SettingsWindow:
         if self.view is None:
             self._build()
         self.backend.reload()
+        # Прокрутку - в начало. Окно не пересоздаётся, а прячется, поэтому без
+        # этого оно открывалось бы там, где его закрыли: с середины страницы,
+        # без заголовка и первой карточки. Снаружи это неотличимо от обрезанного
+        # окна - строка начинается с середины фразы, - и владелец так это и
+        # прочитал, увидев «месте.» первой строкой.
+        root = self.view.rootObject()
+        if root is not None:
+            try:
+                root.resetScroll()
+            except (AttributeError, RuntimeError) as e:
+                _log(f"прокрутка не сбросилась: {e}")
         self.view.show()
         self.view.raise_()
         self.view.requestActivate()

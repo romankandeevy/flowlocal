@@ -1,0 +1,140 @@
+# Сборка дистрибутивов под обе платформы.
+#
+# Отдельно от tests.yml: тесты идут на каждый пуш и быстрые, а сборка тяжёлая
+# (PyInstaller тянет PySide6 и onnxruntime), поэтому только руками
+# (workflow_dispatch) и на тег версии (v1.0, v1.1, ...). НЕ на каждый push.
+#
+# Windows-job собирает то, что раздаётся людям: onedir-папку и установщик .exe
+# через Inno Setup. macOS-job - ЗАГОТОВКА: код ещё не портирован (см.
+# docs/macos-port-audit.md), поэтому job помечен continue-on-error и может
+# падать или давать нерабочий .app. Это ожидаемо, артефакт всё равно выложим,
+# если что-то собралось.
+
+name: сборка
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  # ---------------------------------------------------------------- Windows
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      # Иначе кириллица в выводе build.py превращается в мусор.
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # 3.13, а не 3.14: под 3.13 у onnxruntime<1.25 и PySide6 есть готовые
+          # колёса и на этой версии зелёный tests.yml. 3.14 в раннере есть не
+          # всегда, а гнаться за ней тут нечего.
+          python-version: "3.13"
+          cache: pip
+
+      - name: зависимости
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: сборка onedir
+        # Гарантированный артефакт: папка dist/cpu/FlowLocal. Без --installer,
+        # чтобы шаг не зависел от наличия Inno Setup и всегда давал результат.
+        run: python tools/build.py cpu
+
+      - name: установщик через Inno Setup
+        # Inno Setup на раннере нет - ставим из Chocolatey (он предустановлен).
+        # continue-on-error: если ISCC не встал или упал, папку выше мы уже
+        # собрали и выложим её как фолбэк - сборка не должна краснеть из-за
+        # необязательного установщика.
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $v = python -c "from version import __version__; print(__version__)"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVersion=$v" tools\installer.iss
+
+      - name: артефакт - установщик .exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowlocal-windows-installer
+          path: dist/FlowLocal-*-setup.exe
+          if-no-files-found: warn
+
+      - name: артефакт - папка onedir (фолбэк и для проверки)
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowlocal-windows-onedir
+          path: dist/cpu/FlowLocal
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------ macOS
+  macos:
+    runs-on: macos-latest # macos-14+, Apple Silicon (arm64) - колёса onnxruntime только под него
+    timeout-minutes: 40
+    # ВЕСЬ job необязательный: приложение пока насквозь Windows-специфично
+    # (winreg, WinDLL, keyboard, win32*), import падает - см. docs/macos-port-audit.md.
+    # Сборка здесь - разведка «встанут ли зависимости и заведётся ли упаковщик»,
+    # а не рабочий дистрибутив. Красный шаг тут ожидаем и не валит весь workflow.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: зависимости
+        # keyboard и pywin32 из requirements.txt на macOS сами отсеются маркером
+        # sys_platform. pyobjc нужен будущему порту (CGEvent, NSPasteboard).
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyobjc-framework-Cocoa pyobjc-framework-Quartz pyinstaller
+
+      - name: проверка импорта (сейчас ОЖИДАЕМО падает)
+        # Полезный шаг даже красным: показывает, на каком именно Win32-импорте
+        # спотыкается macOS. По мере порта этот шаг позеленеет первым.
+        continue-on-error: true
+        run: |
+          python -c "import app" && echo "импортируется - порт продвинулся!" \
+            || echo "ожидаемо: приложение ещё не портировано на macOS (см. docs/macos-port-audit.md)"
+
+      - name: проба - зависимости и звук на Маке
+        # tools/probe_mac.py deps: встали ли колёса, виден ли микрофон. Не трогает
+        # ни клавиатуры, ни вставки - в CI безопасно.
+        continue-on-error: true
+        run: python tools/probe_mac.py deps
+
+      - name: сборка .app (заготовка)
+        continue-on-error: true
+        run: python tools/build_mac.py
+
+      - name: .dmg через hdiutil
+        continue-on-error: true
+        run: |
+          APP=$(find dist -maxdepth 3 -name "*.app" | head -1)
+          if [ -n "$APP" ]; then
+            hdiutil create -volname FlowLocal -srcfolder "$APP" -ov -format UDZO dist/FlowLocal-macos.dmg
+            echo "собран dmg из $APP"
+          else
+            echo "нет .app - dmg не собираем (порт не готов, это ожидаемо)"
+          fi
+
+      - name: артефакт - macOS (если что-то собралось)
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowlocal-macos
+          path: |
+            dist/FlowLocal-macos.dmg
+            dist/*.app
+          if-no-files-found: ignore

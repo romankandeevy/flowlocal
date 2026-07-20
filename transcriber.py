@@ -81,17 +81,43 @@ class Transcriber:
         режим работы, а не деградация: GigaAM на процессоре укладывается в
         секунду. Спрашиваем сам onnxruntime, а не наличие видеокарты: карта
         может быть, а провайдера под неё в сборке нет.
+
+        DirectML - третий путь между этими двумя (PLAN 10). Он приезжает своим
+        колесом onnxruntime-directml и работает на любой видеокарте с DirectX
+        12, а не только на NVIDIA. Порядок «CUDA, потом DirectML, потом
+        процессор» не случаен: у кого стоит onnxruntime-gpu, тот поставил его
+        осознанно, и отбирать у него CUDA ради универсального пути незачем.
+
+        Ставится DirectML кнопкой «Ускорить на видеокарте» (dml_setup.py), и
+        замер там же решает, оставлять его или нет: на этой машине он вышел
+        медленнее процессора, см. шапку dml_setup.
         """
         import onnxruntime as rt
 
         have = set(rt.get_available_providers())
+        # Явный выбор «видеокарта» - это про КАРТУ, а не про CUDA: так он и
+        # подписан в настройках. Поэтому здесь тоже перебор, а не одна попытка -
+        # у человека с DirectML вместо onnxruntime-gpu единственная попытка
+        # «CUDA» уронила бы загрузку целиком, хотя карта у него есть.
         if device == "cuda":
-            return [("cuda", ["CUDAExecutionProvider", "CPUExecutionProvider"])]
+            gpu = []
+            if "CUDAExecutionProvider" in have:
+                gpu.append(("cuda", ["CUDAExecutionProvider", "CPUExecutionProvider"]))
+            if "DmlExecutionProvider" in have:
+                gpu.append(("dml", ["DmlExecutionProvider", "CPUExecutionProvider"]))
+            # Список провайдеров, которых в сборке нет, onnxruntime не прощает -
+            # он бросает на создании сессии. Пустой перебор означал бы «модель
+            # не загрузилась» вместо «видеокарты не нашлось», поэтому оставляем
+            # прежнюю попытку как была: пусть ошибка придёт от onnxruntime и
+            # ляжет в журнал со своим текстом.
+            return gpu or [("cuda", ["CUDAExecutionProvider", "CPUExecutionProvider"])]
         if device == "cpu":
             return [("cpu", ["CPUExecutionProvider"])]
         attempts = []
         if "CUDAExecutionProvider" in have:
             attempts.append(("cuda", ["CUDAExecutionProvider", "CPUExecutionProvider"]))
+        if "DmlExecutionProvider" in have:
+            attempts.append(("dml", ["DmlExecutionProvider", "CPUExecutionProvider"]))
         attempts.append(("cpu", ["CPUExecutionProvider"]))
         return attempts
 

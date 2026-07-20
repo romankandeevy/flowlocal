@@ -34,6 +34,9 @@ class FakeClipboard:
         self.text = start
         self.log: list[str] = []
         self.set_fails = False
+        # Система не пустила наши нажатия: окно выше по правам (UIPI) - ровно
+        # то, что видит человек, диктуя в программу от администратора.
+        self.paste_blocked = False
         self.on_paste = None      # что случится «одновременно» с Ctrl+V
         self.after_set = None     # что случится сразу после нашей записи
 
@@ -52,10 +55,15 @@ class FakeClipboard:
         return True
 
     def ctrl_v(self):
+        """Возвращает то же, что настоящий _send_ctrl_v: дошли ли нажатия."""
+        if self.paste_blocked:
+            self.log.append("вставку не пустили")
+            return False
         self.log.append(f"вставили:{(self.text or '')[:20]}")
         if self.on_paste is not None:
             hook, self.on_paste = self.on_paste, None
             hook(self)
+        return True
 
 
 def run(text, clip, mode="paste", restore=True, typing_ok=True):
@@ -119,6 +127,23 @@ def main() -> int:
     run("диктовка", clip)
     check("вставили:диктовка" in clip.log,
           "буфер перед Ctrl+V перезаписан нашим текстом, а не чужой подменой")
+
+    # --- система не пустила нажатия: окно под администратором (UIPI) ---
+    #
+    # Главный случай задачи 12. Раньше keybd_event ничего не возвращал, мы
+    # считали такую вставку удачной и возвращали в буфер прежнюю ссылку - то
+    # есть стирали единственный след диктовки. Теперь это честный False, а
+    # текст остаётся в буфере: человека спасает его же Ctrl+V.
+    clip = FakeClipboard("ссылка-которую-скопировали")
+    clip.paste_blocked = True
+    res, typed = run("Письмо в программу от администратора.", clip)
+    check(res is False, "заблокированная вставка честно возвращает False")
+    check(clip.get() == "Письмо в программу от администратора.",
+          "диктовка осталась в буфере - её вставит сам человек")
+    check("ссылка-которую-скопировали" not in (clip.get() or ""),
+          "прежний буфер НЕ возвращаем: он затёр бы единственную копию текста")
+    check(not typed,
+          "посимвольно не печатаем: те же нажатия та же система и не пустит")
 
     # --- буфер занят намертво ---
     clip = FakeClipboard("старое")

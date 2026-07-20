@@ -60,24 +60,6 @@ def _wait_modifiers_released(timeout: float = 1.5) -> None:
     time.sleep(0.03)
 
 
-def _send_ctrl_v() -> None:
-    win32api.keybd_event(VK_CONTROL, 0, 0, 0)
-    time.sleep(0.01)
-    win32api.keybd_event(VK_V, 0, 0, 0)
-    time.sleep(0.02)
-    win32api.keybd_event(VK_V, 0, win32con.KEYEVENTF_KEYUP, 0)
-    win32api.keybd_event(VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
-
-
-def _send_ctrl_c() -> None:
-    win32api.keybd_event(VK_CONTROL, 0, 0, 0)
-    time.sleep(0.01)
-    win32api.keybd_event(VK_C, 0, 0, 0)
-    time.sleep(0.02)
-    win32api.keybd_event(VK_C, 0, win32con.KEYEVENTF_KEYUP, 0)
-    win32api.keybd_event(VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
-
-
 class _KEYBDINPUT(ctypes.Structure):
     _fields_ = [
         ("wVk", ctypes.c_ushort),
@@ -132,6 +114,49 @@ def _send(events: list[_INPUT]) -> bool:
         if len(events) > _CHUNK:
             time.sleep(0.005)
     return ok
+
+
+def _tap(vk: int, up: bool = False) -> bool:
+    """Одно нажатие или отпускание клавиши. False - система его не пустила.
+
+    Скан-код обязателен, как и везде в этом файле: с нулём событие уходит, но
+    приложения, читающие ввод по скан-кодам, его не видят (HANDOFF.md).
+    """
+    return _send([_key_event(vk, win32api.MapVirtualKey(vk, 0),
+                             _KEYEVENTF_KEYUP if up else 0)])
+
+
+def _send_ctrl_v() -> bool:
+    """Послать Ctrl+V. False - система не пустила наши нажатия.
+
+    Через SendInput, а не keybd_event, ровно из-за этого False. keybd_event
+    ничего не возвращает: вставка в окно программы, запущенной от
+    администратора, проваливалась молча - Windows глушит чужой ввод в процесс
+    выше по правам (UIPI), а мы рапортовали успех и возвращали в буфер то, что
+    человек копировал раньше. То есть своими руками стирали единственный след
+    диктовки. SendInput в этом случае возвращает ноль, и мы наконец знаем, что
+    отдавать текст было некуда.
+
+    Паузы между событиями сохранены как были: часть окон не успевает увидеть
+    зажатый Ctrl, если V приходит в ту же миллисекунду.
+    """
+    ok = _tap(VK_CONTROL)
+    time.sleep(0.01)
+    ok = _tap(VK_V) and ok
+    time.sleep(0.02)
+    # Отпускаем в любом случае, даже если нажатия не прошли: зажатый Ctrl,
+    # оставленный нами, хуже непрошедшей вставки.
+    ok = _tap(VK_V, up=True) and ok
+    return _tap(VK_CONTROL, up=True) and ok
+
+
+def _send_ctrl_c() -> None:
+    win32api.keybd_event(VK_CONTROL, 0, 0, 0)
+    time.sleep(0.01)
+    win32api.keybd_event(VK_C, 0, 0, 0)
+    time.sleep(0.02)
+    win32api.keybd_event(VK_C, 0, win32con.KEYEVENTF_KEYUP, 0)
+    win32api.keybd_event(VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
 
 
 def _type_unicode(text: str) -> bool:
@@ -275,6 +300,18 @@ def _restore_wait(n: int) -> float:
     return min(_RESTORE_MAX, _RESTORE_MIN + _RESTORE_PER_CHAR * max(0, n))
 
 
+def to_clipboard(text: str) -> bool:
+    """Положить текст в буфер обмена и ничего больше. False - буфер занят.
+
+    Единственная дверь для всех обходных путей: не вставилось, диктовали
+    нарочно в буфер, файл голосового инбокса недоступен. Раньше на каждый такой
+    случай звался приватный _set_clipboard_text - снаружи модуля и по-разному.
+    """
+    if not text:
+        return True
+    return _set_clipboard_text(text)
+
+
 def insert(text: str, mode: str = "paste", restore: bool = True) -> bool:
     """Вставить текст в активное окно. True - получилось.
 
@@ -301,7 +338,11 @@ def insert(text: str, mode: str = "paste", restore: bool = True) -> bool:
     # бы их версию.
     if _get_clipboard_text() != text and not _set_clipboard_text(text):
         return _type_unicode(text)
-    _send_ctrl_v()
+    if not _send_ctrl_v():
+        # Наши нажатия не пустили (окно выше по правам - UIPI). Прежний буфер
+        # НЕ возвращаем: диктовка сейчас единственная копия текста, и человеку
+        # остаётся Ctrl+V руками - об этом ему скажет пилюля.
+        return False
     if restore and old is not None:
         time.sleep(_restore_wait(len(text)))
         # Возвращаем прежний буфер, только если в буфере всё ещё наша диктовка.

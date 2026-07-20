@@ -141,11 +141,23 @@ class Stream:
     хвост с этой позиции и склеивает.
     """
 
-    def __init__(self, transcribe, log, min_tail: float | None = None) -> None:
+    def __init__(self, transcribe, log, min_tail: float | None = None,
+                 on_words=None) -> None:
         self._transcribe = transcribe
         self._log = log
         self._min_tail = MIN_TAIL_SEC if min_tail is None else float(min_tail)
+        # Кому сказать, сколько слов уже разобрано. Наружу уходит ЧИСЛО и
+        # только оно: показ распознанного по ходу речи здесь вне закона (см.
+        # шапку файла), а вот сказать «слышу, уже разбираю» человеку нечем -
+        # снаружи вся эта работа невидима.
+        self._on_words = on_words
         self.parts: list[str] = []
+        # Слова считаем на добавлении куска, а не пересчётом по всем частям.
+        # Считает это рабочий поток разбора - тот самый, который в это время
+        # держит модель, - и делать там лишнюю работу на каждый кусок незачем:
+        # длинная диктовка набирает десятки частей, и каждая новая заставляла
+        # заново резать все предыдущие. Число всё равно только растёт.
+        self._words = 0
         self.consumed = 0
         self.runs = 0
         self.waited_feed = False     # finish() ждал текущий кусок
@@ -176,10 +188,35 @@ class Stream:
         self.consumed += cut
         self.runs += 1
         if text:
-            self.parts.append(text)
+            self._add(text)
         self._log(f"на ходу: разобрано {piece.size / SAMPLE_RATE:.0f} с, "
                   f"осталось {(total - self.consumed) / SAMPLE_RATE:.0f} с")
+        self._tell_words()
         return True
+
+    def _add(self, text: str) -> None:
+        """Положить разобранный кусок и досчитать слова. Единственная дверь
+        в parts: мимо неё счётчик разъедется с содержимым."""
+        self.parts.append(text)
+        self._words += len(text.split())
+
+    def words(self) -> int:
+        """Сколько слов разобрано на ходу. Хвост сюда ещё не входит."""
+        return self._words
+
+    def _tell_words(self) -> None:
+        """Отдать счётчик наружу.
+
+        Зовётся из рабочего потока разбора, поэтому падение колбэка глотаем и
+        счётчик выключаем: цифра на пилюле - украшение, а диктовка - нет.
+        """
+        if self._on_words is None:
+            return
+        try:
+            self._on_words(self.words())
+        except Exception as e:  # noqa: BLE001
+            self._log(f"счётчик слов отключён: {type(e).__name__}: {e}")
+            self._on_words = None
 
     def speculate(self, audio: np.ndarray, total: int) -> bool:
         """Разобрать остаток заранее, раз человек замолчал. True - разобрали.
@@ -209,9 +246,9 @@ class Stream:
         if self.spec is not None and self.spec[0] == end:
             self.spec_hit = True
             if self.spec[1]:
-                self.parts.append(self.spec[1])
+                self._add(self.spec[1])
         elif tail.size >= SAMPLE_RATE // 20:
             text = str(self._transcribe(tail) or "").strip()
             if text:
-                self.parts.append(text)
+                self._add(text)
         return " ".join(p for p in self.parts if p).strip()

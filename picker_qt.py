@@ -30,7 +30,7 @@ _PREVIEW_MAX = 90
 
 def _qml_path() -> str:
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base, "qml", "Picker.qml")
+    return os.path.join(base, "qml", "windows", "Picker.qml")
 
 
 def preview_of(text: str) -> str:

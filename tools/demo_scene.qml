@@ -23,7 +23,7 @@ Item {
     property bool held: false        // сочетание зажато
     property string body: ""         // то, что вставилось
 
-    Loader { anchors.fill: parent; source: "../qml/Backdrop.qml" }
+    Loader { anchors.fill: parent; source: "../qml/controls/Backdrop.qml" }
 
     // ------- окно, в которое диктуют -------
     Rectangle {

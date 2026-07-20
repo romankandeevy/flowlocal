@@ -82,6 +82,56 @@ def has_model(name: str) -> bool:
         return False
 
 
+# Что именно не так, когда правки текста нет. Четыре ответа вместо прежнего
+# «готово / не готово».
+#
+# Зачем понадобилось различать. Раньше окна спрашивали `serving() and
+# has_model()` и на любое «нет» писали «Правка текста не установлена», а рядом
+# ставили кнопку «Установить» на 3.3 ГБ. Для установленной, но не запущенной
+# Ollama это враньё в обе стороны: программа стоит на диске, и качать её заново
+# незачем - надо разбудить сервер. Человек при этом видел бы только «не
+# установлена» и качал бы три гигабайта поверх трёх имеющихся.
+#
+#   ready     - сервер отвечает, модель на месте: всё работает
+#   sleeping  - программа установлена, но сервер молчит
+#   no_model  - сервер отвечает, а нужной модели у него нет
+#   absent    - Ollama нет вовсе
+STATE_READY = "ready"
+STATE_SLEEPING = "sleeping"
+STATE_NO_MODEL = "no_model"
+STATE_ABSENT = "absent"
+
+# Отказы установки - фразами и в одном месте.
+#
+# Фраза, а не код ошибки: её показывают человеку как есть - и в окне подписью
+# ряда, и на пилюле. Поэтому каждая называет причину И следующий шаг: «не
+# вышло» не говорит, что делать, а «проверьте интернет» говорит. Текст самого
+# исключения остаётся в журнале - `HTTPError 503` человеку бесполезен.
+#
+# Наружу нужны обеим сторонам: ensure() отдаёт их этапом, а app.py берёт
+# последний этап на пилюлю и обязан отличить отказ от «скачиваю модель».
+# Сверять по началу строки («не …») нельзя - следующий этап, начатый с «не»,
+# молча станет отказом.
+FAIL_DOWNLOAD = "не удалось скачать - проверьте интернет"
+FAIL_INSTALL = "установка не завершилась - попробуйте ещё раз"
+FAIL_SILENT = "установлена, но не отвечает - попробуйте ещё раз"
+FAIL_MODEL = "модель не докачалась - проверьте интернет"
+FAILURES = (FAIL_DOWNLOAD, FAIL_INSTALL, FAIL_SILENT, FAIL_MODEL)
+
+
+def state(model: str = "") -> str:
+    """Одно слово о том, в каком состоянии правка текста. См. константы выше.
+
+    Порядок проверок важен: сначала «отвечает ли», потом «есть ли модель».
+    Наоборот has_model() уходил бы в сеть к мёртвому серверу и ждал таймаут на
+    каждый заход в настройки.
+    """
+    name = model or DEFAULT_MODEL
+    if serving():
+        return STATE_READY if has_model(name) else STATE_NO_MODEL
+    return STATE_SLEEPING if exe() else STATE_ABSENT
+
+
 def download(on_progress=None) -> str:
     """Скачать установщик во временную папку. Возвращает путь.
 
@@ -234,15 +284,15 @@ def ensure(model: str = DEFAULT_MODEL, on_stage=None, log=print) -> bool:
                 path = download(lambda f, t: stage("скачиваю Ollama", f, t))
             except Exception as e:  # noqa: BLE001
                 log(f"ollama: скачать не вышло - {e}")
-                stage("не удалось скачать")
+                stage(FAIL_DOWNLOAD)
                 return False
             stage("устанавливаю")
             if not install(path, log):
-                stage("не удалось установить")
+                stage(FAIL_INSTALL)
                 return False
             shutil.rmtree(os.path.dirname(path), ignore_errors=True)
         elif not _wait_serving(log):
-            stage("Установилось, но не запускается - попробуйте ещё раз")
+            stage(FAIL_SILENT)
             return False
 
     if not has_model(model):
@@ -260,7 +310,7 @@ def ensure(model: str = DEFAULT_MODEL, on_stage=None, log=print) -> bool:
                 log("ollama: скачивание модели оборвалось, пробую ещё раз")
                 stage("продолжаю скачивать модель")
         else:
-            stage("не удалось скачать модель")
+            stage(FAIL_MODEL)
             return False
 
     stage("готово", 1.0)

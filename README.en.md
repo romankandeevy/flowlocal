@@ -39,6 +39,41 @@ something during a pause. No "Thanks for watching!" in the middle of a thought.
 No GPU required. On a CPU, 8 seconds of speech becomes text in about 0.7 s, and
 with transcribing while you speak there is almost no wait at all - see below.
 
+<details>
+<summary><b>But what if I do have a graphics card</b></summary>
+
+Short answer: it probably will not help, and we measured that.
+
+**DirectML** - the *Use the graphics card* button on the *More* page. It
+downloads what is needed, swaps part of the recogniser and **measures your
+machine before and after**. Faster - it stays; slower - the processor comes back
+and you see both numbers. Works on any DirectX 12 card: NVIDIA, AMD, Intel,
+integrated.
+
+Measured on an RTX 5060 (GigaAM v3 e2e-rnnt int8), median of five runs:
+
+| Recording length | Processor | Graphics card |
+|---|---|---|
+| 3 s | 0.11 s | 0.28 s |
+| 8 s | 0.24 s | 0.32 s |
+| 12 s | 0.36 s | 0.34 s |
+| 20 s | 0.64 s | 0.41 s |
+| 45 s | 1.73 s | 0.63 s |
+
+The card pays a fixed entry price of about 0.27 s and then barely grows. The
+crossover is at twelve seconds. But people dictate in three-to-eight-second
+phrases, and even those are transcribed in chunks while they speak - the left
+half of the table, where the processor is twice as fast. Hence "probably will
+not help".
+
+**CUDA** - for those who want to try it themselves: install `onnxruntime-gpu`
+instead of `onnxruntime` and the app picks it up on its own, nothing to
+configure. With *device: auto* the order is CUDA, then DirectML, then the
+processor. CUDA is not in the distribution and never will be - half a gigabyte
+of NVIDIA libraries for a win that short phrases do not have.
+
+</details>
+
 > **Honest caveat.** The figures above are the model card's, not ours, and we
 > are not going to pretend we measured them ourselves. Our own harness
 > (`tools/bench_asr.py`) measures accuracy, latency, RAM and disk, but it was
@@ -237,8 +272,8 @@ Two deliberate departures from the system, both forced:
 | `transforms.py` | Text transforms: the ready-made ones and your own |
 | `insights.py` | Analysis of your own speech for *Stats* |
 | `inserter.py` | Insertion into the active window (clipboard + Ctrl+V, or character by character) |
-| `overlay_qt.py`, `qml/Overlay.qml` | The pill |
-| `settings_qt.py`, `qml/Settings.qml` | Settings: data in Python, layout in QML |
+| `overlay_qt.py`, `qml/windows/Overlay.qml` | The pill |
+| `settings_qt.py`, `qml/windows/Settings.qml` | The app window: how things are going, history, stats and settings. Data in Python, layout in QML |
 | `notes_qt.py`, `notes.py` | The notes window |
 | `i18n.py` | English interface; the translation key is the Russian string itself |
 | `theme.py`, `theme_qt.py` | Korti tokens - one source of truth, bridged into QML |
@@ -253,9 +288,14 @@ process - no IPC, no serialisation, so 60 fps costs nothing.
 - **Windows only.** macOS is on the roadmap and is a genuine 10-15 weeks, not a weekend.
 - Inserting via the clipboard overwrites its non-text contents (files, images) -
   only text is restored.
-- Insertion fails into programs running as administrator if FlowLocal itself
-  runs without those rights (a Windows limitation, UIPI).
-- The pill isn't visible over exclusive-fullscreen games.
+- Windows blocks our keystrokes into programs running as administrator if
+  FlowLocal itself runs without those rights (UIPI). The text is not lost: it
+  stays on the clipboard, the pill says «on the clipboard», and your own Ctrl+V
+  pastes it.
+- The pill isn't visible over exclusive-fullscreen games, and pasting there
+  usually doesn't go through. That's what the separate «dictate to the
+  clipboard» shortcut is for: the text lands on the clipboard and is inserted
+  nowhere.
 - Undo won't fire if you managed to type something after inserting. That's a
   guard, not a gap: otherwise Backspace would eat your text.
 

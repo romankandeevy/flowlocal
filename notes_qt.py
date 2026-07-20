@@ -36,7 +36,7 @@ TIDY = (
 
 def _qml_path() -> str:
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base, "qml", "Notes.qml")
+    return os.path.join(base, "qml", "windows", "Notes.qml")
 
 
 class NotesWindow(QObject):
@@ -78,15 +78,23 @@ class NotesWindow(QObject):
     # ---------- показ ----------
 
     def open(self) -> None:
-        """Показать окно. Что именно открыть - по настройке «notes_open».
+        """Показать окно. Что именно показать - по настройке «notes_open».
 
-        «last» - продолжаем прошлую мысль, «new» - чистый лист. Второе для
-        тех, у кого заметка это разовый черновик, а не дневник: им каждый раз
-        приходилось бы нажимать «Новая», и это ровно тот случай, когда
-        настройка дешевле привычки.
+        По умолчанию «list»: открывается СПИСОК заметок - почитать, поправить,
+        удалить, - а редактор вызывается из него кнопкой «Новая» или «Открыть».
+        Так просил владелец: «нажал Заметки - открылся список, а не пустой
+        лист». Список - в том же окне отдельным видом, а не вторым окном:
+        редактор из него никуда не делся, добавлен экран перед ним, и всё
+        прежнее (автосейв, «Привести в порядок», копирование, удаление)
+        осталось на месте.
+
+        «last»/«new» оставлены для того, кто держит заметку как черновик и
+        диктует В окно сразу: ему редактор нужен под фокусом с первой секунды,
+        иначе надиктованное некуда вставить. Обратно к списку - кнопка «Назад»
+        в редакторе, так что ни одна возможность не потеряна.
         """
         self.refresh()
-        как = str(self.cfg.get("notes_open") or "last")
+        как = str(self.cfg.get("notes_open") or "list")
         if как == "new":
             # Чистый лист заводим только если прошлый не остался пустым:
             # иначе за десять открытий накопится десять пустых заметок.
@@ -94,12 +102,17 @@ class NotesWindow(QObject):
             текст = (notes.load(cur) or {}).get("text", "") if cur else "x"
             if текст.strip():
                 self.create()
-        elif not self.root.property("current"):
-            items = notes.listing()
-            if items:
-                self.open_note(items[0]["id"])
-            else:
-                self.create()
+            self.root.setProperty("view", "editor")
+        elif как == "last":
+            if not self.root.property("current"):
+                items = notes.listing()
+                if items:
+                    self.open_note(items[0]["id"])
+                else:
+                    self.create()
+            self.root.setProperty("view", "editor")
+        else:
+            self.root.setProperty("view", "list")
         self.view.show()
         self.view.raise_()
         self.view.requestActivate()
@@ -170,7 +183,20 @@ class NotesWindow(QObject):
     def _on_done(self, note_id: str, text: str) -> None:
         self.root.setProperty("busy", False)
         if not text:
+            # Молчать нельзя. Правки текста может не быть вовсе или она может
+            # не отвечать - и тогда кнопка «Привести в порядок» просто
+            # переставала причёсывать, а человек оставался думать, дошло ли
+            # нажатие. Почему именно не вышло, спрашиваем у ollama_setup:
+            # «не установлена» и «молчит» лечатся по-разному.
+            import i18n
+            import ollama_setup as O
+
+            why = ("правка текста не отвечает"
+                   if O.state() == O.STATE_SLEEPING
+                   else "правка текста не установлена - откройте настройки")
+            self.root.setProperty("note", i18n.t(why))
             return
+        self.root.setProperty("note", "")
         notes.save(note_id, text)
         if self.root.property("current") == note_id:
             self.root.setText(text)

@@ -103,7 +103,7 @@ from version import __version__  # noqa: E402
 import cleaner  # noqa: E402
 from cleaner import _strip_fillers, clean, extract_commands, llm_command  # noqa: E402
 from inserter import (_set_clipboard_text, backspace,  # noqa: E402
-                      copy_selection, insert, press_enter)
+                      copy_selection, insert, press_enter, to_clipboard)
 from overlay_qt import Overlay  # noqa: E402
 from recorder import Recorder  # noqa: E402
 from transcriber import Transcriber  # noqa: E402
@@ -130,6 +130,18 @@ _UPDATE_EVERY = 6 * 60 * 60 * 1000
 _KEEP_IN_CLIPBOARD_CHARS = 300
 
 
+def _words_label(n: int) -> str:
+    """«23 слова» - то, что пилюля показывает после диктовки.
+
+    Согласование числительного считается здесь, а язык выбирает правило, а не
+    перевод готовой строки: ключом в словаре была бы строка с числом, и вести
+    его пришлось бы до бесконечности. Тот же приём, что в overlay_qt.set_words.
+    """
+    if i18n.language() == "en":
+        return f"{n} word" if n == 1 else f"{n} words"
+    return f"{n} {plural(n, 'слово', 'слова', 'слов')}"
+
+
 def log(msg: str) -> None:
     line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n"
     try:
@@ -143,12 +155,28 @@ def log(msg: str) -> None:
     print(line, end="")   # под pythonw sys.stdout = None, print молча ничего не делает
 
 
-def die(msg: str) -> None:
+def die(msg: str, detail: str = "") -> None:
     """Фатальная ошибка так, чтобы её увидели: под pythonw консоли нет и
-    traceback уходит в никуда."""
-    log(f"FATAL: {msg}")
+    traceback уходит в никуда.
+
+    Два текста, а не один, и это главное в этой функции. `msg` человеку -
+    человеческой фразой; `detail` (текст исключения) уходит ТОЛЬКО в журнал.
+    Раньше оба склеивались в одно окно, и последнее, что человек видел от
+    программы, выглядело так:
+
+        не удалось загрузить модель.
+
+        [WinError 126] Не найден указанный модуль
+
+    Вторая строка не говорит ему ничего и не подсказывает ни одного действия -
+    она написана для нас. Ему нужен адрес журнала: окна, из которого журнал
+    открывается кнопкой, в этот момент ещё нет и уже не будет.
+    """
+    log(f"FATAL: {msg}" + (f" | {detail}" if detail else ""))
     try:
-        ctypes.windll.user32.MessageBoxW(None, str(msg), "FlowLocal", 0x10)
+        ctypes.windll.user32.MessageBoxW(
+            None, f"{msg}\n\nЧто случилось - записано в журнале работы:\n{LOG_PATH}",
+            "FlowLocal", 0x10)
     except Exception:  # noqa: BLE001
         pass
 
@@ -197,13 +225,17 @@ class App:
                                     self.cfg.get("overlay_y"),
                                     save=self._save_overlay_pos)
         self.transcriber = Transcriber(self.cfg, log)
-        self.settings = None
+        self.settings = None         # окно программы: Главная, История, настройки
         self.onboarding = None
         self.tray = None
         self._recording = False
         self._rec_started_at = 0.0
         self._rec_mode = "hold"        # каким биндом начата текущая запись
-        self._held = {"hold": False, "toggle": False, "command": False}
+        # Куда ушла последняя диктовка: окно, буфер или файл. Нужно «Повторить
+        # последнюю» - повтор обязан отдать текст туда же, куда собирался.
+        self._last_dest = "insert"
+        self._held = {"hold": False, "toggle": False, "command": False,
+                      "clipboard": False, "inbox": False}
         self._mouse_binds: list[tuple[str, tuple, str]] = []
         self._mouse_listener = None
         self._work_lock = threading.Lock()
@@ -217,6 +249,12 @@ class App:
         self._update: dict | None = None   # свежая версия с GitHub, если нашлась
         self._wake = None            # слух за сном и разблокировкой экрана
         self.notes_win = None        # окно заметок, создаётся при первом открытии
+        self.transcript = None       # окно с расшифровкой файла
+        # Идёт ли расшифровка файла. Отдельно от _recording: диктовать во время
+        # расшифровки можно (она ждёт своей очереди на _work_lock), а вот
+        # запускать вторую расшифровку поверх первой - нет: два часовых файла
+        # разом просто поделят процессор и оба будут вдвое дольше.
+        self._file_busy = False
         self._music = None           # пауза музыки на время диктовки
         self.picker = None           # список преобразований, создаётся при первом показе
         self._tf_text = ""           # что преобразуем
@@ -324,7 +362,12 @@ class App:
                 try:
                     self._bind_dictation(mode, fallback)
                     self.cfg[f"hotkey_{mode}"] = fallback
-                    self.ui(self.overlay.show_error, f"сочетание {spec} не распознано")
+                    # Само сочетание из конфига на пилюле не показываем: сюда
+                    # оно попадает как раз тогда, когда прочитать его не
+                    # удалось, то есть это мусор из файла. Человеку важно
+                    # другое - что диктовка работает и каким сочетанием.
+                    self.ui(self.overlay.show_error,
+                            "сочетание не распозналось - вернул стандартное")
                 except (ValueError, KeyError) as e2:
                     log(f"fallback hotkey_{mode} failed too: {e2}")
         if str(self.cfg.get("hotkey_toggle") or "").strip():
@@ -338,6 +381,7 @@ class App:
         self._bind_undo()
         self._bind_transform()
         self._bind_notes()
+        self._bind_elsewhere()
 
     def _bind_dictation(self, mode: str, spec: str) -> None:
         mods, key, mouse_btn = inputspec.parse(spec)
@@ -503,6 +547,34 @@ class App:
         except (ValueError, KeyError) as e:
             log(f"bad hotkey_notes {spec!r}: {e}")
 
+    def _bind_elsewhere(self) -> None:
+        """Два жеста диктовки, у которых текст едет не в активное окно:
+        «в буфер» (hotkey_clipboard) и «в файл» (hotkey_inbox). Оба
+        необязательные, оба по умолчанию пустые.
+
+        Через тот же _bind_dictation, что hold и command: жест ровно тот же -
+        зажал, сказал, отпустил, - и заводить ему второй способ ловли клавиш
+        значило бы завести второе место, где ломается хоткей. Отличие целиком в
+        одном: куда отдать распознанное (см. _process, параметр dest).
+
+        Битое сочетание не откатываем на умолчание, как у hold: умолчание тут
+        пустое, возвращать нечего, а немым приложение от этого не станет.
+        """
+        for mode, key in (("clipboard", "hotkey_clipboard"),
+                          ("inbox", "hotkey_inbox")):
+            spec = str(self.cfg.get(key) or "").strip()
+            if not spec:
+                continue
+            # Инбокс без файла - это жест, который молча ничего не делает.
+            # Лучше не вешать вовсе и сказать об этом в журнале.
+            if mode == "inbox" and not str(self.cfg.get("inbox_path") or "").strip():
+                log("hotkey_inbox задан, а файл не выбран - жест не включён")
+                continue
+            try:
+                self._bind_dictation(mode, spec)
+            except (ValueError, KeyError) as e:
+                log(f"bad {key} {spec!r}: {e}")
+
     def open_notes(self) -> None:
         """Открыть окно заметок. ТОЛЬКО главный поток Qt.
 
@@ -522,6 +594,173 @@ class App:
 
             log("окно заметок не открылось:\n" + traceback.format_exc())
             self.ui(self.overlay.show_error, "заметки не открылись")
+
+    # ---------- расшифровка готового файла (PLAN 11) ----------
+    #
+    # Второй источник речи, кроме микрофона. Дальше - ТОТ ЖЕ конвейер: резка на
+    # куски по 60 секунд, ASR, знаки, чистка от бубнежа, словарь. Отличий ровно
+    # три, и все три на краях: откуда берётся звук (audiofile), куда уходит
+    # текст (окно с текстом вместо вставки в чужое поле) и пометка в истории.
+    #
+    # Дверей тоже две, и обе ведут сюда: пункт трея «Расшифровать файл…» и
+    # перетаскивание файла на окно программы.
+
+    def transcribe_file(self, path: str) -> None:
+        """Расшифровать файл. ТОЛЬКО главный поток Qt.
+
+        Здесь остаются только разговоры с человеком - проверка файла и вопрос
+        про длинную запись. Сама работа уходит в поток: часовой подкаст считает
+        минуты, и заморозить на них главный поток значит показать «программа
+        зависла» вместо работы.
+        """
+        import audiofile
+
+        path = str(path or "").strip('"')
+        try:
+            audiofile.check(path)
+        except audiofile.AudioFileError as e:
+            self._file_message("Не могу открыть", i18n.t(str(e)))
+            return
+        if self._recording:
+            self._file_message("Идёт запись",
+                               i18n.t("сначала закончите диктовку"))
+            return
+        if self._file_busy:
+            self._file_message("Уже работаю",
+                               i18n.t("подождите, идёт расшифровка"))
+            return
+
+        # Длину спрашиваем ДО старта, а не после. Человек, бросивший на окно
+        # часовой подкаст, должен узнать про пятнадцать минут работы, пока он
+        # ещё может передумать, - а не обнаружить это через десять минут по
+        # молчащей программе.
+        secs = audiofile.duration(path)
+        if secs >= audiofile.LONG_MINUTES * 60 and not self._ask_long(path, secs):
+            log(f"расшифровка отменена человеком: {secs / 60:.0f} мин")
+            return
+        self._file_busy = True
+        self.ui(self.overlay.set_hint, "")
+        self.ui(self.overlay.show_downloading, i18n.t("читаю файл"))
+        self._set_tray_state("proc")
+        threading.Thread(target=self._process_file, args=(path, secs),
+                         daemon=True).start()
+
+    def _file_message(self, title: str, body: str) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        box = QMessageBox()
+        box.setWindowTitle(i18n.t(title))
+        box.setText(body)
+        box.setIcon(QMessageBox.Information)
+        box.exec()
+
+    def _ask_long(self, path: str, secs: float) -> bool:
+        """Спросить про длинную запись. True - человек согласен ждать."""
+        import audiofile
+        from PySide6.QtWidgets import QMessageBox
+
+        mins = int(secs // 60)
+        wait = int(audiofile.estimate(secs) // 60)
+        box = QMessageBox()
+        box.setWindowTitle(i18n.t("Это надолго"))
+        box.setIcon(QMessageBox.Question)
+        box.setText(
+            f"{os.path.basename(path)}\n\n"
+            + i18n.t("Запись идёт") + f" {mins} "
+            + plural(mins, "минуту", "минуты", "минут") + ". "
+            + i18n.t("Расшифровка займёт около") + f" {max(1, wait)} "
+            + plural(max(1, wait), "минуты", "минут", "минут") + ".\n\n"
+            + i18n.t("Программой можно пользоваться дальше - диктовка подождёт "
+                     "своей очереди."))
+        yes = box.addButton(i18n.t("Расшифровать"), QMessageBox.AcceptRole)
+        box.addButton(i18n.t("Отмена"), QMessageBox.RejectRole)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def _process_file(self, path: str, secs: float) -> None:
+        """Файл -> текст. Рабочий поток.
+
+        Под тем же _work_lock, что и диктовка с микрофона, и это не
+        перестраховка: модель одна, и два прогона разом в лучшем случае
+        поделили бы процессор пополам, а в худшем - подрались бы за загрузку
+        модели, если её успели выгрузить за простоем.
+        """
+        import audiofile
+
+        name = os.path.basename(path)
+        try:
+            audio = audiofile.decode(
+                path,
+                on_progress=lambda d: self.ui(
+                    self.overlay.show_downloading,
+                    i18n.t("читаю файл") + f" {int(d * 100)}%"))
+            dur = audio.size / 16000.0
+            log(f"файл {name}: {dur:.1f} с звука")
+            self.ui(self.overlay.show_processing)
+            with self._work_lock:
+                if not self.transcriber.loaded:
+                    self.ui(self.overlay.show_downloading, i18n.t("просыпаюсь"))
+                    self.transcriber.load()
+                    self.ui(self.overlay.show_processing)
+                self._last_use = time.time()
+                t0 = time.time()
+                # Прогресс «часть N из M» уже умеет transcriber - он и режет.
+                raw = self.transcriber.transcribe(
+                    audio, on_part=lambda i, n: self.ui(
+                        self.overlay.show_downloading, f"часть {i} из {n}"))
+                # process не передаём: чистка подбирает тон по тому, КУДА
+                # вставляют, а мы никуда не вставляем. Правило тона для окна,
+                # которое сейчас в фокусе, к чужому подкасту отношения не имеет.
+                text = clean(raw, self.cfg, log)
+            if not text:
+                log(f"файл {name}: ничего не расслышали")
+                self.ui(self.overlay.show_error, i18n.t("в файле не слышно речи"))
+                return
+            self._history(text, dur, raw=raw, source="file")
+            n = len(text.split())
+            log(f"файл {name}: {n} слов за {time.time() - t0:.1f} с")
+            self.ui(self.overlay.show_done, _words_label(n))
+            self.ui(self._show_transcript, name, text)
+        except audiofile.AudioFileError as e:
+            log(f"файл {name}: {e}")
+            self.ui(self.overlay.show_error, i18n.t(str(e)))
+        except Exception as e:  # noqa: BLE001 - чужой файл не должен ронять программу
+            log(f"файл {name}: не вышло: {type(e).__name__}: {e}")
+            self.ui(self.overlay.show_error, i18n.t("файл не расшифровался"))
+        finally:
+            self._file_busy = False
+            self._set_tray_state("idle")
+
+    def _show_transcript(self, name: str, text: str) -> None:
+        """Окно с расшифровкой. Главный поток."""
+        try:
+            if self.transcript is None:
+                from transcript_qt import TranscriptWindow
+
+                self.transcript = TranscriptWindow(self.overlay.tokens, log)
+            self.transcript.show(name, text)
+        except Exception:  # noqa: BLE001 - текст важнее окна
+            import traceback
+
+            log("окно расшифровки не открылось:\n" + traceback.format_exc())
+            # Текст не теряем ни при каком исходе: окна нет - значит в буфер, и
+            # человеку об этом говорим. Час работы модели не должен пропасть
+            # из-за того, что не нарисовалось окно.
+            self._to_clipboard(text)
+            self.ui(self.overlay.show_done, i18n.t("расшифровка в буфере"))
+
+    def _pick_audio_file(self) -> None:
+        """Пункт трея «Расшифровать файл…». Главный поток."""
+        import audiofile
+        from PySide6.QtWidgets import QFileDialog
+
+        mask = " ".join("*" + e for e in audiofile.SUPPORTED)
+        path, _ = QFileDialog.getOpenFileName(
+            None, i18n.t("Какой файл расшифровать"),
+            os.path.expanduser("~"),
+            f"{i18n.t('Запись')} ({mask});;{i18n.t('Все файлы')} (*)")
+        if path:
+            self.transcribe_file(path)
 
     def _tidy_note(self, text: str, instruction: str) -> str:
         """Причесать заметку. Зовётся из потока окна заметок.
@@ -547,6 +786,29 @@ class App:
             return
         threading.Thread(target=self._transform_grab, daemon=True).start()
 
+    def _llm_missing(self) -> str:
+        """Почему правки текста нет - фразой и с указанием, куда идти.
+
+        Три разные беды выглядели на пилюле одинаково («правка текста не
+        установлена»), а делать в них надо разное: включить переключатель,
+        разбудить уснувшую Ollama, поставить её с нуля. Хуже всего был средний
+        случай - программа стоит на диске и молчит, а человеку предлагали
+        установить её заново.
+
+        Спрашиваем состояние, а не гадаем по конфигу. serving() на закрытый
+        порт отвечает отказом сразу, так что рабочий поток тут не залипнет.
+        """
+        import ollama_setup as O
+
+        if (self.cfg.get("llm") or {}).get("enabled") is False:
+            return "правка текста выключена в настройках"
+        st = O.state()
+        if st == O.STATE_SLEEPING:
+            return "правка текста не отвечает - откройте настройки"
+        if st == O.STATE_NO_MODEL:
+            return "правке текста не хватает модели"
+        return "правка текста не установлена - откройте настройки"
+
     def _transform_grab(self) -> None:
         """Снять выделение и показать список. Рабочий поток."""
         if not self._work_lock.acquire(blocking=False):
@@ -555,7 +817,7 @@ class App:
         try:
             llm = self.cfg.get("llm") or {}
             if not llm.get("enabled"):
-                self.ui(self.overlay.show_error, "правка текста не установлена")
+                self.ui(self.overlay.show_error, self._llm_missing())
                 return
             items = transforms.all_for(self.cfg)
             if not items:
@@ -697,7 +959,8 @@ class App:
                 pass
             self._mouse_listener = None
         self._mouse_binds.clear()
-        self._held = {"hold": False, "toggle": False, "command": False}
+        self._held = {"hold": False, "toggle": False, "command": False,
+                      "clipboard": False, "inbox": False}
 
     def _dictation_press(self, mode: str) -> None:
         if self._held.get(mode):      # автоповтор зажатого сочетания
@@ -719,7 +982,9 @@ class App:
         if not self._held.get(mode):
             return
         self._held[mode] = False
-        if mode in ("hold", "command") and self._recording and self._rec_mode == mode:
+        # Все жесты, кроме переключателя, кончаются отпусканием: и обычная
+        # диктовка, и правка голосом, и «в буфер», и «в файл».
+        if mode != "toggle" and self._recording and self._rec_mode == mode:
             self._finish_recording()
 
     def _esc(self, _e) -> None:
@@ -796,7 +1061,9 @@ class App:
             return
         self._stream = streaming.Stream(
             self.transcriber.transcribe, log,
-            min_tail=streaming.min_tail_sec(self.cfg))
+            min_tail=streaming.min_tail_sec(self.cfg),
+            # Счётчик слов на пилюлю: разбор на ходу иначе снаружи невидим.
+            on_words=lambda n: self.ui(self.overlay.set_words, n))
         self._stream_thread = threading.Thread(target=self._stream_work, daemon=True)
         self._stream_thread.start()
 
@@ -858,11 +1125,15 @@ class App:
             threading.Thread(target=self._process_command, args=(audio,),
                              daemon=True).start()
             return
+        # Куда отдавать текст, решает жест, которым начали. Дальше конвейер
+        # общий: распознавание, чистка и история у всех троих одни и те же.
+        dest = self._rec_mode if self._rec_mode in ("clipboard", "inbox") else "insert"
         # Запись держим до следующей: если распознавание или вставка упадут,
         # фраза не потеряна - «Повторить последнюю» в трее прогонит её заново.
         # Память дешёвая: минута речи в float32 - ~4 МБ.
-        self._last_audio, self._last_dur = audio, dur
-        threading.Thread(target=self._process, args=(audio, dur), daemon=True).start()
+        self._last_audio, self._last_dur, self._last_dest = audio, dur, dest
+        threading.Thread(target=self._process, args=(audio, dur, dest),
+                         daemon=True).start()
 
     def _process_command(self, audio) -> None:
         """Command mode: выделил текст, сказал что сделать - выделенное заменилось.
@@ -882,7 +1153,7 @@ class App:
                 llm = self.cfg.get("llm") or {}
                 if not llm.get("enabled"):
                     log("command: полировка выключена, править нечем")
-                    self.ui(self.overlay.show_error, "правка текста не установлена")
+                    self.ui(self.overlay.show_error, self._llm_missing())
                     return
 
                 self._inserting = True
@@ -909,7 +1180,12 @@ class App:
                 t0 = time.time()
                 result = llm_command(sel, instruction, llm, log)
                 if not result:
-                    self.ui(self.overlay.show_error, "не смог выполнить")
+                    # «Не смог выполнить» звучало как отказ по существу
+                    # («понял, но не буду»), а причина почти всегда другая:
+                    # Ollama не ответила. Заодно говорим главное - выделенный
+                    # текст на месте, ничего не испорчено.
+                    self.ui(self.overlay.show_error,
+                            "правка текста не ответила - текст не тронут")
                     return
 
                 self._inserting = True
@@ -938,7 +1214,9 @@ class App:
                 self.ui(self.overlay.show_error, "не удалось вставить")
         except Exception as e:  # noqa: BLE001
             log(f"command error: {e}")
-            self.ui(self.overlay.show_error, "ошибка команды")
+            # «Ошибка команды» - это заголовок строки в журнале, а не фраза
+            # человеку: она не говорит ни что случилось, ни что делать.
+            self.ui(self.overlay.show_error, "не получилось - попробуйте ещё раз")
         finally:
             self._set_tray_state("idle")
 
@@ -957,8 +1235,11 @@ class App:
         self.ui(self.overlay.set_hint, "")
         self.ui(self.overlay.show_processing)
         self._set_tray_state("proc")
+        # Повторяем и назначение тоже: диктовка в файл, прогнанная заново,
+        # обязана лечь в файл, а не вставиться в то окно, где человек сейчас.
         threading.Thread(target=self._process,
-                         args=(audio, getattr(self, "_last_dur", 0.0)),
+                         args=(audio, getattr(self, "_last_dur", 0.0),
+                               getattr(self, "_last_dest", "insert")),
                          daemon=True).start()
 
     def _cancel_recording(self) -> None:
@@ -984,7 +1265,17 @@ class App:
         self._set_tray_state("idle")
         log("recording cancelled")
 
-    def _process(self, audio, dur: float) -> None:
+    def _process(self, audio, dur: float, dest: str = "insert") -> None:
+        """Распознать и отдать текст. dest решает, кому именно:
+
+            insert    - в активное окно, как было всегда;
+            clipboard - в буфер обмена, ничего никуда не вставляя;
+            inbox     - в конец файла из inbox_path.
+
+        Всё до доставки одинаково для всех троих - распознавание, чистка,
+        команды, история. Новый жест не заводит второго конвейера: он выбирает
+        только последний шаг.
+        """
         try:
             # лок держим на весь конвейер, включая вставку: если распознать
             # вторую фразу, пока вставляется первая, текст уедет не в том порядке
@@ -1062,49 +1353,26 @@ class App:
                     log(f"empty result ({dur:.1f}s audio)")
                     self.ui(self.overlay.show_error, "ничего не расслышали")
                     return
-                # Отправлять ли сообщение самим: список приложений в настройках.
-                # Голосовое «нажми энтер» при этом никуда не делось - оно
-                # работает везде и перебивает список.
-                want_enter = want_enter or self._auto_enter_here(process)
-                # Склейка с предыдущей вставкой: пробел спереди и строчная
-                # буква, если фраза продолжает мысль. Иначе две диктовки подряд
-                # слипаются в «первая фразаВторая фраза».
-                text = self._join_with_previous(text, process)
-                # После текста с Enter'ом хвостовой пробел - мусор в начале
-                # следующего сообщения.
-                out = text + (" " if self.cfg.get("append_space", True)
-                              and not want_enter else "")
-                self._inserting = True
-                _t = time.perf_counter()
-                # Длинную диктовку оставляем в буфере обмена, даже если человек
-                # просил возвращать скопированное.
-                #
-                # Владелец спросил: надиктовал много, а не вставилось - что ему
-                # делать? Ответа не было. В режиме «сразу целиком» мы шлём
-                # Ctrl+V и не можем узнать, дошёл ли он: окно могло потерять
-                # фокус, поле могло не принимать вставку, программа могла идти
-                # от администратора. Мы считали такую диктовку вставленной и
-                # возвращали в буфер то, что человек копировал раньше, - то
-                # есть своими руками стирали последний след его десяти минут.
-                #
-                # Теперь для длинного текста уборка отменяется: пропажа абзаца
-                # дороже, чем не возвращённая ссылка. Ctrl+V спасает, ничего не
-                # открывая, и пилюля про это говорит.
-                long_text = len(out) >= _KEEP_IN_CLIPBOARD_CHARS
-                try:
-                    ok = insert(
-                        out,
-                        mode=self.cfg.get("insert_mode", "paste"),
-                        restore=(self.cfg.get("restore_clipboard", True)
-                                 and not long_text),
-                    )
-                    if ok and want_enter:
-                        time.sleep(0.05)   # дать окну дожевать вставку
-                        press_enter()
-                finally:
-                    lat["insert"] = time.perf_counter() - _t
-                    self._insert_window_closes()
-                if ok:
+                if dest == "insert":
+                    # Отправлять ли сообщение самим: список приложений в
+                    # настройках. Голосовое «нажми энтер» при этом никуда не
+                    # делось - оно работает везде и перебивает список.
+                    want_enter = want_enter or self._auto_enter_here(process)
+                    # Склейка с предыдущей вставкой: пробел спереди и строчная
+                    # буква, если фраза продолжает мысль. Иначе две диктовки
+                    # подряд слипаются в «первая фразаВторая фраза».
+                    text = self._join_with_previous(text, process)
+                    # После текста с Enter'ом хвостовой пробел - мусор в начале
+                    # следующего сообщения.
+                    out = text + (" " if self.cfg.get("append_space", True)
+                                  and not want_enter else "")
+                    ok, note, in_window = self._insert_here(out, want_enter, lat)
+                else:
+                    # Ни склейки, ни хвостового пробела, ни Enter: всё это про
+                    # чужое поле, в которое мы сейчас и не целимся.
+                    out = text
+                    ok, note, in_window = self._put_aside(out, dest)
+                if in_window:
                     # После Enter стирать нечего: текст уже улетел сообщением.
                     self._undo_text, self._undo_armed = \
                         (None, False) if want_enter else (out, True)
@@ -1128,14 +1396,15 @@ class App:
                 # любой другой исход означает, что её ещё можно спасти.
                 recordings.drop(saved)
                 saved = ""
+                # Пилюля называет место, а не только число. «Вставлено» и «в
+                # буфере» - разные исходы, и человек должен знать, какой из них
+                # у него сейчас: во втором случае ему остаётся нажать Ctrl+V.
                 # Про буфер говорим только когда там правда лежит диктовка:
-                # обещание «и в буфере» на коротком тексте было бы враньём.
+                # обещание на пустом месте было бы враньём.
                 self.ui(self.overlay.show_done,
-                        f"{n} {plural(n, 'слово', 'слова', 'слов')}"
-                        + (" · и в буфере" if long_text else ""))
+                        _words_label(n) + (f" · {i18n.t(note)}" if note else ""))
             else:
-                self.ui(self.overlay.show_error,
-                        "не вставилось - текст в буфере, нажмите Ctrl+V")
+                self.ui(self.overlay.show_error, i18n.t(note))
         except Exception as e:  # noqa: BLE001
             log(f"process error: {e}")
             if saved:
@@ -1152,6 +1421,95 @@ class App:
             # Сверх лимита не копим: спасение не должно стать свалкой.
             recordings.prune()
             self._set_tray_state("idle")
+
+    # ---------- куда уходит распознанный текст ----------
+    #
+    # Три дороги и один общий выход. Общий выход - буфер обмена: он есть всегда
+    # и работает везде, где не работает больше ничего, - в окне под
+    # администратором, поверх полноэкранной игры, при занятом файле инбокса.
+    # Поэтому фолбэк здесь ровно один (_to_clipboard), и каждая дорога
+    # сворачивает на него, а не заводит свой.
+    #
+    # Обе доставки отвечают одинаковой тройкой:
+    #   ok        - текст доехал хоть куда-то, и человек его не потерял;
+    #   note      - чем дополнить пилюлю («в буфере», «в файле»); пусто - просто
+    #               вставилось, дополнять нечем;
+    #   in_window - текст лёг именно в активное окно. Только в этом случае можно
+    #               взводить отмену: Backspace стирает символы ТАМ, где курсор,
+    #               и после «в буфере» он съел бы чужой текст.
+
+    def _to_clipboard(self, text: str) -> bool:
+        """Общий фолбэк: положить текст в буфер обмена."""
+        if to_clipboard(text):
+            return True
+        # Буфер занят намертво (обычно чужим менеджером буфера). Это последняя
+        # дверь, и раз она закрыта - говорим об этом в журнал, а человеку
+        # ответит пилюля.
+        log("буфер обмена занят - текст отдать некуда")
+        return False
+
+    def _insert_here(self, out: str, want_enter: bool,
+                     lat: dict) -> tuple[bool, str, bool]:
+        """Вставить в активное окно. Не вышло - текст остаётся в буфере.
+
+        Длинную диктовку оставляем в буфере обмена и при удачной вставке, даже
+        если человек просил возвращать скопированное.
+
+        Владелец спросил: надиктовал много, а не вставилось - что ему делать?
+        Ответа не было. Мы шлём Ctrl+V и не всегда можем узнать, дошёл ли он:
+        окно могло потерять фокус, поле могло не принимать вставку. Мы считали
+        такую диктовку вставленной и возвращали в буфер то, что человек
+        копировал раньше, - то есть своими руками стирали последний след его
+        десяти минут.
+
+        Теперь для длинного текста уборка отменяется: пропажа абзаца дороже,
+        чем не возвращённая ссылка. А случай «система не пустила наши нажатия»
+        (окно выше по правам) inserter теперь различает и честно отвечает False
+        - тогда диктовка остаётся в буфере целиком, и пилюля про это говорит.
+        """
+        long_text = len(out) >= _KEEP_IN_CLIPBOARD_CHARS
+        self._inserting = True
+        _t = time.perf_counter()
+        try:
+            ok = insert(
+                out,
+                mode=self.cfg.get("insert_mode", "paste"),
+                restore=(self.cfg.get("restore_clipboard", True)
+                         and not long_text),
+            )
+            if ok and want_enter:
+                time.sleep(0.05)   # дать окну дожевать вставку
+                press_enter()
+        finally:
+            lat["insert"] = time.perf_counter() - _t
+            self._insert_window_closes()
+        if ok:
+            return True, ("и в буфере" if long_text else ""), True
+        log("вставить не вышло - оставляю текст в буфере")
+        if self._to_clipboard(out):
+            return True, "в буфере, нажмите Ctrl+V", False
+        return False, "не вставилось и буфер занят", False
+
+    def _put_aside(self, out: str, dest: str) -> tuple[bool, str, bool]:
+        """Отдать текст мимо активного окна: в буфер или в файл инбокса."""
+        if dest == "clipboard":
+            if self._to_clipboard(out):
+                log(f"в буфер: {len(out)} символов")
+                return True, "в буфере", False
+            return False, "буфер обмена занят", False
+
+        import inbox
+
+        path = str(self.cfg.get("inbox_path") or "").strip()
+        if inbox.append(path, out):
+            log(f"в файл {path}: {len(out)} символов")
+            return True, "в файле", False
+        # Файл занят или лежит не там - текст не пропадает, а уходит тем же
+        # общим фолбэком. Второго способа спасти диктовку мы не заводим.
+        log(f"инбокс недоступен ({path!r}) - отдаю в буфер")
+        if self._to_clipboard(out):
+            return True, "файл занят - текст в буфере", False
+        return False, "файл занят и буфер тоже", False
 
     # ---------- отмена последней вставки ----------
 
@@ -1234,7 +1592,7 @@ class App:
             f"«О программе» → «Несохранённые записи»: можно распознать заново.")
 
     def _history(self, text: str, dur: float, process: str = "",
-                 raw: str = "") -> None:
+                 raw: str = "", source: str = "") -> None:
         """Строка в history.jsonl. Ничего не пишем, если история выключена.
 
         Кроме текста и длительности пишем ещё два поля, и оба - ради статистики
@@ -1244,7 +1602,12 @@ class App:
                    диктуете больше всего и в какое время;
             raw  - что услышала модель до чистки. Только если отличается от
                    итога: совпадает - писать нечего, а история и так самое
-                   тяжёлое, что мы храним.
+                   тяжёлое, что мы храним;
+            src  - откуда взялась речь. Пусто - микрофон, 'file' - расшифровка
+                   готового файла. Нужно, чтобы «Историю» можно было читать:
+                   часовой подкаст среди диктовок неотличим от диктовки на час,
+                   а это разные вещи, и статистика «сколько вы наговорили» на
+                   чужом подкасте врала бы в свою пользу.
 
         Заводим сейчас, хотя показывать пока негде, и это осознанно: такие
         числа считаются по накопленному. Добавь мы поля вместе с экраном - он
@@ -1272,6 +1635,7 @@ class App:
                             "text": text,
                             **({"app": process} if process else {}),
                             **({"raw": raw} if raw and raw != text else {}),
+                            **({"src": source} if source else {}),
                         },
                         ensure_ascii=False,
                     )
@@ -1280,22 +1644,47 @@ class App:
         except OSError:
             pass
 
-    # ---------- настройки ----------
+    # ---------- окно ----------
+
+    def _win_args(self) -> dict:
+        """Чем кормить окно на QML: общий набор колбэков в приложение.
+
+        Именно колбэков, а не состояния. Backend окно заводит себе само
+        (SettingsWindow.__init__), и каждое открытие перечитывает конфиг с
+        диска (open -> reload), так что правка снаружи доезжает сама. А вот
+        «поставить Ollama» или «переслушать запись» умеет только приложение, и
+        руки для этого даёт оно.
+
+        Отдельным методом, а не семью строками в вызове: так видно списком, что
+        именно окно просит у приложения, и добавить восьмое - правка в одном
+        месте, а не поиск конструктора среди двух сотен строк.
+        """
+        return dict(
+            on_onboarding=self._open_onboarding,
+            update_fn=lambda: self._update,
+            do_update=self._do_update,
+            llm_install=self.install_ollama,
+            llm_busy=self.ollama_busy,
+            redo_fn=self._redo_recording,
+            notes_fn=self.open_notes,
+            transcribe_fn=self.transcribe_file)
 
     def _open_settings(self) -> None:
+        """Окно программы. Одно на все двери.
+
+        Сюда ведут все пути: клик по значку в трее, ярлык из «Пуска», пункт
+        меню «Настройки…» и просьба от второго экземпляра (poke). Разными их
+        делала пора двух окон - маленькое из трея и большое из меню; окно снова
+        одно, и разводить входы больше некуда. Открывается оно на «Главной»,
+        так что пришедший «посмотреть, что надиктовано» попадает именно туда, а
+        настройки ждут второй группой в панели.
+        """
         from settings_qt import SettingsWindow
 
         if self.settings is None:
             self.settings = SettingsWindow(
                 self._on_config_change, self._on_hotkey_capture,
-                self._info, HISTORY_PATH, LOG_PATH,
-                on_onboarding=self._open_onboarding,
-                update_fn=lambda: self._update,
-                do_update=self._do_update,
-                llm_install=self.install_ollama,
-                llm_busy=self.ollama_busy,
-                redo_fn=self._redo_recording,
-                notes_fn=self.open_notes)
+                self._info, HISTORY_PATH, LOG_PATH, **self._win_args())
         self.settings.open()
 
     def _redo_recording(self, path: str) -> None:
@@ -1375,7 +1764,14 @@ class App:
         if isinstance(llm, dict) and not llm.get("model") and self._llm_note:
             llm["model"] = self._llm_note
             log(f"настройки затёрли имя модели - вернул {self._llm_note}")
-        hk_keys = ("hotkey_hold", "hotkey_toggle", "undo_hotkey")
+        # Все сочетания разом, а не три главных. Назначение нового хоткея и так
+        # перевешивает биндЫ (_on_hotkey_capture), а вот СНЯТИЕ идёт обычной
+        # записью в конфиг - и снятое сочетание продолжало работать до
+        # перезапуска. Здесь же и inbox_path: без файла жест «в файл» не
+        # вешается вовсе, значит выбор файла обязан его включить.
+        hk_keys = ("hotkey_hold", "hotkey_toggle", "hotkey_command",
+                   "hotkey_transform", "hotkey_notes", "hotkey_clipboard",
+                   "hotkey_inbox", "inbox_path", "undo_hotkey")
         if any(old.get(k) != new.get(k) for k in hk_keys):
             self._hotkey_bind()
             self._set_tray_state(self._tray_state)   # в подсказке трея - биндЫ
@@ -1456,7 +1852,11 @@ class App:
                 self.ui(self.overlay.show_done, "модель готова")
             except Exception as e:  # noqa: BLE001 - старая модель продолжает работать
                 log(f"model reload failed: {e}")
-                self.ui(self.overlay.show_error, "не удалось загрузить модель")
+                # Говорим и про беду, и про то, что диктовка цела: старая
+                # модель осталась в работе, и «не удалось загрузить модель»
+                # пугало человека молчанием о том, работает ли что-нибудь.
+                self.ui(self.overlay.show_error,
+                        "новая модель не загрузилась - работает прежняя")
             finally:
                 self._model_reloading = False
                 self._set_tray_state("idle")
@@ -1521,6 +1921,15 @@ class App:
         # худший сорт сюрприза.
         if self._llm_note:
             info["понимает поправки"] = "да"
+        # Служебное для статус-строки «Главной» (settings_qt.statusInfo).
+        # Подчёркивание - метка «не показывать»: about() такие ключи
+        # пропускает, и на страницу «О программе» они не попадают. Здесь, а
+        # не в конфиге окна, потому что оба ответа знает только приложение:
+        # устройство выбирает onnxruntime при загрузке (провайдера может не
+        # оказаться, и «cuda» тихо станет «cpu»), а модель могли сменить в
+        # другом окне - его копия конфига об этом ещё не знает.
+        info["_device"] = self.transcriber.device
+        info["_model"] = str(self.cfg.get("model") or "")
         return info
 
     def _status(self) -> str:
@@ -1591,6 +2000,11 @@ class App:
         self._act_update.triggered.connect(self._do_update)
         self._act_update.setVisible(False)
         menu.addAction("Заметки…").triggered.connect(self.open_notes)
+        # Вторая дверь к расшифровке файла: первая - перетащить его на окно.
+        # Обе нужны. Перетаскивание быстрее, но про него не догадываются, пока
+        # не покажут; пункт меню видно списком, и он же работает, когда окно
+        # закрыто и тащить не на что.
+        menu.addAction("Расшифровать файл…").triggered.connect(self._pick_audio_file)
         act_settings = menu.addAction("Настройки…")
         act_settings.triggered.connect(self._open_settings)
         self._act_retry = menu.addAction("Повторить последнюю диктовку")
@@ -1613,7 +2027,9 @@ class App:
                     f"Обновить до {upd['version']}  ({upd['size_mb']} МБ)")
         menu.aboutToShow.connect(_refresh_menu)
         self.tray.setContextMenu(menu)
-        # Двойной клик - настройки: у pystray это был default=True.
+        # Двойной клик по значку - окно программы. Оно открывается на «Главной»,
+        # то есть ровно там, зачем по значку и кликают: работает ли программа и
+        # что она надиктовала.
         self.tray.activated.connect(
             lambda r: self._open_settings()
             if r == QSystemTrayIcon.DoubleClick else None)
@@ -1634,7 +2050,8 @@ class App:
             # если человек уже жал хоткей и видит «загружаю модель…» - убрать
             self.ui(self._loading_done)
         except Exception as e:  # noqa: BLE001
-            die(f"не удалось загрузить модель.\n\n{e}")
+            die("Не удалось загрузить распознавание речи. "
+                "Помогает переустановка программы.", f"{type(e).__name__}: {e}")
             self.ui(self._shutdown)
 
     def _check_update_bg(self) -> None:
@@ -1739,7 +2156,16 @@ class App:
                 except Exception:  # noqa: BLE001 - окно могли закрыть
                     self._ollama_subs.remove(cb)
 
+        # Последний этап помним: ollama_setup заканчивает работу этапом-фразой
+        # («не удалось скачать - проверьте интернет»), и это единственное
+        # место, где известно, ЧТО именно не вышло. Без него пилюля говорила
+        # «не удалось установить» одинаково на оборванную закачку, на
+        # неудавшуюся установку и на молчащий сервер - то есть не говорила
+        # ничего.
+        last = {"stage": ""}
+
         def stage(name: str, frac: float, total: float) -> None:
+            last["stage"] = name
             self.ui(self.overlay.show_downloading, name)
             self.ui(self.overlay.set_progress, frac)
             self.ui(tell, name, frac, total, None)
@@ -1760,9 +2186,13 @@ class App:
                     pass
                 self._llm_note = O.DEFAULT_MODEL
             self._ollama_busy = False
-            # Итог виден и без окна: пилюля скажет «готово» или «не удалось».
+            # Итог виден и без окна: пилюля скажет «готово» или назовёт причину.
+            # Про исключение (его текст ушёл в журнал строкой выше) на пилюле
+            # не говорим ни слова - там ему не место.
+            why = (last["stage"] if last["stage"] in O.FAILURES
+                   else "не удалось установить")
             self.ui(self.overlay.show_done if ok else self.overlay.show_error,
-                    "правка текста готова" if ok else "не удалось установить")
+                    "правка текста готова" if ok else why)
             self.ui(tell, "готово" if ok else "не удалось", 1.0 if ok else 0.0, 0, ok)
 
         threading.Thread(target=work, daemon=True).start()
@@ -2083,7 +2513,7 @@ class App:
             self._open_settings()
         except Exception:  # noqa: BLE001
             import traceback
-            log("не смог открыть настройки по ярлыку:\n" + traceback.format_exc())
+            log("не смог открыть окно по ярлыку:\n" + traceback.format_exc())
 
     def run(self, silent: bool = False) -> None:
         # Язык интерфейса ставим ДО первого окна: иначе мастер первого
@@ -2314,9 +2744,72 @@ def download_model_cli() -> int:
     return 0
 
 
+def transcribe_cli() -> int:
+    """`--transcribe <файл>`: расшифровать запись и положить текст рядом.
+
+    Окон не открывает и в трей не лезет - это одноразовая работа, а не запуск
+    программы. Тем же приёмом сделан `--download-model` выше.
+
+    Зачем этот флаг существует, кроме удобства. СОБРАННОЕ приложение иначе
+    нечем проверить: у него нет консоли (console=False в flowlocal.spec), в
+    трее оно ждёт мыши, а декодер - единственная часть задачи 11, которая
+    ломается именно в сборке, а не в исходниках. Обе библиотеки приезжают
+    скомпилированными расширениями плюс своя DLL рядом, и PyInstaller такое
+    теряет регулярно и молча: из исходников работает, у человека с
+    установщиком - нет, и узнаёт он об этом, перетащив первое голосовое.
+    Флаг превращает эту проверку в одну команду и делает её обязательной
+    частью выпуска, а не доброй волей проверяющего.
+
+    Текст пишем ФАЙЛОМ рядом с записью, а не в вывод: печатать некуда - у
+    собранного приложения консоли нет.
+    """
+    path = sys.argv[2] if len(sys.argv) >= 3 else ""
+    if not path:
+        print("использование: --transcribe <файл>")
+        return 2
+
+    import audiofile
+
+    try:
+        audio = audiofile.decode(path)
+    except audiofile.AudioFileError as e:
+        log(f"--transcribe: {e}")
+        print(f"не вышло: {e}")
+        return 1
+    except Exception as e:  # noqa: BLE001 - чужой файл, прилететь может что угодно
+        log(f"--transcribe: {type(e).__name__}: {e}")
+        print(f"не вышло: {type(e).__name__}: {e}")
+        return 1
+
+    cfg = C.load()
+    t = Transcriber(cfg, log)
+    try:
+        t.load()
+        text = clean(t.transcribe(audio), cfg, log)
+    except Exception as e:  # noqa: BLE001
+        log(f"--transcribe: распознать не вышло: {type(e).__name__}: {e}")
+        print(f"не вышло: {type(e).__name__}: {e}")
+        return 1
+
+    out = os.path.splitext(path)[0] + ".txt"
+    try:
+        with open(out, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text + "\n")
+    except OSError as e:
+        log(f"--transcribe: не записать {out}: {e}")
+        print(f"не записать {out}: {e}")
+        return 1
+    log(f"--transcribe: {len(text.split())} слов из {os.path.basename(path)} "
+        f"({audio.size / 16000:.1f} с) -> {out}")
+    print(f"готово: {out}")
+    return 0
+
+
 def main() -> None:
     if len(sys.argv) >= 2 and sys.argv[1] == "--download-model":
         sys.exit(download_model_cli())
+    if len(sys.argv) >= 2 and sys.argv[1] == "--transcribe":
+        sys.exit(transcribe_cli())
     if len(sys.argv) >= 2 and sys.argv[1] == "--autostart":
         mode = sys.argv[2] if len(sys.argv) >= 3 else ""
         if mode not in ("on", "off"):
@@ -2372,5 +2865,7 @@ if __name__ == "__main__":
         import traceback
 
         log("FATAL on startup:\n" + traceback.format_exc())
-        die(f"не удалось запуститься.\n\n{e}")
+        die("FlowLocal не запустился. Помогает перезагрузка компьютера, "
+            "а если не помогла - переустановка программы.",
+            f"{type(e).__name__}: {e}")
         raise SystemExit(1) from e

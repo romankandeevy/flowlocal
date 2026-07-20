@@ -37,15 +37,20 @@ def strings() -> dict[str, list[str]]:
     """Строка -> в каких файлах встретилась."""
     found: dict[str, list[str]] = {}
     qml = os.path.join(ROOT, "qml")
-    for name in sorted(os.listdir(qml)):
-        if not name.endswith(".qml"):
-            continue
-        with open(os.path.join(qml, name), encoding="utf-8") as f:
-            for _q, text in CALL.findall(f.read()):
-                # Переменные в вызове (L.t(modelData.title)) сюда не попадают -
-                # их не сматчит кавычка. Это правильно: что там за строка,
-                # известно только в работе.
-                found.setdefault(text, []).append(name)
+    # Обход рекурсивный: с 19.07.2026 qml/ поделена на controls/ и windows/, а
+    # плоский listdir в такой папке нашёл бы ноль файлов и честно отрапортовал
+    # «непереведённых нет». Инструмент, который молчит тем громче, чем больше
+    # он пропустил, хуже отсутствующего.
+    for root, _dirs, names in os.walk(qml):
+        for name in sorted(names):
+            if not name.endswith(".qml"):
+                continue
+            with open(os.path.join(root, name), encoding="utf-8") as f:
+                for _q, text in CALL.findall(f.read()):
+                    # Переменные в вызове (L.t(modelData.title)) сюда не
+                    # попадают - их не сматчит кавычка. Это правильно: что там
+                    # за строка, известно только в работе.
+                    found.setdefault(text, []).append(name)
     return found
 
 

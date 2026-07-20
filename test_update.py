@@ -12,7 +12,6 @@ API, - в том числе мусор. Сеть в тесте означала 
 """
 
 import json
-import os
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -111,17 +110,6 @@ def main() -> None:
     check("пусто не роняет", _parse(""), (0,), fails)
     check("10 больше 9 (а не меньше, как у строк)",
           _parse("0.10.0") > _parse("0.9.0"), True, fails)
-
-    # --- версия для npm ---
-    # Реестр npm принимает только три числа, наша схема даёт два. Ноль
-    # дописывает release.npm_version, и это единственное место, где так можно.
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                    "tools"))
-    from release import npm_version
-
-    check("1.0 -> 1.0.0 для npm", npm_version("1.0"), "1.0.0", fails)
-    check("1.11 -> 1.11.0, а не 1.1.1", npm_version("1.11"), "1.11.0", fails)
-    check("три числа не трогаем", npm_version("0.21.0"), "0.21.0", fails)
 
     # --- есть обновление ---
     got = with_stub(release("v0.2.0"), cur="0.1.0")

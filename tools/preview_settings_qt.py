@@ -1,8 +1,12 @@
-"""Контактный лист окна настроек: все страницы, обе темы.
+"""Контактный лист окна: все страницы, обе темы.
 
     python tools/preview_settings_qt.py            # обе темы, в tools/
     python tools/preview_settings_qt.py dark       # только тёмная
     python tools/preview_settings_qt.py --show     # показать окно, ничего не снимать
+
+Окно одно (1060x700), страниц семь: Главная, История, Статистика, Диктовка,
+Слова, Дополнительно, О программе. Их список окно отдаёт само, свойством
+`pages`, - так витрина не может отстать от программы, когда страницу добавят.
 
 **Почему здесь свой конфиг, а не настоящий.** Прошлое превью снималось с живого
 приложения - и вместе с интерфейсом сняло почту из «Замен» и расшифровки из
@@ -64,10 +68,21 @@ import ollama_setup as _ollama  # noqa: E402
 
 _ollama.serving = lambda timeout=1.5: False
 _ollama.has_model = lambda name: False
+# exe() тоже: с задачи 9 окна различают «не установлена» и «установлена, но
+# молчит», и различают по наличию файла на диске. У владельца файл есть - без
+# этой подмены витрина показывала бы «не отвечает» на его машине и «не
+# установлена» на любой другой, то есть снова зависела бы от того, кто снимает.
+_ollama.exe = lambda: ""
 
 _DEMO_TODAY = _dt.date(2026, 7, 16)          # последний день демо-истории
 _summary = _stats.summary
 _stats.summary = lambda rows, today=None: _summary(rows, today or _DEMO_TODAY)
+# `week` подменяем по той же причине и той же подменой: недельный график
+# заканчивается НАСТОЯЩИМ сегодня (иначе акцентом подсвечивался бы не тот
+# столбик - см. его docstring), а значит без подмены картинка ехала бы каждый
+# день, и через неделю после съёмки витрина показывала бы семь нулей.
+_week = _stats.week
+_stats.week = lambda rows, today=None: _week(rows, today or _DEMO_TODAY)
 
 # История: правдоподобная, но выдуманная. Даты фиксированные, иначе картинка
 # меняется от каждого прогона и гит видит diff там, где ничего не менялось.
@@ -106,6 +121,12 @@ def _info() -> dict:
         "слушает": "Microphone (Realtek)",
         "диктовать": "Ctrl + Shift + Space · Ctrl + Мышь 4",
         "понимает поправки": "да",
+        # Служебные ключи для статус-строки «Главной». В «О программе» они не
+        # видны (about() пропускает подчёркивание), но без них витрина сняла бы
+        # статус-строку без модели и устройства - то есть не то, что видит
+        # человек.
+        "_device": "cpu",
+        "_model": "gigaam-v2-ctc",
     }
 
 
@@ -118,18 +139,6 @@ def shoot(mode: str, out: str, tmp: str) -> None:
     from settings_qt import SettingsWindow
 
     app = QApplication.instance() or QApplication(sys.argv)
-    win = SettingsWindow(lambda *_a: None, lambda *_a: None, _info,
-                         os.path.join(tmp, "history.jsonl"),
-                         os.path.join(tmp, "flow.log"))
-    win.open()
-    root = win.view.rootObject()
-    # pages в QML - обычный JS-массив, из Python он приезжает QJSValue,
-    # а не списком: разворачиваем.
-    # Страниц теперь два набора: своё и настройки. Снимаем оба - витрина должна
-    # показывать всю программу, а не половину, до которой дошла первой.
-    main = root.property("mainPages").toVariant()
-    settings = root.property("settingsPages").toVariant()
-    pages = [("main", x) for x in main] + [("settings", x) for x in settings]
 
     def settle(ms: int) -> None:
         """Дать Qt отрисоваться. grabWindow() снимает то, что уже нарисовано, а
@@ -138,20 +147,36 @@ def shoot(mode: str, out: str, tmp: str) -> None:
         QTimer.singleShot(ms, loop.quit)
         loop.exec()
 
-    settle(700)                       # первый кадр: шрифты, QML, титул
+    # Список страниц окно отдаёт само, свойством `pages`. Витрина обязана
+    # показывать всю программу, а не тот набор страниц, который кто-то однажды
+    # переписал сюда руками.
     shots = []
-    for i, (где, page) in enumerate(pages):
-        root.setProperty("inSettings", где == "settings")
+    win = SettingsWindow(lambda *_a: None, lambda *_a: None, _info,
+                         os.path.join(tmp, "history.jsonl"),
+                         os.path.join(tmp, "flow.log"))
+    win.open()
+    root = win.view.rootObject()
+    # pages в QML - обычный JS-массив, из Python он приезжает QJSValue,
+    # а не списком: разворачиваем.
+    pages = root.property("pages").toVariant()
+    settle(700)                       # первый кадр: шрифты, QML, титул
+    for page in pages:
         root.setProperty("page", page)
-        # Ждём не переход между страницами (280 мс хватало), а анимации
-        # появления: count-up чисел на Главной (~520 мс) и волну столбцов на
-        # Статистике (~650 мс). Витрина должна снять дорисованный экран, а не
-        # застать графику на полпути.
+        # Ждём не переход между страницами, а анимации появления: count-up
+        # чисел на Главной и волну столбцов на Статистике. Витрина должна
+        # снять дорисованный экран, а не застать графику на полпути.
+        #
+        # После приведения движения к токенам (PLAN, задача 8) обе стали
+        # короче: 280 мс на число и 520 мс на волну столбцов с учётом
+        # лесенки. Паузу оставляем прежней - она с запасом, а подгонять её
+        # под текущие числа значило бы ловить их заново при каждой правке
+        # токенов.
         settle(950)
         img = win.view.grabWindow()
-        p = os.path.join(tmp, f"_pg_{i}.png")
+        p = os.path.join(tmp, f"_pg_{len(shots)}.png")
         img.save(p)
         shots.append((page, p))
+    win.view.hide()
 
     from PIL import Image, ImageDraw, ImageFont
     # Шрифт подписей - свой: у шрифта PIL по умолчанию нет кириллицы, и
@@ -164,24 +189,30 @@ def shoot(mode: str, out: str, tmp: str) -> None:
 
     imgs = [(name, Image.open(p).convert("RGB")) for name, p in shots]
     cols = 3
-    rows = (len(imgs) + cols - 1) // cols
+    pad, top = 16, 26
+    # Снимки одного окна, значит все одного размера: колонка одна на весь лист.
+    # Считать ширину по строке приходилось, пока окон было два и второе было
+    # вдвое уже; теперь это лишняя развилка.
+    grid = [imgs[i:i + cols] for i in range(0, len(imgs), cols)]
     w = max(i.width for _n, i in imgs)
     h = max(i.height for _n, i in imgs)
-    pad, top = 16, 26
     # Подложка в цвет темы: лист - это витрина, а не отладка.
     bg = (18, 18, 18) if mode == "dark" else (245, 245, 245)
     ink = (150, 150, 150) if mode == "dark" else (110, 110, 110)
-    sheet = Image.new("RGB", (cols * w + (cols + 1) * pad,
-                              rows * (h + top) + (rows + 1) * pad), bg)
+    sheet = Image.new(
+        "RGB",
+        (cols * w + (cols + 1) * pad,
+         len(grid) * (h + top + pad) + pad), bg)
     d = ImageDraw.Draw(sheet)
-    for n, (name, img) in enumerate(imgs):
-        x = pad + (n % cols) * (w + pad)
-        y = pad + (n // cols) * (h + top + pad)
-        d.text((x + 2, y), f"{name} · {mode}", fill=ink, font=label)
-        sheet.paste(img, (x, y + top))
+    y = pad
+    for row in grid:
+        for n, (name, img) in enumerate(row):
+            x = pad + n * (w + pad)
+            d.text((x + 2, y), f"{name} · {mode}", fill=ink, font=label)
+            sheet.paste(img, (x, y + top))
+        y += h + top + pad
     sheet.save(out)
     print(f"{out}: {len(imgs)} страниц, тема {mode}")
-    win.view.hide()
 
 
 def main() -> None:
