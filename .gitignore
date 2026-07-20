@@ -81,3 +81,6 @@ desktop.ini
 
 # Кеш инкрементальной сборки TypeScript.
 web/tsconfig.tsbuildinfo
+
+# Кеш зависимостей Vite - пересобирается сам при запуске dev-сервера.
+web/.vite/
