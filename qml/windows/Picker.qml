@@ -2,11 +2,11 @@
 // осталось выбрать, что с ним сделать.
 //
 // Переделана из вертикального списка в горизонтальную капсулу. Причина - в
-// самой механике вызова: человек больше НЕ выделяет текст руками. Курсор просто
-// стоит в поле, по сочетанию программа сама берёт весь текст (Ctrl+A, Ctrl+C),
-// а здесь показывает по одному преобразованию - листаешь стрелками или колесом,
-// цифрой прыгаешь, Enter применяешь, Esc отменяешь. Выбрал - весь текст поля
-// заменяется результатом.
+// самой механике вызова: человек больше НЕ обязан выделять текст руками.
+// Курсор просто стоит в поле, а программа берёт текст сама - выделил, значит
+// выделение, не выделил, значит поле целиком. Здесь она показывает по одному
+// преобразованию: листаешь стрелками или колесом, цифрой прыгаешь, Enter
+// применяешь, Esc отменяешь. Выбрал - взятое заменяется результатом.
 //
 // Окно ЗАБИРАЕТ фокус, в отличие от пилюли-оверлея, и это осознанно: иначе
 // стрелки и цифры уходили бы в чужое поле и печатались прямо в текст, который
@@ -49,6 +49,12 @@ Item {
         (items.length > 0 && current >= 0 && current < items.length)
         ? items[current] : null
 
+    // Список пуст: все готовые спрятаны, своих не завели. Пилюля всё равно
+    // появляется и говорит «нету» - человек нажал сочетание и обязан получить
+    // ответ, иначе тишина читается как поломка. Листать в этом состоянии
+    // нечего, поэтому счётчик и шевроны прячутся, а остаётся один Esc.
+    readonly property bool empty: items.length === 0
+
     signal chosen(string id)
     signal cancelled()
 
@@ -74,7 +80,10 @@ Item {
         } else if (e.key === Qt.Key_Right || e.key === Qt.Key_Down) {
             move(1); e.accepted = true;
         } else if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
-            take(current); e.accepted = true;
+            // На пустом списке Enter закрывает. Иначе он не делал бы ничего, и
+            // окно, забравшее фокус, держало бы человека до Esc.
+            if (empty) cancelled(); else take(current);
+            e.accepted = true;
         } else if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) {
             take(e.key - Qt.Key_1); e.accepted = true;
         }
@@ -113,8 +122,8 @@ Item {
         spacing: 10
 
         // ----- что преобразуем: одна строка, приглушённо -----
-        // Весь текст поля целиком заменится результатом, и человек должен
-        // видеть, ЧТО именно он сейчас правит: замена большая, ошибиться дорого.
+        // Взятый текст заменится результатом, и человек должен видеть, ЧТО
+        // именно он сейчас правит: замена бывает во всё поле, ошибиться дорого.
         Text {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
@@ -158,6 +167,7 @@ Item {
                     // Шеврон влево: и подсказка «листается», и клик - предыдущее.
                     Icon {
                         anchors.verticalCenter: parent.verticalCenter
+                        visible: !root.empty
                         path: "m15 18-6-6 6-6"          // lucide chevron-left
                         size: 18
                         weight: 2
@@ -177,6 +187,7 @@ Item {
                     // табличными цифрами - чтобы не дёргался при смене числа.
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
+                        visible: !root.empty
                         text: (root.current + 1) + " / " + root.items.length
                         font.family: T.mono
                         font.pixelSize: T.t2xs
@@ -191,14 +202,20 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 2
                         Text {
-                            text: root.cur ? L.t(root.cur.title) : ""
+                            text: root.empty ? L.t("нету")
+                                             : (root.cur ? L.t(root.cur.title) : "")
                             font.family: T.sans
                             font.pixelSize: T.tMd
                             font.weight: Font.DemiBold
                             color: T.text
                         }
                         Text {
-                            text: (root.cur && root.cur.hint) ? L.t(root.cur.hint) : ""
+                            // На пустом списке подсказка отвечает на «и что
+                            // теперь»: преобразования не пропали, их выключили
+                            // или ещё не завели, и то и другое - в настройках.
+                            text: root.empty
+                                  ? L.t("включите готовые или добавьте свои в настройках")
+                                  : ((root.cur && root.cur.hint) ? L.t(root.cur.hint) : "")
                             visible: text !== ""
                             font.family: T.sans
                             font.pixelSize: T.tSm
@@ -209,6 +226,7 @@ Item {
                     // Шеврон вправо: клик - следующее.
                     Icon {
                         anchors.verticalCenter: parent.verticalCenter
+                        visible: !root.empty
                         path: "m9 18 6-6-6-6"           // lucide chevron-right
                         size: 18
                         weight: 2
@@ -232,7 +250,8 @@ Item {
         Text {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
-            text: L.t("← → листать · Enter - применить · Esc - отмена")
+            text: root.empty ? L.t("Esc - закрыть")
+                             : L.t("← → листать · Enter - применить · Esc - отмена")
             font.family: T.sans
             font.pixelSize: T.t2xs
             color: T.textFaint
