@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 
 import { Button } from "./button";
 import { Card } from "./card";
+import { ChartShowcase } from "./chart/showcase";
 import { cn } from "./cn";
 import { FormShowcase } from "./form/showcase";
 import { IconsShowcase } from "./icons.showcase";
@@ -105,6 +106,10 @@ export function Showcase() {
 
           <Section title="Формы">
             <FormShowcase />
+          </Section>
+
+          <Section title="Рисунок и графики">
+            <ChartShowcase />
           </Section>
 
           <Section title="Таблицы и оболочка">

@@ -86,8 +86,12 @@ def main() -> int:
         skipped.append(("web/", "npm не найден"))
     else:
         print("\nweb")
-        for name, cmd in (("сборка", ["npm", "run", "build"]),
-                          ("тесты", ["npm", "run", "test"])):
+        # Полный путь от which, а не голое «npm»: на Windows это npm.cmd, и
+        # subprocess без shell его не находит - падает с «не удаётся найти
+        # указанный файл», хотя which выше только что его нашёл.
+        npm = shutil.which("npm")
+        for name, cmd in (("сборка", [npm, "run", "build"]),
+                          ("тесты", [npm, "run", "test"])):
             code, out, sec = run(cmd, cwd=web)
             rows.append((f"web {name}", code == 0, sec, out))
             print(f"  {'ок ' if code == 0 else 'СБОЙ'}  {name:34s} {sec:5.1f} с")
