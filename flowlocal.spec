@@ -104,7 +104,31 @@ hiddenimports = [
     "soundfile",
 ]
 
-binaries = [
+def _webview_plugin() -> list:
+    """Плагин бэкенда вебвью - тот, что на самом деле рисует.
+
+    **Без него окно настроек не открывается вовсе, а сборка проходит молча.**
+    Поймано замером собранной папки: Qt6WebView.dll на месте, QML-плагин на
+    месте, а plugins/webview/ пусто. PyInstaller собирает плагины Qt по тому,
+    что видит в импортах, а `from PySide6.QtWebView import QtWebView` у нас
+    стоит внутри webwindow.py и выполняется лениво - статический анализ до
+    него не доходит.
+
+    Кладём поимённо, а не всю папку plugins: рядом лежит qtwebview_webengine,
+    и он тянет Chromium на 200 МБ.
+    """
+    import PySide6
+
+    src = os.path.join(os.path.dirname(PySide6.__file__),
+                       "plugins", "webview", "qtwebview_webview2.dll")
+    if not os.path.exists(src):
+        raise SystemExit(
+            "нет qtwebview_webview2.dll в PySide6 - вебвью не заработает.\n"
+            "Проверьте версию PySide6: плагин появился в 6.4.")
+    return [(src, "PySide6/plugins/webview")]
+
+
+binaries = _webview_plugin() + [
     # Грузится через ctypes из overlay_qt._preload_qml_deps(), а не импортом -
     # PyInstaller про такую зависимость не догадается, и тень у пилюли молча
     # пропадёт. Зачем этот костыль вообще нужен - см. PLAN 3.0.
