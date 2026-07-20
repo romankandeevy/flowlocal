@@ -84,6 +84,9 @@ jobs:
       - name: вопрос по интонации
         run: python test_intonation.py
 
+      - name: английская речь в кириллице
+        run: python test_language.py
+
       - name: выгрузка и загрузка личного
         run: python test_backup.py
 

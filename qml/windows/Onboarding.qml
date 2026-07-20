@@ -105,11 +105,16 @@ Rectangle {
     property real dlFrac: 0
     property bool downloading: false
 
+    // «Готово» - это когда на месте ОБЕ модели: русская и английская. Вторая
+    // не выбирается и не ищется в настройках, она приезжает вместе с первой -
+    // иначе человек увидел бы, что английский не даётся, и пошёл бы искать
+    // настройку, которой нет (решение владельца).
     function refreshModelState() {
         var list = B.modelsInfo();
+        var eng = B.englishReady();
         for (var i = 0; i < list.length; i++)
             if (list[i].id === chosenModel) {
-                modelReady = list[i].installed;
+                modelReady = list[i].installed && eng;
                 downloading = list[i].downloading;
                 return;
             }
@@ -598,7 +603,7 @@ Rectangle {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: wiz.modelReady
-                      ? L.t("Она уже на этом компьютере. Дальше интернет для распознавания не нужен.")
+                      ? L.t("Всё уже на этом компьютере. Дальше интернет для распознавания не нужен.")
                       : L.t("Это то, что превращает вашу речь в текст. Она работает прямо ")
                         + L.t("здесь, поэтому её надо принести целиком - один раз.")
                 font.family: T.sans; font.pixelSize: T.tSm; color: T.textMuted
@@ -616,10 +621,17 @@ Rectangle {
                 visible: !wiz.modelReady
                 width: parent.width
                 spacing: 8
+                // Цену называем ДО скачивания, а не после, - тем же приёмом,
+                // что на экране правки текста («Скачаем 3.3 ГБ»). Число берём
+                // у Python (starterMb), а не пишем руками: оно складывается из
+                // двух моделей и разъедется с правдой в первый же день, если
+                // держать его строкой в вёрстке.
                 Repeater {
                     model: [
-                        {t: L.t("236 МБ, две-три минуты"),
+                        {t: B.starterMb() + L.t(" МБ, три-пять минут"),
                          s: L.t("Скачивается один раз. Дальше не понадобится")},
+                        {t: L.t("Русский и английский"),
+                         s: L.t("Скажете фразу по-английски - она так и запишется, буквами")},
                         {t: L.t("Дальше - без интернета"),
                          s: L.t("Распознавание идёт на этом компьютере, в самолёте и на даче тоже")},
                         {t: L.t("Видеокарта не нужна"),
@@ -653,8 +665,10 @@ Rectangle {
             }
 
             // Прогресс скачивания: полоса плюс проценты словами. Без числа
-            // полоса на 236 мегабайтах выглядит замершей - «зависло», сказал
-            // владелец, и по одной полосе отличить это было невозможно.
+            // полоса на трёхстах мегабайтах выглядит замершей - «зависло»,
+            // сказал владелец, и по одной полосе отличить это было невозможно.
+            // Полоса одна на обе модели: качаются они подряд, а человеку это
+            // одно ожидание, а не два.
             Item { width: 1; height: 4; visible: wiz.downloading }
             Column {
                 visible: wiz.downloading
@@ -1506,13 +1520,16 @@ Rectangle {
             // правила, и «Готово» выпускает человека с рабочей диктовкой.
             // Ставить Ollama или нет, он решает сам кнопками на этом экране.
             label: wiz.step === 0 ? L.t("Начать")
-                 : wiz.step === 2 ? (wiz.modelReady ? "Дальше"
-                                     : wiz.downloading ? "Скачивается…" : "Скачать модель")
+                 : wiz.step === 2 ? (wiz.modelReady ? L.t("Дальше")
+                                     : wiz.downloading ? L.t("Скачивается…")
+                                                       : L.t("Скачать"))
                  : wiz.step === wiz.last ? L.t("Готово")
                  : L.t("Дальше")
             onClicked: {
                 if (wiz.step === 2 && !wiz.modelReady) {
-                    if (!wiz.downloading) B.downloadModel(wiz.chosenModel);
+                    // downloadStarter, а не downloadModel: качаются обе модели
+                    // подряд, русская и английская.
+                    if (!wiz.downloading) B.downloadStarter(wiz.chosenModel);
                     return;
                 }
                 if (wiz.step === 2 && wiz.modelReady) B.setModel(wiz.chosenModel);

@@ -97,6 +97,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import config as C  # noqa: E402
 import inputspec  # noqa: E402
+import language  # noqa: E402
 import models  # noqa: E402
 import overlay_qt as OV  # noqa: E402
 import theme as T  # noqa: E402
@@ -250,6 +251,10 @@ class App:
         self._ready = False
         self._llm_note = ""          # модель Ollama, найденная автоопределением
         self._update_told = ""       # про какую версию уже сказали шариком
+        # Сказали ли уже, что английская модель не приехала. Один раз за
+        # запуск: шарик на каждую английскую фразу - это навязчивость, а
+        # догрузка всё равно идёт своим ходом.
+        self._english_told = False
         self._ollama_busy = False    # идёт ли установка Ollama
         self._ollama_subs: list = []  # окна, которые хотят видеть ход
         self._last_insert = None     # (exe, когда, текст) - для склейки
@@ -1455,10 +1460,26 @@ class App:
                 # что программа за вас исправила, и какое слово она путает чаще
                 # прочих, - без этого такой счёт не восстановить задним числом.
                 raw = text
+                # Говорили по-английски? Тогда у нас на руках не текст, а
+                # английские звуки, записанные русскими буквами, - «дуис пик
+                # инглиш». Переспрашиваем ту же запись моделью, которая пишет
+                # латиницей, и отдаём её ответ. Русскую фразу это не стоит
+                # ничего: одна проверка текста без звука и без модели.
                 _t = time.perf_counter()
-                text = clean(text, self.cfg, log, process=process)
+                english = self._english_retry(text, audio)
+                lat["english"] = time.perf_counter() - _t
+                _t = time.perf_counter()
+                if english:
+                    # Чистку английскому не отдаём, и это не экономия. Весь
+                    # cleaner устроен под русский: словарь, паразиты, правила
+                    # запятых, приведение к русской заглавной. Знаки и
+                    # заглавные в английском уже расставила сама модель.
+                    text = english
+                    lat["punct"] = 0.0
+                else:
+                    text = clean(text, self.cfg, log, process=process)
+                    lat["punct"] = cleaner.last_punct_sec
                 lat["clean"] = time.perf_counter() - _t
-                lat["punct"] = cleaner.last_punct_sec
                 # Команды - ПОСЛЕ полировки: LLM не должна их видеть, иначе
                 # перепишет или послушается, оба исхода хуже.
                 before_commands = text
@@ -1467,8 +1488,12 @@ class App:
                 # Сказали «нажми энтер» - последние полсекунды записи это она,
                 # и интонация там про команду, а не про фразу. Разбирать её
                 # значило бы гадать по чужому хвосту.
+                #
+                # И не для английского: там знак уже поставила своя модель, а
+                # правила подъёма тона в intonation.py писались под русскую
+                # ИК-3 - в английском вопрос звучит иначе.
                 if (self.cfg.get("question_by_voice", True)
-                        and text == before_commands):
+                        and not english and text == before_commands):
                     import intonation
 
                     try:
@@ -1550,6 +1575,102 @@ class App:
             # Сверх лимита не копим: спасение не должно стать свалкой.
             recordings.prune()
             self._set_tray_state("idle")
+
+    # ---------- английская речь ----------
+
+    def _english_retry(self, text: str, audio) -> str:
+        """Английскую фразу переспросить моделью, которая пишет латиницей.
+
+        Возвращает английский текст или пустую строку - тогда всё идёт как
+        всегда, кириллицей и через обычную чистку.
+
+        Порядок проверок от дешёвой к дорогой: выключатель, разбор текста,
+        наличие модели, и только потом сам звук. На русской фразе дальше
+        второго шага дело не заходит.
+
+        Ошибку глотаем молча и отдаём кириллицу. Английский - улучшение, а не
+        обязанность, и уронить из-за него обычную диктовку нельзя.
+        """
+        if not self.cfg.get("english_speech", True):
+            return ""
+        try:
+            if not language.looks_english(text):
+                return ""
+        except Exception as e:  # noqa: BLE001 - разбор текста не стоит фразы
+            log(f"определитель языка: {e}")
+            return ""
+        log(f"похоже на английский ({language.ru_score(text):.2f}): {text!r}")
+        if not language.installed():
+            self.ui(self._tell_english_missing)
+            return ""
+        try:
+            en = language.shared(log)
+            if not en.loaded:
+                # Полсекунды на подъём, и человеку надо видеть, за что он
+                # ждёт: слово на пилюле вместо молчаливой паузы.
+                self.ui(self.overlay.show_downloading, i18n.t("английский"))
+                en.load()
+                self.ui(self.overlay.set_hint, "")
+                self.ui(self.overlay.show_processing)
+            out = en.transcribe(audio)
+        except Exception as e:  # noqa: BLE001
+            log(f"английский переспрос не вышел: {type(e).__name__}: {e}")
+            return ""
+        # Ответ без единой латинской буквы - это не английский, а что-то
+        # пошедшее не так. Отдаём то, что было: хуже кириллицы только пустота.
+        if not out or not any(c.isascii() and c.isalpha() for c in out):
+            log(f"переспрос вернул не английский: {out!r} - оставляю как было")
+            return ""
+        log(f"английский: {out!r}")
+        return out
+
+    def _tell_english_missing(self) -> None:
+        """Английский услышали, а писать его нечем. Главный поток.
+
+        Так бывает у тех, кто обновился со старой версии: мастер первого
+        запуска они проходили давно, а модель добавилась только сейчас.
+        Молчать нельзя - человек увидит «дуис пик инглиш» и решит, что
+        программа так и умеет. И заставлять его искать кнопку в настройках
+        не за что: качаем сами, один раз, и говорим сколько.
+        """
+        if self._english_told:
+            return
+        self._english_told = True
+        threading.Thread(target=self._fetch_english_bg, daemon=True).start()
+        if self.tray is None:
+            return
+        self.tray.showMessage(
+            "Похоже, вы говорили по-английски",
+            f"Программа умеет писать английский как положено - буквами. "
+            f"Догружаю недостающее, {language.SIZE_MB} МБ, один раз. "
+            f"Следующая фраза уже будет английской.")
+
+    def _fetch_english_bg(self) -> None:
+        """Догрузить английскую модель. Отдельным ПРОЦЕССОМ, как и основную.
+
+        Причина та же (см. download_model_cli): сборку сессии делает C-код,
+        который держит GIL секундами, и всё это время окно не отвечает, а хук
+        клавиатуры не укладывается в свои 300 мс.
+        """
+        import subprocess
+
+        try:
+            r = subprocess.run(
+                _download_cmd(language.DOWNLOAD_ID),
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception as e:  # noqa: BLE001
+            log(f"английская модель: загрузчик не запустился: {e}")
+            return
+        if r.returncode == 0 and language.installed():
+            log(f"английская модель готова, {language.size_mb():.0f} МБ")
+        else:
+            # Не получилось - пусть попробует ещё раз на следующей английской
+            # фразе. Одна неудачная сеть не должна выключать возможность.
+            self._english_told = False
+            log("английская модель не скачалась: "
+                + (r.stderr or r.stdout or "").strip()[:300])
 
     # ---------- куда уходит распознанный текст ----------
     #
@@ -2398,6 +2519,10 @@ class App:
             return          # идёт распознавание - не мешаем
         try:
             self.transcriber.unload()
+            # Английскую отпускаем той же рукой. Она поднимается за полсекунды,
+            # а держать её в памяти между английскими фразами, которых у
+            # большинства не будет вовсе, незачем.
+            language.release()
         finally:
             self._work_lock.release()
 
@@ -2822,10 +2947,24 @@ def poke_running_instance() -> bool:
     return True
 
 
+def _download_cmd(model_id: str) -> list:
+    """Чем звать загрузчик модели: собранный .exe или свой же исходник.
+
+    Двойник этой функции есть в settings_qt - там она нужна окну настроек.
+    Держим отдельно намеренно: тащить сюда весь settings_qt (а с ним QtWidgets)
+    ради шести строк, да ещё из рабочего потока, дороже, чем повторить их.
+    """
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--download-model", model_id]
+    return [sys.executable, os.path.join(APP_DIR, "app.py"),
+            "--download-model", model_id]
+
+
 def download_model_cli() -> int:
     """Скачать модель и выйти. Служебный режим, человеку не показывается.
 
         FlowLocal.exe --download-model gigaam-v2-ctc
+        FlowLocal.exe --download-model english
 
     Зачем отдельный процесс. Раньше модель качалась потоком внутри окна
     настроек, и владелец, проходя мастер первого запуска, написал: «после
@@ -2847,15 +2986,50 @@ def download_model_cli() -> int:
     if not model_id:
         print("использование: --download-model <идентификатор>")
         return 2
+    import shutil
+
     import models
     from transcriber import model_dir
+
+    # Английская модель идёт особняком: в каталоге моделей распознавания её
+    # нет и быть не должно. Каталог - это выбор человека («Обычная» или
+    # «Внимательная»), а английская не выбирается: она приезжает вместе с
+    # основной и работает сама.
+    if model_id in (language.DOWNLOAD_ID, language.MODEL):
+        err = language.download()
+        if err:
+            log(f"скачивание английской модели не вышло: {err}")
+            print(f"не скачалось: {err}")
+            return 1
+        log(f"скачано: английская модель, {language.size_mb():.0f} МБ")
+        print("готово")
+        return 0
 
     m = models.get(model_id)
     if m is None:
         print(f"нет такой модели: {model_id}")
         return 2
     d = model_dir(m.id, m.quant)
-    os.makedirs(d, exist_ok=True)
+    # Папку НЕ создаём заранее, и это не мелочь: для onnx-asr существующая
+    # папка означает «работаем офлайн», качать в неё он не пойдёт и упадёт на
+    # ненайденном файле. Здесь раньше стоял makedirs - то есть первое же
+    # скачивание в мастере отвечало «не удалось скачать, проверьте интернет»
+    # при живом интернете.
+    #
+    # Неполную папку от оборванной скачки сносим по той же причине: докачать в
+    # неё нельзя. А полную не трогаем - иначе повторное нажатие «Скачать»
+    # стирало бы готовую модель и качало её заново.
+    if os.path.isdir(d):
+        try:
+            on_disk = sum(os.path.getsize(os.path.join(d, f))
+                          for f in os.listdir(d)) / 1e6
+        except OSError:
+            on_disk = 0.0
+        if on_disk >= m.size_mb * 0.9:
+            log(f"{model_id} уже на месте, {on_disk:.0f} МБ")
+            print("готово")
+            return 0
+        shutil.rmtree(d, ignore_errors=True)
     try:
         import onnx_asr
 

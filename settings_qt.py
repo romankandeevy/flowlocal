@@ -52,6 +52,7 @@ def _log(msg: str) -> None:
 
 
 import inputspec
+import language
 import models
 import notes
 import stats
@@ -1115,6 +1116,89 @@ class Backend(QObject):
                          + (r.stderr or r.stdout or "").strip()[:300])
                     self.flashed.emit("не удалось скачать - проверьте интернет",
                                       "danger")
+            except Exception as e:  # noqa: BLE001
+                _log(f"загрузчик модели не запустился: {e}")
+                self.flashed.emit("не вышло начать скачивание", "danger")
+            finally:
+                self._downloading.discard(model_id)
+                self.modelsChanged.emit()
+
+        threading.Thread(target=poll, daemon=True).start()
+        threading.Thread(target=work, daemon=True).start()
+
+    @Slot(result=bool)
+    def englishReady(self) -> bool:
+        """Приехала ли модель, которая пишет английский буквами."""
+        return language.installed()
+
+    @Slot(result=int)
+    def starterMb(self) -> int:
+        """Во что обойдётся первый запуск: обе модели вместе.
+
+        Цену называем ДО скачивания, а не после, - как на экране Ollama
+        («Скачаем 3.3 ГБ»). Человек должен знать, во что ввязался, до того как
+        нажал, а не по проценту на полосе.
+        """
+        m = models.get(str(self.cfg.get("model") or models.DEFAULT))
+        return int((m.size_mb if m else 0) + language.SIZE_MB)
+
+    @Slot(str)
+    def downloadStarter(self, model_id: str) -> None:
+        """Мастер первого запуска: обе модели одной полосой.
+
+        Английская не выбирается и не ищется в настройках - она приезжает
+        вместе с основной. Владелец сказал прямо: «она обязательная, а то
+        человек зайдёт, увидит что у нас английский не даётся и не найдёт в
+        настройках». Настройка, которую надо найти, для человека не существует.
+
+        Отсюда и одна полоса на две скачки: два места в интерфейсе - это два
+        решения, а решать тут нечего.
+        """
+        from transcriber import model_dir
+
+        m = models.get(model_id)
+        if m is None or model_id in self._downloading:
+            return
+        self._downloading.add(model_id)
+        self.modelsChanged.emit()
+        dirs = [(model_dir(m.id, m.quant), float(m.size_mb)),
+                (language.folder(), float(language.SIZE_MB))]
+        total = sum(size for _d, size in dirs)
+
+        def poll() -> None:
+            # Прогресс - по росту папок: huggingface_hub наружу процентов не
+            # отдаёт, а размер честный (models.py сверен с метаданными
+            # репозитория, английский - с настоящей скачкой).
+            while model_id in self._downloading:
+                got = 0.0
+                for d, _size in dirs:
+                    try:
+                        got += (sum(os.path.getsize(os.path.join(d, f))
+                                    for f in os.listdir(d)) / 1e6
+                                if os.path.isdir(d) else 0.0)
+                    except OSError:
+                        pass
+                self.modelProgress.emit(model_id, min(0.99, got / total))
+                time.sleep(0.4)
+
+        def work() -> None:
+            # Отдельными процессами и по очереди, а не двумя сразу: у человека
+            # один канал, и параллельная качка только запутает полосу. Про
+            # процесс вместо потока - см. app.download_model_cli.
+            try:
+                for what in (model_id, language.DOWNLOAD_ID):
+                    r = subprocess.run(
+                        _download_cmd(what), capture_output=True, text=True,
+                        encoding="utf-8", errors="replace",
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                    if r.returncode != 0:
+                        _log(f"{what} не скачалась: "
+                             + (r.stderr or r.stdout or "").strip()[:300])
+                        self.flashed.emit("не удалось скачать - проверьте интернет",
+                                          "danger")
+                        return
+                self.modelProgress.emit(model_id, 1.0)
+                self.flashed.emit("всё скачано", "")
             except Exception as e:  # noqa: BLE001
                 _log(f"загрузчик модели не запустился: {e}")
                 self.flashed.emit("не вышло начать скачивание", "danger")
