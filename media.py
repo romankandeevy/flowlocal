@@ -20,7 +20,6 @@ APPCOMMAND_MEDIA_PLAY_PAUSE - это ПЕРЕКЛЮЧАТЕЛЬ. Если муз
 """
 
 import ctypes
-from ctypes import wintypes   # чистые псевдонимы типов, есть и на macOS
 
 import platform_api
 
@@ -45,7 +44,12 @@ _SAMPLE_GAP = 0.07
 # задача. Пока пауза музыки под darwin - заглушка: _send ничего не шлёт,
 # output_level честно отвечает «не спросил», и Music поэтому просто не трогает
 # ничего (playing() == False).
+#
+# `wintypes` тоже здесь, а не наверху: на macOS он не импортируется (VARIANT_BOOL
+# объявлен с кодом типа "v", он только Windows), и одна эта строка роняла import.
 if platform_api.IS_WINDOWS:
+    from ctypes import wintypes
+
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
     _user32.SendMessageW.argtypes = [wintypes.HWND, ctypes.c_uint,
                                      wintypes.WPARAM, wintypes.LPARAM]

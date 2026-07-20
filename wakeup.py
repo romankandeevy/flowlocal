@@ -30,7 +30,6 @@ keyboard после этого считает клавишу зажатой на
 """
 
 import ctypes
-import ctypes.wintypes as wt   # чистые псевдонимы типов, есть и на macOS
 
 import platform_api
 
@@ -59,7 +58,12 @@ _WAKE_SESSION = {WTS_SESSION_UNLOCK, WTS_SESSION_LOGON,
 # этого модуля - залипание клавиш в библиотеке keyboard - на маке отпадает
 # вместе с самой keyboard. Поэтому под darwin WakeWatcher - заглушка (start()
 # возвращает False), а класс и тип поднимаем только под Windows.
+#
+# `ctypes.wintypes` (ниже как wt) - по той же причине под гардом: на macOS он
+# не импортируется вовсе, VARIANT_BOOL в нём объявлен кодом типа "v".
 if platform_api.IS_WINDOWS:
+    import ctypes.wintypes as wt
+
     _WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, wt.HWND, ctypes.c_uint,
                                   ctypes.c_ulonglong, ctypes.c_longlong)
 
