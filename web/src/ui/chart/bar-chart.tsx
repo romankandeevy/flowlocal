@@ -20,6 +20,7 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 
+import { t } from "../../i18n";
 import { cn } from "../cn";
 import { useAfterPaint } from "./metric";
 
@@ -89,7 +90,9 @@ export function BarChart({
         className={cn("flex items-center justify-center", className)}
         style={{ height }}
       >
-        <span className="font-sans text-sm text-text-faint">пока пусто</span>
+        <span className="font-sans text-sm text-text-faint">
+          {t("пока пусто")}
+        </span>
       </div>
     );
   }
@@ -155,7 +158,7 @@ export function BarChart({
                 "text-2xs text-text-faint",
               )}
             >
-              среднее
+              {t("среднее")}
             </span>
           </div>
         ) : null}

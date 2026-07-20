@@ -28,6 +28,7 @@
 
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 
+import { t } from "../../i18n";
 import { cn } from "../cn";
 
 export interface CalendarDay {
@@ -126,7 +127,7 @@ export function StreakCalendar({
   return (
     <div
       role="img"
-      aria-label="Календарь диктовок по дням"
+      aria-label={t("Календарь диктовок по дням")}
       className="w-full"
       style={{ maxWidth: LABEL_W + weeks * CELL_MAX + (weeks - 1) * GAP }}
     >
@@ -243,7 +244,9 @@ export function StreakCalendar({
 
       {/* ---- лестница ---- */}
       <div className="flex items-center justify-end pt-1.5" style={{ gap: GAP }}>
-        <span className="pr-1 font-sans text-2xs text-text-faint">тише</span>
+        <span className="pr-1 font-sans text-2xs text-text-faint">
+          {t("тише")}
+        </span>
         {LEVEL_ALPHA.map((_unused, level) => (
           <span
             key={level}
@@ -256,7 +259,9 @@ export function StreakCalendar({
             }}
           />
         ))}
-        <span className="pl-1 font-sans text-2xs text-text-faint">гуще</span>
+        <span className="pl-1 font-sans text-2xs text-text-faint">
+          {t("гуще")}
+        </span>
       </div>
     </div>
   );

@@ -480,9 +480,26 @@ class Bridge(QObject):
             _log(f"мост: неизвестный тип {kind!r}")
 
     def _do_get(self, client, msg: dict) -> None:
+        """Значение по имени: сперва свойство Backend, потом ключ конфига.
+
+        У Backend четырнадцать Q_PROPERTY, и это не украшение: micOptions,
+        themeOptions, modelOptions, autoEnterApps - без них страница не
+        нарисует ни одного выпадающего списка. Раньше сюда попадал только
+        `backend.get(path)`, то есть конфиг, и все четырнадцать были для
+        страницы недостижимы вовсе. Поймано на первой же странице, которой
+        понадобился список микрофонов.
+
+        Порядок именно такой, а не наоборот. Столкнуться им не на чем -
+        свойства называются camelCase, ключи конфига через подчёркивание, - но
+        если однажды совпадут, отвечать должно свойство: конфиг доступен и
+        через set, а свойство только отсюда.
+        """
         path = str(msg.get("path") or "")
-        self._send(client, {"t": "val", "path": path,
-                            "v": self.backend.get(path)})
+        if path in self._props:
+            value = self.backend.property(path)
+        else:
+            value = self.backend.get(path)
+        self._send(client, {"t": "val", "path": path, "v": value})
 
     def _do_set(self, msg: dict) -> None:
         path = str(msg.get("path") or "")

@@ -15,6 +15,7 @@
 // нажатия». Начало и конец захвата - вызовы моста, а моста ещё нет, отсюда
 // пропсы value/capturing и обработчики наружу. Когда мост появится, HotkeyField
 // перестанет принимать value и capturing и начнёт читать их сам.
+import { t } from "../../i18n";
 import { cn } from "../cn";
 
 export function HotkeyBox({
@@ -92,14 +93,14 @@ export function HotkeyBox({
               ),
         )}
       >
-        {capturing ? "нажмите сочетание…" : value || "не назначено"}
+        {capturing ? t("нажмите сочетание…") : value || t("не назначено")}
       </button>
 
       {allowClear && value ? (
         <button
           type="button"
           onClick={onClear}
-          aria-label="Убрать сочетание"
+          aria-label={t("Убрать сочетание")}
           className={cn(
             // Подложка под крестиком: без неё цель клика в 20 пикселей ничем
             // не обозначена, и наведение читается как случайное покраснение

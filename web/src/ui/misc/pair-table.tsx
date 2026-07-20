@@ -35,6 +35,7 @@
 // всегда несёт оба списка, её не позволяет.
 import { useState } from "react";
 
+import { t } from "../../i18n";
 import { Button } from "../button";
 import { Card } from "../card";
 import { cn } from "../cn";
@@ -160,8 +161,8 @@ export function PairRow({
             так видно - она в том же ряду. */}
         {onRemoved ? (
           <Button onClick={onRemoved} className="w-full">
-            Убрать
-            <span className="sr-only">: {pair.k || "пустая строка"}</span>
+            {t("Убрать")}
+            <span className="sr-only">: {pair.k || t("пустая строка")}</span>
           </Button>
         ) : null}
       </td>
@@ -262,13 +263,13 @@ export function PairTable({
           {leftHeader}
         </th>
         <th scope="col" className="sr-only">
-          меняется на
+          {t("меняется на")}
         </th>
         <th scope="col" className="sr-only">
           {rightHeader}
         </th>
         <th scope="col" className="sr-only">
-          Действие
+          {t("Действие")}
         </th>
       </tr>
     </thead>

@@ -4,6 +4,7 @@
 // другая под всё. Ни та, ни другая не часть страницы.
 import * as Dialog from "@radix-ui/react-dialog";
 
+import { t } from "../../i18n";
 import { Button } from "../button";
 import { cn } from "../cn";
 import { Icon } from "../icons";
@@ -94,7 +95,7 @@ export function VersionsDialog({
               </h2>
             </Dialog.Title>
             <Dialog.Close asChild>
-              <Button label="Закрыть" />
+              <Button label={t("Закрыть")} />
             </Dialog.Close>
           </div>
 
@@ -104,13 +105,15 @@ export function VersionsDialog({
           <div className="min-h-0 flex-1 overflow-y-auto py-2" tabIndex={0}>
             {/* Первой строкой - что это за список, чтобы архив не начинался
                 сразу с номеров без объяснения. */}
-            <Heading className="px-6 pt-3 pb-1">Все выпуски до 1.0</Heading>
+            <Heading className="px-6 pt-3 pb-1">
+              {t("Все выпуски до 1.0")}
+            </Heading>
             {versions.map((v, i) => (
               <SettingRow
                 key={v.version}
                 first={i === 0}
                 icon={<Icon name="about" />}
-                title={`Версия ${v.version}`}
+                title={t("Версия") + " " + v.version}
                 subtitle={v.title}
                 // В QML пункты выпуска склеивались в строку с дефисами и
                 // отдавались разметке Markdown. Здесь это настоящий список:

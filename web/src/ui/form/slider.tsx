@@ -15,6 +15,7 @@
 // значило бы вернуть своё кольцо - ровно то, от чего переезд избавляет.
 import * as RadixSlider from "@radix-ui/react-slider";
 
+import { t } from "../../i18n";
 import { cn } from "../cn";
 
 export function Slider({
@@ -24,7 +25,7 @@ export function Slider({
   from = 0,
   to = 1,
   step = 0.1,
-  suffix = " с",
+  suffix = " " + t("с"),
   trackWidth = 130,
   disabled = false,
   label,

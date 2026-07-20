@@ -10,6 +10,7 @@
 // Голос - акцентом (то самое «особенное»: ради этого числа диктовку и завели),
 // печать - тихими чернилами. Тени нет: внутри едут полосы, см. card.tsx.
 
+import { t } from "../../i18n";
 import { Card } from "../card";
 import { cn } from "../cn";
 import { useAfterPaint } from "./metric";
@@ -33,8 +34,8 @@ export function SpeedBars({
 
   // Подписи короткие и свои: готовыми списками из Python их не собрать.
   const rows = [
-    { name: "печать", wpm: typingWpm, accent: false },
-    { name: "голос", wpm: voiceWpm, accent: true },
+    { name: t("печать"), wpm: typingWpm, accent: false },
+    { name: t("голос"), wpm: voiceWpm, accent: true },
   ];
 
   return (
@@ -74,7 +75,7 @@ export function SpeedBars({
             </div>
 
             <span className="w-[76px] shrink-0 pl-2.5 font-mono text-2xs tabular-nums text-text-muted">
-              {row.wpm || 0} сл/мин
+              {row.wpm || 0} {t("сл/мин")}
             </span>
           </div>
         ))}
@@ -83,7 +84,7 @@ export function SpeedBars({
             фразы - готовый ключ перевода. */}
         {ratio && ratio !== "-" ? (
           <p className="font-sans text-sm leading-[1.3] text-text-secondary">
-            {ratio} быстрее, чем печатать руками
+            {ratio} {t("быстрее, чем печатать руками")}
           </p>
         ) : null}
       </div>

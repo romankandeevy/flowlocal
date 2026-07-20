@@ -13,6 +13,7 @@
 // Стоит в ряду метрик «Статистики» и подогнан к ним по высоте, чтобы сетка из
 // трёх оставалась ровной. Тени нет: внутри движется дуга - см. card.tsx.
 
+import { t } from "../../i18n";
 import { Card } from "../card";
 import { cn } from "../cn";
 import { Icon } from "../icons";
@@ -124,7 +125,7 @@ export function StreakRing({
             узнать, а слово они прочитают. Тот же довод, что у «подробнее». */}
         {expandable ? (
           <span className="font-sans text-2xs font-medium text-text-muted transition-colors duration-[var(--dur-fast)] group-hover:text-text">
-            {open ? "свернуть" : "по дням"}
+            {open ? t("свернуть") : t("по дням")}
           </span>
         ) : null}
       </div>

@@ -12,6 +12,7 @@
 //
 // Разметка - настоящая <table> со спрятанными <th>, ровно по тем же доводам,
 // что расписаны в шапке pair-table.tsx.
+import { t } from "../../i18n";
 import { Button } from "../button";
 import { Card } from "../card";
 import { EmptyState } from "./empty-state";
@@ -63,8 +64,10 @@ export function TransformTable({
       <Card>
         <EmptyState
           icon="sparkles"
-          title="Своих преобразований пока нет"
-          hint="Нажмите «Добавить»: слева название, справа - что сделать с выделенным текстом."
+          title={t("Своих преобразований пока нет")}
+          hint={t(
+            "Нажмите «Добавить»: слева название, справа - что сделать с выделенным текстом.",
+          )}
         />
       </Card>
     );
@@ -74,7 +77,7 @@ export function TransformTable({
     <Card>
       <div className="px-6 pt-3.5 pb-1.5">
         <table className="w-full table-fixed">
-          <caption className="sr-only">Свои преобразования</caption>
+          <caption className="sr-only">{t("Свои преобразования")}</caption>
           <colgroup>
             <col className="w-[170px]" />
             <col />
@@ -83,13 +86,13 @@ export function TransformTable({
           <thead>
             <tr>
               <th scope="col" className="sr-only">
-                Название
+                {t("Название")}
               </th>
               <th scope="col" className="sr-only">
-                Что сделать с текстом
+                {t("Что сделать с текстом")}
               </th>
               <th scope="col" className="sr-only">
-                Действие
+                {t("Действие")}
               </th>
             </tr>
           </thead>
@@ -102,16 +105,18 @@ export function TransformTable({
                 <td className="pr-2 pb-2">
                   <TableInput
                     value={row.title}
-                    label="Название"
-                    placeholder="По-деловому"
+                    label={t("Название")}
+                    placeholder={t("По-деловому")}
                     onChange={(t) => edit(i, { title: t })}
                   />
                 </td>
                 <td className="pr-2 pb-2">
                   <TableInput
                     value={row.instruction}
-                    label="Что сделать с текстом"
-                    placeholder="Перепиши вежливо и по делу, ничего не выбрасывая"
+                    label={t("Что сделать с текстом")}
+                    placeholder={t(
+                      "Перепиши вежливо и по делу, ничего не выбрасывая",
+                    )}
                     onChange={(t) => edit(i, { instruction: t })}
                   />
                 </td>
@@ -120,9 +125,9 @@ export function TransformTable({
                     onClick={() => onChange(rows.filter((_, j) => j !== i))}
                     className="w-full"
                   >
-                    Убрать
+                    {t("Убрать")}
                     <span className="sr-only">
-                      : {row.title || "пустая строка"}
+                      : {row.title || t("пустая строка")}
                     </span>
                   </Button>
                 </td>

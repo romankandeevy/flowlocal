@@ -23,6 +23,7 @@
 // значит вернуть те двадцать строк.
 import { type ReactNode, useId } from "react";
 
+import { t } from "../i18n";
 import { cn } from "./cn";
 
 export function SettingRow({
@@ -99,7 +100,7 @@ export function SettingRow({
               "[&::-webkit-details-marker]:hidden",
             )}
           >
-            подробнее
+            {t("подробнее")}
             <svg
               viewBox="0 0 24 24"
               width="13"

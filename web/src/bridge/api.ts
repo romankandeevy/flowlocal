@@ -39,6 +39,10 @@ export type SettingKey =
   | "language"
   | "layout"
   | "llm"
+  | "llm.enabled"
+  | "llm.model"
+  | "llm.timeout_sec"
+  | "llm.url"
   | "mic_device"
   | "min_record_sec"
   | "model"
@@ -373,6 +377,72 @@ export function tidyNote(a0: string, a1: string): Promise<void> {
 
 export function transformPresets(): Promise<unknown[]> {
   return call("transformPresets") as Promise<unknown[]>;
+}
+
+// ---------- свойства Backend ----------
+//
+// Списки для выпадающих меню и прочее, что Backend отдаёт
+// свойством, а не методом: micOptions, themeOptions,
+// modelOptions, autoEnterApps. Без них страница не нарисует ни
+// одного выпадающего списка, а раньше они были ей недоступны
+// вовсе - мост отвечал только за ключи конфига.
+//
+// Едут тем же сообщением get: мост различает их по имени.
+
+export function autoEnterApps(): Promise<unknown> {
+  return get("autoEnterApps");
+}
+
+export function autostart(): Promise<unknown> {
+  return get("autostart");
+}
+
+export function declinedCount(): Promise<unknown> {
+  return get("declinedCount");
+}
+
+export function deviceOptions(): Promise<unknown> {
+  return get("deviceOptions");
+}
+
+export function dictionaryText(): Promise<unknown> {
+  return get("dictionaryText");
+}
+
+export function insertOptions(): Promise<unknown> {
+  return get("insertOptions");
+}
+
+export function maxTransforms(): Promise<unknown> {
+  return get("maxTransforms");
+}
+
+export function micOptions(): Promise<unknown> {
+  return get("micOptions");
+}
+
+export function modelOptions(): Promise<unknown> {
+  return get("modelOptions");
+}
+
+export function pillOptions(): Promise<unknown> {
+  return get("pillOptions");
+}
+
+export function ready(): Promise<unknown> {
+  return get("ready");
+}
+
+export function themeOptions(): Promise<unknown> {
+  return get("themeOptions");
+}
+
+export function toneNote(): Promise<unknown> {
+  return get("toneNote");
+}
+
+export function userName(): Promise<unknown> {
+  return get("userName");
 }
 
 // ---------- сигналы Backend ----------

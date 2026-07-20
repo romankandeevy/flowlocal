@@ -113,6 +113,12 @@ jobs:
       - name: иконки не разъехались с Icons.qml
         run: python tools/check_icons.py
 
+      - name: словарь страницы не разъехался с i18n.py
+        run: python tools/gen_i18n.py --check
+
+      - name: строки страницы идут через t()
+        run: python tools/check_web_i18n.py
+
       - name: node
         uses: actions/setup-node@v4
         with:

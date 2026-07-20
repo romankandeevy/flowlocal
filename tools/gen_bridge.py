@@ -131,13 +131,36 @@ def surface() -> tuple:
         elif m.methodType() == QMetaMethod.Signal:
             signals[name] = args
 
-    keys = sorted(C.DEFAULTS)
+    props = sorted(n for n in
+                   (mo.property(i).name() for i in range(mo.propertyCount()))
+                   if n not in own)
+    keys = sorted(_paths(C.DEFAULTS))
     del app
-    return slots, signals, keys
+    return slots, signals, keys, props
+
+
+def _paths(d: dict, prefix: str = "") -> list:
+    """Ключи конфига со вложенными - точкой: llm, llm.url, llm.model.
+
+    Плоского списка мало. `Backend.get` умеет вложенные пути, и окно ими
+    пользуется: `B.get("llm.url")` стоит прямо в Settings.qml. Без них союз
+    SettingKey оказывался беднее того, что мост принимает, и типизированная
+    страница не могла прочитать настройку, которую QML читал спокойно.
+
+    Сам `llm` в списке тоже остаётся: словарь целиком иногда нужен, и
+    выбрасывать его - значит решать за вызывающего.
+    """
+    out = []
+    for key, value in d.items():
+        path = f"{prefix}{key}"
+        out.append(path)
+        if isinstance(value, dict):
+            out += _paths(value, f"{path}.")
+    return out
 
 
 def render() -> str:
-    slots, signals, keys = surface()
+    slots, signals, keys, props = surface()
     out = [HEAD]
 
     out.append("/** Ключи конфига - все, что есть в config.DEFAULTS. */")
@@ -164,6 +187,20 @@ def render() -> str:
                    f"Promise<{'void' if rt == 'void' else rt}> {{")
         out.append(f'  return call("{name}"{", " + names if names else ""}) '
                    f"as Promise<{'void' if rt == 'void' else rt}>;")
+        out.append("}\n")
+
+    out.append("// ---------- свойства Backend ----------")
+    out.append("//")
+    out.append("// Списки для выпадающих меню и прочее, что Backend отдаёт")
+    out.append("// свойством, а не методом: micOptions, themeOptions,")
+    out.append("// modelOptions, autoEnterApps. Без них страница не нарисует ни")
+    out.append("// одного выпадающего списка, а раньше они были ей недоступны")
+    out.append("// вовсе - мост отвечал только за ключи конфига.")
+    out.append("//")
+    out.append("// Едут тем же сообщением get: мост различает их по имени.\n")
+    for name in props:
+        out.append(f"export function {name}(): Promise<unknown> {{")
+        out.append(f'  return get("{name}");')
         out.append("}\n")
 
     out.append("// ---------- сигналы Backend ----------\n")
@@ -200,9 +237,10 @@ def main() -> int:
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
-    slots, signals, keys = surface()
+    slots, signals, keys, props = surface()
     print(f"записано: {OUT}")
-    print(f"  методов {len(slots)}, сигналов {len(signals)}, ключей {len(keys)}")
+    print(f"  методов {len(slots)}, свойств {len(props)}, "
+          f"сигналов {len(signals)}, ключей {len(keys)}")
     return 0
 
 

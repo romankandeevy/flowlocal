@@ -36,7 +36,9 @@ GENERATED = [
     ("tools/gen_theme.py", ["--check"], "CSS против theme.py"),
     ("tools/gen_bridge.py", ["--check"], "api.ts против Backend"),
     ("tools/check_icons.py", [], "иконки против Icons.qml"),
-    ("tools/check_i18n.py", [], "непереведённые строки"),
+    ("tools/check_i18n.py", [], "непереведённые строки в qml"),
+    ("tools/gen_i18n.py", ["--check"], "словарь страницы против i18n.py"),
+    ("tools/check_web_i18n.py", [], "строки страницы мимо t()"),
     ("tools/probe_mac_import.py", [], "импорт прошёл бы и на macOS"),
 ]
 

@@ -153,6 +153,31 @@ def main() -> int:
     check("после set мост подтверждает значение",
           echo is not None and echo.get("v") == 0.7, str(echo))
 
+    print("\nСВОЙСТВА BACKEND")
+    # Четырнадцать Q_PROPERTY: списки для выпадающих меню. Раньше get отвечал
+    # только за ключи конфига, и все четырнадцать были странице недоступны -
+    # то есть ни один выпадающий список нарисовать было нельзя. Поймано на
+    # первой же странице, которой понадобился список микрофонов.
+    page.got.clear()
+    page.send({"t": "get", "path": "micOptions"})
+    got = page.wait_for("val")
+    check("свойство micOptions доезжает",
+          got is not None and isinstance(got.get("v"), list), str(got)[:90])
+
+    page.got.clear()
+    page.send({"t": "get", "path": "themeOptions"})
+    got = page.wait_for("val")
+    check("свойство themeOptions доезжает",
+          got is not None and isinstance(got.get("v"), list), str(got)[:90])
+
+    # Ключ конфига и свойство различаются по имени, и одно не должно затенять
+    # другое: конфиг обязан отвечать по-прежнему.
+    page.got.clear()
+    page.send({"t": "get", "path": "mic_device"})
+    got = page.wait_for("val")
+    check("ключ конфига рядом со свойством не потерялся",
+          got is not None and got.get("path") == "mic_device", str(got)[:90])
+
     print("\nВЫЗОВЫ")
     page.got.clear()
     page.send({"t": "call", "m": "modelsInfo", "a": [], "id": 17})
