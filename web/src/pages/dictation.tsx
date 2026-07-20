@@ -27,6 +27,7 @@ import {
   punctModelReady,
   removeAutoEnterApp,
   pillOptions,
+  pretty,
   runningApps,
   setSetting,
   setTechTerms,
@@ -50,6 +51,23 @@ interface Option {
   value: string;
   label: string;
 }
+
+/**
+ * Вариант списка микрофонов. Значение тут НЕ строка: у «по умолчанию» это
+ * null, у настоящих устройств - номер. Приводить их к строке нельзя - в
+ * конфиг уехало бы "0" вместо 0 и "null" вместо пустоты, и микрофон
+ * перестал бы выбираться совсем.
+ *
+ * Radix при этом умеет только строковые значения, и пустую строку считает
+ * за «не выбрано». Поэтому наружу отдаём служебный ключ, а внутрь
+ * возвращаем исходное значение как есть.
+ */
+interface DeviceOption {
+  value: number | null;
+  label: string;
+}
+
+const DEFAULT_MIC = "__default__";
 
 /** Настройка в состоянии компонента: читаем один раз, пишем сразу.
  *
@@ -88,13 +106,28 @@ function Hotkey({
   const [value, setValue] = useState("");
   const [capturing, setCapturing] = useState(false);
 
+  // Показываем то, что вернул pretty(), а не то, что лежит в конфиге. В
+  // конфиге запись машинная - «ctrl+shift+space», - и человеку её показывать
+  // нельзя: HotkeyField по своему договору ждёт уже человеческий вид, и
+  // мастер первого запуска так и делает. Здесь этого не хватало, и в окне
+  // настроек сочетание выглядело сырой строкой.
   useEffect(() => {
-    void getSetting(field).then((v) => setValue(String(v ?? "")));
-    return on("captureDone", (which, spec) => {
+    let alive = true;
+    void getSetting(field).then(async (v) => {
+      const spec = String(v ?? "");
+      const shown = spec ? String((await pretty(spec)) || spec) : "";
+      if (alive) setValue(shown);
+    });
+    const off = on("captureDone", async (which, spec) => {
       if (String(which) !== field) return;
       setCapturing(false);
-      setValue(String(spec ?? ""));
+      const raw = String(spec ?? "");
+      setValue(raw ? String((await pretty(raw)) || raw) : "");
     });
+    return () => {
+      alive = false;
+      off();
+    };
   }, [field]);
 
   return (
@@ -226,15 +259,17 @@ function Hotkeys() {
 // ---------- микрофон ----------
 
 function Microphone() {
-  const [device, setDevice] = useSetting("mic_device", "");
-  const [devices, setDevices] = useState<Option[]>([]);
+  const [device, setDevice] = useSetting<number | null>("mic_device", null);
+  const [devices, setDevices] = useState<DeviceOption[]>([]);
 
   // Список берём у Backend, а не собираем сами: подписи там уже человеческие
   // («по умолчанию · Microphone (Realtek)»), и собирать их второй раз на
   // странице значило бы завести второе место, где они могут разъехаться.
   useEffect(() => {
-    void micOptions().then((v) => setDevices((v as Option[]) ?? []));
+    void micOptions().then((v) => setDevices((v as DeviceOption[]) ?? []));
   }, []);
+
+  const key = (v: number | null) => (v === null ? DEFAULT_MIC : String(v));
 
   return (
     <section className="flex flex-col gap-3">
@@ -246,10 +281,13 @@ function Microphone() {
           subtitle={t("Какой микрофон слушать")}
         >
           <Select
-            value={device}
-            options={devices}
+            value={key(device)}
+            options={devices.map((d) => ({ value: key(d.value), label: d.label }))}
             label={t("Микрофон")}
-            onChange={setDevice}
+            onChange={(picked) => {
+              const found = devices.find((d) => key(d.value) === picked);
+              setDevice(found ? found.value : null);
+            }}
           />
         </SettingRow>
         <ToggleSetting

@@ -16,3 +16,21 @@ if (!("ResizeObserver" in globalThis)) {
     disconnect(): void {}
   } as unknown as typeof ResizeObserver;
 }
+
+// Холста в jsdom нет: getContext("2d") возвращает null и печатает
+// «Not implemented». Волна микрофона это переживает - рисование просто
+// пропускается, - но вывод тестов забивается шумом, а шум прячет настоящее.
+//
+// Заглушка молчаливая и ничего не рисует, и это правда: проверять в jsdom
+// нечего - ни раскладки, ни пикселей там нет. Как выглядит волна, видно
+// только глазами на витрине.
+if (typeof HTMLCanvasElement !== "undefined") {
+  HTMLCanvasElement.prototype.getContext = (() => {
+    const noop = () => {};
+    const ctx = new Proxy(
+      { canvas: null, fillStyle: "", strokeStyle: "", lineWidth: 1 },
+      { get: (t, k) => (k in t ? (t as never)[k] : noop), set: () => true },
+    );
+    return () => ctx;
+  })() as unknown as typeof HTMLCanvasElement.prototype.getContext;
+}

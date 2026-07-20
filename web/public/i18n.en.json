@@ -1,5 +1,6 @@
 {
  " - и текст появится здесь.": " - and the text will show up here.",
+ " ГБ": " GB",
  " МБ": " MB",
  " МБ, три-пять минут": " MB, three to five minutes",
  " и говорите. Нажмите ещё раз - текст на месте.": " and talk. Press again and the text is in.",
@@ -12,6 +13,7 @@
  " слов в минуту. Столько вы сберегли": " words per minute. That is what you saved",
  " слов за ": " words in ",
  "% · качается, можно не смотреть": "% · downloading, no need to watch",
+ "% из ": "% of ",
  ". Дать короткую фразу?": ". Give it a short name?",
  ". Диктовка работает и без этого, ": ". Dictation works without it, ",
  "236 МБ, две-три минуты": "236 MB, two or three minutes",
@@ -562,6 +564,7 @@
  "Фамилии, названия, термины - по одному на строку": "Surnames, names, terms - one per line",
  "Фон под настройками": "Background behind settings",
  "Хватает обычного процессора: 8 секунд речи - меньше секунды работы": "An ordinary processor is enough: 8 seconds of speech - under a second of work",
+ "Ход настройки": "Setup progress",
  "Хорошо. Включить можно потом: «Диктовка» → «Правка текста на ходу», ": "All right. You can turn it on later: «Dictation» → «Text editing», ",
  "ЦВЕТА": "COLOURS",
  "Частые фразы уже заведены - вам остаётся значение": "Common phrases are set up - just add your value",

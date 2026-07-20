@@ -1336,4 +1336,7 @@ EN: dict[str, str] = {
         "Could not reach the program",
     "\u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430 \u043d\u0435 \u0441\u043e\u0445\u0440\u0430\u043d\u0438\u043b\u0430\u0441\u044c":
         "the setting was not saved",
+    "\u0425\u043e\u0434 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438": "Setup progress",
+    "% \u0438\u0437 ": "% of ",
+    " \u0413\u0411": " GB",
 }
