@@ -69,6 +69,7 @@ export type SettingKey =
   | "tone_rules"
   | "transforms"
   | "transforms_hidden"
+  | "ui.web"
   | "ui_language"
   | "undo_hotkey"
   | "unload_after_min"

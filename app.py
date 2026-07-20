@@ -255,6 +255,12 @@ class App:
         # запуск: шарик на каждую английскую фразу - это навязчивость, а
         # догрузка всё равно идёт своим ходом.
         self._english_told = False
+        # Настройки страницей: мост, окно и Backend под них. Поднимаются по
+        # требованию и только при включённом ui.web - вебвью стоит 123 МБ
+        # памяти, а программа висит в трее сутками.
+        self._web = None
+        self._bridge = None
+        self._web_backend = None
         self._ollama_busy = False    # идёт ли установка Ollama
         self._ollama_subs: list = []  # окна, которые хотят видеть ход
         self._last_insert = None     # (exe, когда, текст) - для склейки
@@ -1929,6 +1935,9 @@ class App:
         так что пришедший «посмотреть, что надиктовано» попадает именно туда, а
         настройки ждут второй группой в панели.
         """
+        if self.cfg.get("ui.web", False) and self._open_settings_web():
+            return
+
         from settings_qt import SettingsWindow
 
         if self.settings is None:
@@ -1936,6 +1945,55 @@ class App:
                 self._on_config_change, self._on_hotkey_capture,
                 self._info, HISTORY_PATH, LOG_PATH, **self._win_args())
         self.settings.open()
+
+    def _open_settings_web(self) -> bool:
+        """Открыть настройки страницей. True - получилось.
+
+        **Обе версии окна живут рядом, и это условие плана, а не осторожность
+        сверх меры.** Страница проверена машиной целиком - типы, доступность,
+        мост, - но ни разу не открывалась человеком: ни одна из восьми страниц,
+        ни мастер. Выбросить работающее QML-окно раньше, чем новое посмотрели
+        глазами, значит оставить владельца без настроек, если что-то не так.
+
+        Выключатель в конфиге (`ui.web`), а не сборкой: переключиться туда и
+        обратно должно быть можно на живой программе, ничего не пересобирая.
+
+        Не вышло - возвращаем False, и открывается прежнее окно. Молча падать
+        тут нельзя: человек нажал «Настройки», и окно обязано появиться хоть
+        какое-то.
+        """
+        try:
+            import bridge
+            import webwindow
+
+            if self._web is None:
+                from settings_qt import Backend
+
+                if self._web_backend is None:
+                    self._web_backend = Backend(
+                        self._on_config_change, self._on_hotkey_capture,
+                        self._info, HISTORY_PATH, LOG_PATH, **self._win_args())
+                extra = []
+                try:
+                    from onboarding_qt import _Extra
+
+                    extra.append(_Extra(self))
+                except Exception as e:  # noqa: BLE001 - мастер тут не главное
+                    log(f"мост без объекта мастера: {e}")
+                self._bridge = bridge.Bridge(self._web_backend, extra)
+                self._web = webwindow.WebWindow(
+                    self._bridge, self.overlay.tokens, self._web_lang(), log)
+            self._web.show()
+            return True
+        except Exception as e:  # noqa: BLE001
+            log(f"настройки страницей не открылись, беру прежнее окно: "
+                f"{type(e).__name__}: {e}")
+            return False
+
+    def _web_lang(self):
+        from theme_qt import Lang
+
+        return Lang()
 
     def _redo_recording(self, path: str) -> None:
         """Распознать сохранённую запись заново - по кнопке из «О программе».
