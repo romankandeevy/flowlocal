@@ -99,6 +99,42 @@ jobs:
       - name: полировка и предохранители
         run: python test_llm.py
 
+      # --- Переезд визуала на React ---
+
+      - name: мост «страница - Python»
+        run: python test_bridge.py
+
+      - name: CSS не разъехался с theme.py
+        run: python tools/gen_theme.py --check
+
+      - name: api.ts не разъехался с Backend
+        run: python tools/gen_bridge.py --check
+
+      - name: иконки не разъехались с Icons.qml
+        run: python tools/check_icons.py
+
+      - name: node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # npm ci, а не install: ставит ровно то, что в package-lock, и падает при
+      # расхождении. install молча подтянул бы новые версии, и «у меня
+      # собирается» перестало бы значить «соберётся у всех».
+      - name: зависимости страницы
+        run: npm ci
+        working-directory: web
+
+      - name: типы и сборка страницы
+        run: npm run build
+        working-directory: web
+
+      - name: доступность витрины
+        run: npm run test
+        working-directory: web
+
     env:
       # Иначе кириллица в выводе превращается в мусор и провал не прочитать.
       PYTHONIOENCODING: utf-8
