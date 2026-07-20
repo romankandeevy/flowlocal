@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { Button } from "./button";
 import { Card } from "./card";
 import { cn } from "./cn";
+import { FormShowcase } from "./form/showcase";
 import { IconsShowcase } from "./icons.showcase";
 import { LayoutModeProvider, type LayoutMode } from "./layout-mode";
 import { SettingRow } from "./setting-row";
@@ -99,6 +100,10 @@ export function Showcase() {
             <Note>
               Пояснение под карточкой. Тише текста, но не шёпотом.
             </Note>
+          </Section>
+
+          <Section title="Формы">
+            <FormShowcase />
           </Section>
 
           <Section title="Иконки">
