@@ -308,9 +308,22 @@ class Bridge(QObject):
     # можно ли уже что-то ей говорить.
     clientsChanged = Signal(int)
 
-    def __init__(self, backend, parent=None) -> None:
+    def __init__(self, backend, extra=None, parent=None) -> None:
+        """backend - главный фасад, extra - дополнительные объекты рядом с ним.
+
+        Второй объект понадобился на мастере первого запуска: его API живёт в
+        `onboarding_qt._Extra` - уровни микрофона, превью тем, пробная
+        диктовка, - и в `Backend` его нет. Тащить одно в другое ради моста
+        нельзя: это разные окна с разной жизнью, и `_Extra` держит ссылку на
+        приложение, которая окну настроек не нужна вовсе.
+
+        Поэтому мост принимает список объектов и собирает белый список со
+        всех. Протокол при этом не меняется: страница по-прежнему зовёт метод
+        по имени, а кто им владеет - забота моста.
+        """
         super().__init__(parent)
         self.backend = backend
+        self.objects = [backend] + list(extra or [])
         self.token = secrets.token_urlsafe(32)
 
         self.http = Static(self.token, {
@@ -371,22 +384,37 @@ class Bridge(QObject):
         странице не адресовано.
         """
         own = _qobject_names()
-        mo = self.backend.metaObject()
-        slots, sigs = set(), set()
-        for i in range(mo.methodCount()):
-            m = mo.method(i)
-            name = bytes(m.name()).decode()
-            if name.startswith("_") or name in own:
-                continue
-            if m.methodType() == QMetaMethod.Slot:
-                slots.add(name)
-            elif m.methodType() == QMetaMethod.Signal:
-                sigs.add(name)
-        props = set()
-        for i in range(mo.propertyCount()):
-            name = mo.property(i).name()
-            if name not in own:
+        slots, sigs, props = set(), set(), set()
+        # Кто чем владеет: имя -> объект. Нужно, чтобы вызов ушёл туда, где
+        # метод есть, а не в первый попавшийся фасад.
+        self._owner = {}
+
+        for obj in self.objects:
+            mo = obj.metaObject()
+            for i in range(mo.methodCount()):
+                m = mo.method(i)
+                name = bytes(m.name()).decode()
+                if name.startswith("_") or name in own:
+                    continue
+                kind = m.methodType()
+                if kind not in (QMetaMethod.Slot, QMetaMethod.Signal):
+                    continue
+                # Столкновение имён - это не мелочь: страница позвала бы одно,
+                # а получила другое, и молча. Первый владелец побеждает, но об
+                # этом говорим вслух - чинить надо переименованием, а не здесь.
+                if name in self._owner and self._owner[name] is not obj:
+                    _log(f"мост: имя {name} есть у двух объектов, "
+                         f"беру у {type(self._owner[name]).__name__}")
+                    continue
+                self._owner.setdefault(name, obj)
+                (slots if kind == QMetaMethod.Slot else sigs).add(name)
+            for i in range(mo.propertyCount()):
+                name = mo.property(i).name()
+                if name in own:
+                    continue
+                self._owner.setdefault(name, obj)
                 props.add(name)
+
         self._signal_names = sigs
         return slots, props
 
@@ -402,8 +430,8 @@ class Bridge(QObject):
         """
         for name in sorted(self._signal_names):
             try:
-                sig = getattr(self.backend, name)
-            except AttributeError:
+                sig = getattr(self._owner[name], name)
+            except (AttributeError, KeyError):
                 continue
             # *a, а не фиксированная арность: сигналы Backend от нуля до трёх
             # аргументов, и перечислять их здесь значило бы держать второй
@@ -496,7 +524,7 @@ class Bridge(QObject):
         """
         path = str(msg.get("path") or "")
         if path in self._props:
-            value = self.backend.property(path)
+            value = self._owner[path].property(path)
         else:
             value = self.backend.get(path)
         self._send(client, {"t": "val", "path": path, "v": value})
@@ -520,7 +548,7 @@ class Bridge(QObject):
 
         if name in self._slots:
             try:
-                value = getattr(self.backend, name)(*args)
+                value = getattr(self._owner[name], name)(*args)
             except Exception as e:  # noqa: BLE001 - страница не должна ронять окно
                 _log(f"мост: {name}() упал: {e}")
                 self._send(client, {"t": "ret", "id": call_id, "v": None,
@@ -530,7 +558,7 @@ class Bridge(QObject):
             # Q_PROPERTY слотом не является, а читать её странице надо. Тем же
             # `call` без аргументов - заводить пятый тип сообщения ради чтения
             # свойства не за что.
-            value = self.backend.property(name)
+            value = self._owner[name].property(name)
         else:
             self._send(client, {"t": "ret", "id": call_id, "v": None,
                                 "e": f"нет такого метода: {name}"})

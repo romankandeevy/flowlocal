@@ -1,14 +1,15 @@
 """Клиент моста для страницы печатается из Backend, а не пишется руками.
 
-Зачем генератор. Backend отдаёт странице 75 методов и 10 сигналов (из 80 и 16 -
-остальное приватное, им Backend перебрасывает работу между потоками). Перенести
-столько в TypeScript руками - это 75 поводов опечататься, и опечатка вылезет не
-при сборке, а в работающем окне: страница попросит метод, которого нет, и
-получит `ret` с жалобой. Сгенерированный клиент даёт типы, и опечатка падает на
-`tsc`.
+Зачем генератор. Странице отдаётся 83 метода, 14 свойств и 13 сигналов.
+Перенести столько в TypeScript руками - это 83 повода опечататься, и опечатка
+вылезет не при сборке, а в работающем окне: страница попросит метод, которого
+нет, и получит `ret` с жалобой. Сгенерированный клиент даёт типы, и опечатка
+падает на `tsc`.
 
-Источник один и тот же, что у самого моста, - `Backend.metaObject()`. Значит,
-разъехаться клиенту и мосту негде: оба видят одно.
+Источников ДВА, и оба те же, что у самого моста: `Backend` из settings_qt и
+`_Extra` из onboarding_qt. Второй появился с мастером первого запуска - у него
+свой API (уровни микрофона, превью тем, пробная диктовка), и в Backend его нет.
+Разъехаться клиенту и мосту негде: оба обходят одни и те же metaObject.
 
 **Обход metaObject идёт с нуля, а не с methodOffset().** Причина разобрана в
 `bridge.Bridge._surface` и стоила трёх ошибок: у питоновского наследника
@@ -49,14 +50,14 @@ OUT = os.path.join(ROOT, "web", "src", "bridge", "api.ts")
 # импортированными из client.ts. Ровно на это и наткнулся tsc.
 PROTOCOL = {"get", "set"}
 
-HEAD = '''// Клиент моста. СГЕНЕРИРОВАНО из Backend - руками не править.
+HEAD = '''// Клиент моста. СГЕНЕРИРОВАНО из Backend и _Extra - руками не править.
 //
 //   python tools/gen_bridge.py           переписать
 //   python tools/gen_bridge.py --check   сверить (стоит в CI)
 //
-// Семьдесят пять методов и десять сигналов переносить руками незачем: тут не
-// столько работа, сколько 75 поводов опечататься, а опечатка вылезла бы не при
-// сборке, а в работающем окне. Здесь она падает на tsc.
+// Восемьдесят три метода и тринадцать сигналов переносить руками незачем: тут
+// не столько работа, сколько 83 повода опечататься, а опечатка вылезла бы не
+// при сборке, а в работающем окне. Здесь она падает на tsc.
 //
 // Типы аргументов взяты из metaObject, то есть из того же места, откуда их
 // берёт сам мост. QVariant и QVariantMap приезжают как unknown и Record -
@@ -109,31 +110,48 @@ def surface() -> tuple:
         history_path=os.devnull,
         log_path=os.devnull,
     )
+    # Мастер первого запуска говорит не с Backend, а со своим объектом
+    # (onboarding_qt._Extra): уровни микрофона, превью тем, пробная диктовка.
+    # Его методы странице нужны так же, как и Backend'овские, поэтому клиент
+    # печатается с обоих.
+    #
+    # Приложение ему не передаём: конструктор только запоминает ссылку, а нам
+    # нужен один metaObject, и ни один метод здесь не зовётся. Настоящее
+    # приложение поднимать ради списка имён было бы и долго, и незачем.
+    objects = [backend]
+    try:
+        import onboarding_qt as O
+
+        objects.append(O._Extra(None))
+    except Exception as e:  # noqa: BLE001 - без мастера клиент всё равно нужен
+        print(f"  мастер пропущен: {type(e).__name__}: {e}", file=sys.stderr)
+
     own = B._qobject_names()
     mo = backend.metaObject()
 
-    slots, signals = {}, {}
-    for i in range(mo.methodCount()):
-        m = mo.method(i)
-        name = _s(m.name())
-        if name.startswith("_") or name in own:
-            continue
-        args = [(_s(t), _s(n) or f"a{k}")
-                for k, (t, n) in enumerate(zip(m.parameterTypes(),
-                                               m.parameterNames()))]
-        if name in PROTOCOL:
-            continue
-        if m.methodType() == QMetaMethod.Slot:
-            # Перегрузки: одно имя, разные подписи. Берём самую длинную -
-            # короткая обычно её частный случай с умолчаниями.
-            if name not in slots or len(args) > len(slots[name][0]):
-                slots[name] = (args, _s(m.typeName()))
-        elif m.methodType() == QMetaMethod.Signal:
-            signals[name] = args
-
-    props = sorted(n for n in
-                   (mo.property(i).name() for i in range(mo.propertyCount()))
-                   if n not in own)
+    slots, signals, props = {}, {}, set()
+    for obj in objects:
+        mo = obj.metaObject()
+        for i in range(mo.methodCount()):
+            m = mo.method(i)
+            name = _s(m.name())
+            if name.startswith("_") or name in own or name in PROTOCOL:
+                continue
+            args = [(_s(t), _s(n) or f"a{k}")
+                    for k, (t, n) in enumerate(zip(m.parameterTypes(),
+                                                   m.parameterNames()))]
+            if m.methodType() == QMetaMethod.Slot:
+                # Перегрузки: одно имя, разные подписи. Берём самую длинную -
+                # короткая обычно её частный случай с умолчаниями.
+                if name not in slots or len(args) > len(slots[name][0]):
+                    slots[name] = (args, _s(m.typeName()))
+            elif m.methodType() == QMetaMethod.Signal:
+                signals[name] = args
+        for i in range(mo.propertyCount()):
+            name = mo.property(i).name()
+            if name not in own:
+                props.add(name)
+    props = sorted(props)
     keys = sorted(_paths(C.DEFAULTS))
     del app
     return slots, signals, keys, props

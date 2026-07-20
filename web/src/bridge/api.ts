@@ -1,11 +1,11 @@
-// Клиент моста. СГЕНЕРИРОВАНО из Backend - руками не править.
+// Клиент моста. СГЕНЕРИРОВАНО из Backend и _Extra - руками не править.
 //
 //   python tools/gen_bridge.py           переписать
 //   python tools/gen_bridge.py --check   сверить (стоит в CI)
 //
-// Семьдесят пять методов и десять сигналов переносить руками незачем: тут не
-// столько работа, сколько 75 поводов опечататься, а опечатка вылезла бы не при
-// сборке, а в работающем окне. Здесь она падает на tsc.
+// Восемьдесят три метода и тринадцать сигналов переносить руками незачем: тут
+// не столько работа, сколько 83 повода опечататься, а опечатка вылезла бы не
+// при сборке, а в работающем окне. Здесь она падает на tsc.
 //
 // Типы аргументов взяты из metaObject, то есть из того же места, откуда их
 // берёт сам мост. QVariant и QVariantMap приезжают как unknown и Record -
@@ -183,6 +183,10 @@ export function exportData(a0: boolean): Promise<string> {
   return call("exportData", a0) as Promise<string>;
 }
 
+export function finish(): Promise<void> {
+  return call("finish") as Promise<void>;
+}
+
 export function history(): Promise<unknown[]> {
   return call("history") as Promise<unknown[]>;
 }
@@ -201,6 +205,10 @@ export function importData(): Promise<string> {
 
 export function insights(): Promise<Record<string, unknown>> {
   return call("insights") as Promise<Record<string, unknown>>;
+}
+
+export function levels(): Promise<unknown[]> {
+  return call("levels") as Promise<unknown[]>;
 }
 
 export function llmBusy(): Promise<boolean> {
@@ -263,6 +271,10 @@ export function pickInboxPath(): Promise<string> {
   return call("pickInboxPath") as Promise<string>;
 }
 
+export function pickModel(a0: string): Promise<string> {
+  return call("pickModel", a0) as Promise<string>;
+}
+
 export function pretty(a0: string): Promise<string> {
   return call("pretty", a0) as Promise<string>;
 }
@@ -281,6 +293,10 @@ export function punctModelNote(): Promise<string> {
 
 export function punctModelReady(): Promise<boolean> {
   return call("punctModelReady") as Promise<boolean>;
+}
+
+export function recommended(): Promise<string> {
+  return call("recommended") as Promise<string>;
 }
 
 export function redoRecording(a0: string): Promise<void> {
@@ -371,12 +387,36 @@ export function suggestions(): Promise<unknown[]> {
   return call("suggestions") as Promise<unknown[]>;
 }
 
+export function testInsert(): Promise<void> {
+  return call("testInsert") as Promise<void>;
+}
+
+export function themeSwatch(a0: string): Promise<Record<string, unknown>> {
+  return call("themeSwatch", a0) as Promise<Record<string, unknown>>;
+}
+
 export function tidyNote(a0: string, a1: string): Promise<void> {
   return call("tidyNote", a0, a1) as Promise<void>;
 }
 
 export function transformPresets(): Promise<unknown[]> {
   return call("transformPresets") as Promise<unknown[]>;
+}
+
+export function trialStart(): Promise<void> {
+  return call("trialStart") as Promise<void>;
+}
+
+export function trialStop(): Promise<void> {
+  return call("trialStop") as Promise<void>;
+}
+
+export function unwatchHotkey(): Promise<void> {
+  return call("unwatchHotkey") as Promise<void>;
+}
+
+export function watchHotkey(a0: string): Promise<void> {
+  return call("watchHotkey", a0) as Promise<void>;
 }
 
 // ---------- свойства Backend ----------
@@ -450,14 +490,17 @@ export function userName(): Promise<unknown> {
 export interface Signals {
   captureDone: [string, string];
   changed: [];
+  comboState: [unknown[], boolean];
   dmlDone: [boolean, string, Record<string, unknown>];
   dmlStage: [string, number];
   flashed: [string, string];
+  insertDone: [boolean];
   llmDone: [boolean];
   llmStage: [string, number, number];
   modelProgress: [string, number];
   modelsChanged: [];
   noteTidied: [string, string, string];
+  trialReady: [string];
 }
 
 /** Подписаться на сигнал. Возвращает функцию отписки. */
