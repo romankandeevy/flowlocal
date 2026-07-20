@@ -63,6 +63,13 @@ dist/
 # сборку не повторить, поэтому он исключение.
 !flowlocal.spec
 
+# --- Вёрстка на React (web/) ---
+# node_modules - двести сорок пакетов, ставятся npm ci по package-lock.json.
+# web/dist собирается из исходников и едет в установщик, а не в репозиторий;
+# правило `dist/` выше ловит только корневую папку PyInstaller.
+node_modules/
+web/dist/
+
 # --- Windows и редакторы ---
 Thumbs.db
 desktop.ini
@@ -71,3 +78,6 @@ desktop.ini
 
 # Внимание: assets/ (шрифты, иконка), tools/*.png (превью интерфейса) и
 # tools/*.gif (демо для README) игнорировать нельзя — они нужны в репозитории.
+
+# Кеш инкрементальной сборки TypeScript.
+web/tsconfig.tsbuildinfo
