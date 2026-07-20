@@ -29,6 +29,12 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "qml", "windows", "Settings.qml")
 
+# Мастер первого запуска разбираем той же меркой - он пишет в тот же конфиг и
+# зовёт тот же Backend, а переносится в фазе 5. Страниц у него нет, поэтому
+# берём его целиком, одним куском: важно не «что на какой странице», а «что он
+# вообще трогает» - список, по которому сверять перенос.
+WIZARD = os.path.join(ROOT, "qml", "windows", "Onboarding.qml")
+
 # Страницы - это Column на одном уровне вложенности внутри `content`. Опознаём
 # их по отступу, а не по имени: id есть не у всех, а отступ есть у каждой.
 PAGE_INDENT = 12
@@ -92,8 +98,13 @@ def main() -> int:
         pages.append({"name": page_name(body, lines, start), "from": start,
                       "to": end, "lines": end - start + 1, **info})
 
+    wizard = collect(open(WIZARD, encoding="utf-8").read())
+    wizard["name"] = "Мастер первого запуска"
+    wizard["lines"] = sum(1 for _ in open(WIZARD, encoding="utf-8"))
+    wizard["from"], wizard["to"] = 1, wizard["lines"]
+
     if "--md" not in sys.argv:
-        for p in pages:
+        for p in pages + [wizard]:
             print(f'\n{p["name"]}  (строки {p["from"]}-{p["to"]}, {p["lines"]})')
             print(f'  ключей {len(p["keys"])}: {" ".join(p["keys"]) or "-"}')
             print(f'  вызовов {len(p["calls"])}: {" ".join(p["calls"]) or "-"}')
@@ -117,7 +128,7 @@ def main() -> int:
         "| Страница | Строки | Ключей | Вызовов |",
         "|---|---|---|---|",
     ]
-    for p in pages:
+    for p in pages + [wizard]:
         out.append(f'| `{p["name"]}` | {p["from"]}-{p["to"]} ({p["lines"]}) | '
                    f'{len(p["keys"])} | {len(p["calls"])} |')
 
@@ -142,9 +153,10 @@ def main() -> int:
         "молчит, - это не «мелочь на потом»: у человека она просто перестала",
         "работать, и узнает он об этом раньше нас.",
     ]
-    for p in pages:
+    for p in pages + [wizard]:
+        src = "Onboarding.qml" if p is wizard else "Settings.qml"
         out += ["", f'## `{p["name"]}`', "",
-                f'Строки {p["from"]}-{p["to"]} в `Settings.qml`.', ""]
+                f'Строки {p["from"]}-{p["to"]} в `qml/windows/{src}`.', ""]
         if p["keys"]:
             out.append("**Ключи конфига.** Каждый должен читаться и писаться "
                        "после переноса.")
