@@ -14,6 +14,14 @@ Item {
     property string pretty: ""            // человекочитаемое из inputspec.pretty
     property bool capturing: false
     property bool allowClear: false
+    // Начинать ли захват с клавиатуры (Space). По умолчанию да - так поле
+    // доступно и без мыши в настройках. На экранах жеста мастера выключается
+    // (keyStart: false): там человек НАЖИМАЕТ сочетание ради живой проверки, а
+    // пробел входит в стандартное ctrl+shift+space - и «Space начинает захват»
+    // превращал каждую проверку в переназначение. Захват дрался с проверкой и
+    // шёл по кругу, «Дальше» не открывалась. Клик по полю - действие
+    // осознанное, им захват и оставляем.
+    property bool keyStart: true
     signal startCapture()
     signal cancelCapture()
     signal cleared()
@@ -31,11 +39,12 @@ Item {
     opacity: enabled ? 1 : 0.4
     Behavior on opacity { NumberAnimation { duration: T.durFast * 1000 } }
 
-    // Space начинает захват, Esc его отменяет. Space, а не Enter: Enter сам
-    // бывает частью сочетания, и «начать захват» на нём означало бы, что
-    // назначить Enter нельзя вовсе.
+    // Space начинает захват (когда keyStart), Esc отменяет идущий. Space, а не
+    // Enter: Enter сам бывает частью сочетания, и «начать захват» на нём значило
+    // бы, что назначить Enter нельзя вовсе. keyStart=false выключает старт с
+    // клавиатуры целиком - зачем, см. свойство keyStart выше.
     Keys.onPressed: (e) => {
-        if (e.key === Qt.Key_Space && !box.capturing) { box.startCapture(); e.accepted = true; }
+        if (box.keyStart && e.key === Qt.Key_Space && !box.capturing) { box.startCapture(); e.accepted = true; }
         else if (e.key === Qt.Key_Escape && box.capturing) { box.cancelCapture(); e.accepted = true; }
     }
 

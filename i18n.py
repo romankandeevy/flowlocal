@@ -177,6 +177,12 @@ EN: dict[str, str] = {
     "Скопировать всё": "Copy all",
     "Привести в порядок": "Tidy up",
     "Причёсываю…": "Tidying…",
+    "Недавние": "Recent",
+    "Найти в заметках…": "Search notes…",
+    "Назад к списку": "Back to list",
+    "Нажмите «Добавить» и диктуйте прямо сюда.": "Press «Add» and dictate right here.",
+    "Страница заметок для длинной диктовки": "A notes page for long dictation",
+    "Открывается ещё из значка в трее": "Also opens from the tray icon",
     "Запомнить": "Remember",
     "Не надо": "No thanks",
     "Ещё раз": "Again",
@@ -312,6 +318,10 @@ EN: dict[str, str] = {
     # ---- мастер первого запуска ----
     "Как вам удобнее?": "How do you like it?",
     "ЦВЕТА": "COLOURS",
+    # Карточки-превью выбора темы. «Система» уже переведена выше (System).
+    "Светлая": "Light",
+    "Тёмная": "Dark",
+    "как в Windows": "like Windows",
     "РАСПОЛОЖЕНИЕ": "LAYOUT",
     "Так выглядит настройка": "This is what a setting looks like",
     "А так - пояснение под ней": "And this is its description",

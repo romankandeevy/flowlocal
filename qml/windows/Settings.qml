@@ -19,9 +19,11 @@
 // он мог только по строке, придуманной ради этой подмены. Границу групп рисует
 // пустота в 12 пикселей - не заголовок и не линия.
 //
-// «Заметки» - пункт панели, но отдельное ОКНО: не подсвечивается и не меняет
-// win.page. Дверь ему нужна именно здесь - пока её не было, скретчпад можно
-// было найти только в трее, и владелец его не нашёл.
+// «Заметки» - обычная страница первой группы (win.page === "Заметки"): нажал в
+// панели - тут же, в этом окне, показался список заметок. Отдельного окна больше
+// нет; редактор одной заметки - второй вид той же страницы (notesView). Дверь в
+// панели ему нужна была всегда - пока её не было, скретчпад находили только в
+// трее, и владелец его не нашёл.
 //
 // Дверей настроек четыре: Основное+Распознавание+Ввод слились в «Диктовку»,
 // Словарь+Замены - в «Слова», плюс «Дополнительно» и «О программе». Отдельной
@@ -74,19 +76,30 @@ Rectangle {
     // между страницами ниже, и по той же причине.
     function resetScroll() { scroll.contentY = 0 }
 
+    // Открыть заметки из приложения (трей и hotkey_notes): перевести окно на
+    // страницу «Заметки» и по режиму из настроек («notes_open») показать список
+    // или сразу редактор. Зовётся из app.open_notes после того, как окно уже
+    // показано и поднято. notesPage - id страницы ниже; функция резолвит его при
+    // вызове, поэтому порядок объявления неважен.
+    function openNotes(mode) {
+        page = "Заметки";
+        notesPage.enter(mode || "list");
+    }
+
     // Открывается на «Главной»: окно открывают посмотреть, работает ли и что
     // надиктовано, а не настраивать. Настройки - вторая половина панели.
     property string page: "Главная"
     // Новая страница - с начала: прокрутка одной не должна доставаться другой.
     // И проявляется, а не возникает рывком, - см. pageIn у content.
     onPageChanged: { scroll.contentY = 0; pageIn.restart() }
-    readonly property var pages: ["Главная", "История", "Статистика",
+    readonly property var pages: ["Главная", "История", "Статистика", "Заметки",
                                   "Диктовка", "Слова", "Дополнительно",
                                   "О программе"]
     // Сколько пунктов в первой группе. По этому числу панель ставит отбивку
     // перед настройками - одно место, где живёт граница, вместо второго
-    // массива, который рано или поздно разъедется с первым.
-    readonly property int ownPages: 3
+    // массива, который рано или поздно разъедется с первым. Заметки - четвёртый
+    // пункт своей группы: место, куда диктуют, а не то, что настраивают.
+    readonly property int ownPages: 4
 
     // Архив прежних версий (0.x) для выплывающей панели на «О программе».
     // Читаем один раз при сборке окна: файл на диске на ходу не меняется, а на
@@ -203,24 +216,14 @@ Rectangle {
                 bottomPadding: 18
             }
 
-            // Первая группа: своё. Главная, История, Статистика.
+            // Первая группа: своё. Главная, История, Статистика, Заметки.
+            // «Заметки» теперь обычный пункт-страница: его рисует тот же
+            // Repeater и подсвечивает active, как остальные. Отдельного окна и
+            // спец-пункта с B.openNotes() больше нет - нажатие ведёт на страницу
+            // в этом же окне.
             Repeater {
                 model: win.pages.slice(0, win.ownPages)
                 PageNav { pageName: modelData }
-            }
-
-            // «Заметки» - отдельное ОКНО, а не страница, поэтому пункт не
-            // подсвечивается и не меняет win.page. Стоит здесь, в первой
-            // группе: это место, куда диктуют, а не то, что настраивают.
-            //
-            // Дверь ему нужна именно в панели: пока её не было, скретчпад
-            // можно было найти только в трее, и владелец его не нашёл.
-            // Возможность, которую не видно, всё равно что не сделана.
-            NavItem {
-                label: L.t("Заметки")
-                icon: ic.forPage("Заметки")
-                active: false
-                onClicked: B.openNotes()
             }
 
             // Граница групп - пустота, а не линия и не второй заголовок.
@@ -1495,6 +1498,339 @@ Rectangle {
                 }
             }
 
+            // ===== Заметки =====
+            // Страница, а не отдельное окно: нажал «Заметки» в панели - тут же, в
+            // этом окне, показался список. Диктуют В неё, как диктовали в прежнее
+            // окно; редактор одной заметки - второй вид той же страницы,
+            // переключаемый notesView ("list" | "editor"). Вся рабочая механика
+            // (автосейв, «привести в порядок», копирование, удаление) перенесена
+            // из бывшего windows/Notes.qml как есть - переписан только каркас.
+            //
+            // Данные и уборка - в Python (B.notesList/noteText/newNote/saveNote/
+            // deleteNote/tidyNote), тот же notes.py, что питал прежнее окно.
+            Column {
+                id: notesPage
+                visible: win.page === "Заметки"
+                width: parent.width
+                spacing: 16
+
+                // "list" - список карточек, "editor" - одна заметка в поле.
+                property string notesView: "list"
+                property var notesModel: []
+                property string notesCurrent: ""   // id открытой заметки
+                property string notesQuery: ""     // строка поиска
+                property bool busy: false          // идёт «привести в порядок»
+                property string note: ""           // жалоба редактора (пусто - нет)
+
+                function reload() { notesModel = B.notesList(notesQuery); }
+                function find(q) { notesQuery = q; reload(); }
+
+                // Новая заметка и сразу в редактор - ровно то, что раньше делала
+                // «Новая» в окне заметок.
+                function addNote() {
+                    var id = B.newNote();
+                    if (!id) return;
+                    notesCurrent = id;
+                    note = "";
+                    noteEditor.text = "";
+                    reload();
+                    notesView = "editor";
+                }
+                function openNote(id) {
+                    notesCurrent = id;
+                    note = "";
+                    noteEditor.text = B.noteText(id);
+                    notesView = "editor";
+                }
+                // К списку с сохранением (обычный «Назад») и без него (заметку
+                // только что удалили). Явное сохранение перед уходом: автосейв
+                // ждёт паузу в 700 мс, а уйти можно раньше - тогда последние
+                // слова не попали бы ни в превью списка, ни на диск.
+                function toList() { note = ""; reload(); notesView = "list"; }
+                function backToList() {
+                    if (notesCurrent) B.saveNote(notesCurrent, noteEditor.text);
+                    toList();
+                }
+
+                // Зовётся из win.openNotes (app.open_notes: трей и hotkey_notes)
+                // по настройке «notes_open». «прошлой»/«новой» открывают редактор
+                // под фокусом - тому, кто держит заметку черновиком и диктует В
+                // неё сразу; список им доступен кнопкой «Назад к списку».
+                function enter(mode) {
+                    reload();
+                    if (mode === "new") {
+                        // Чистый лист только если прошлый не остался пустым:
+                        // иначе за десять открытий накопится десять пустых.
+                        if (notesCurrent === "" || noteEditor.text.trim() !== "")
+                            addNote();
+                        else
+                            notesView = "editor";
+                    } else if (mode === "last") {
+                        if (notesCurrent === "") {
+                            if (notesModel.length > 0) openNote(notesModel[0].id);
+                            else addNote();
+                        } else {
+                            notesView = "editor";
+                        }
+                    } else {
+                        notesView = "list";
+                    }
+                }
+
+                // Поле под фокус, как только показали редактор: диктовка
+                // вставляется в активное поле, и без фокуса надиктованному некуда
+                // лечь. Оба вида всегда в дереве (переключается видимость), так
+                // что noteEditor к этому моменту существует.
+                onNotesViewChanged: if (notesView === "editor") noteEditor.forceActiveFocus()
+
+                // Заход на страницу из панели - всегда список и свежие данные.
+                // Переходы список<->редактор идут внутри (видимость страницы не
+                // меняется), их это не трогает. Открытие из трея/хоткея
+                // переопределяет вид следом, через win.openNotes -> enter().
+                onVisibleChanged: if (visible) { notesView = "list"; reload(); }
+                Component.onCompleted: reload()
+
+                // Причёсанный текст приходит из Python сигналом: считает его
+                // рабочий поток, а трогать поле можно только отсюда.
+                Connections {
+                    target: B
+                    function onNoteTidied(id, text, complaint) {
+                        notesPage.busy = false;
+                        if (complaint !== "") {
+                            if (id === notesPage.notesCurrent) notesPage.note = complaint;
+                            return;
+                        }
+                        if (id === notesPage.notesCurrent) {
+                            notesPage.note = "";
+                            noteEditor.text = text;
+                        }
+                        notesPage.reload();     // превью причёсанного в списке
+                    }
+                }
+
+                // ---------- список ----------
+                // Заголовок с кнопкой «Добавить» справа - тот же приём, что у
+                // «Подстановок» на «Словах»: кнопка живёт в SectionHeader, а не в
+                // карточке, где налезала бы на содержимое строк.
+                SectionHeader {
+                    visible: notesPage.notesView === "list"
+                    text: L.t("Недавние")
+                    buttonLabel: L.t("Добавить"); buttonKind: "primary"
+                    onAction: notesPage.addNote()
+                }
+                FlowInput {
+                    visible: notesPage.notesView === "list"
+                    width: parent.width
+                    placeholder: L.t("Найти в заметках…")
+                    onEdited: (t) => notesPage.find(t)
+                }
+                // Пусто - зовём начать, тем же EmptyState, что и другие пустые
+                // страницы: одно устройство пустоты на всю программу. Карточкой,
+                // чтобы пустой список не зиял голым полем.
+                Card {
+                    width: parent.width
+                    visible: notesPage.notesView === "list" && notesPage.notesModel.length === 0
+                    EmptyState {
+                        icon: ic.notes
+                        title: L.t("Заметок пока нет")
+                        hint: L.t("Нажмите «Добавить» и диктуйте прямо сюда.")
+                    }
+                }
+                // Каждая заметка - карточкой: заголовок, превью, время и корзина
+                // в углу. Клик по карточке открывает заметку; корзина - своей
+                // областью поверх, поэтому удаление заметку не открывает.
+                Repeater {
+                    model: notesPage.notesView === "list" ? notesPage.notesModel : []
+                    Card {
+                        width: notesPage.width
+                        Item {
+                            width: parent.width
+                            implicitHeight: Math.max(noteCard.implicitHeight + 28, 60)
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: notesPage.openNote(modelData.id)
+                            }
+                            Column {
+                                id: noteCard
+                                anchors { left: parent.left; right: trashBtn.left
+                                          top: parent.top; leftMargin: 20
+                                          rightMargin: 12; topMargin: 14 }
+                                spacing: 6
+                                Text {
+                                    width: parent.width
+                                    text: modelData.title
+                                    elide: Text.ElideRight
+                                    font.family: T.sans; font.pixelSize: T.tMd
+                                    font.weight: Font.DemiBold
+                                    color: T.text
+                                }
+                                Text {
+                                    // Прячем, когда превью повторяет заголовок:
+                                    // у короткой заметки первая строка и есть
+                                    // заголовок, дублировать её незачем.
+                                    visible: text !== "" && text !== modelData.title
+                                    width: parent.width
+                                    text: modelData.preview
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                    font.family: T.sans; font.pixelSize: T.tSm
+                                    color: T.textMuted
+                                }
+                                Text {
+                                    visible: text !== ""
+                                    text: modelData.when
+                                    font.family: T.mono; font.pixelSize: T.t2xs
+                                    color: T.textMuted
+                                }
+                            }
+                            // Корзина в углу. Иконкой, а не кнопкой «Удалить»:
+                            // место экономит, а красный проступает под курсором.
+                            Item {
+                                id: trashBtn
+                                anchors { right: parent.right; rightMargin: 14
+                                          verticalCenter: parent.verticalCenter }
+                                width: 34; height: 34
+                                Icon {
+                                    anchors.centerIn: parent
+                                    path: ic.trash
+                                    size: 18
+                                    color: trashHit.containsMouse ? T.danger : T.textMuted
+                                }
+                                MouseArea {
+                                    id: trashHit
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        B.deleteNote(modelData.id);
+                                        if (notesPage.notesCurrent === modelData.id)
+                                            notesPage.notesCurrent = "";
+                                        notesPage.reload();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ---------- редактор ----------
+                // Перенесён из windows/Notes.qml как есть: «Назад к списку», поле
+                // с автосейвом, «Привести в порядок», «Скопировать всё», «Удалить».
+                FlowButton {
+                    visible: notesPage.notesView === "editor"
+                    label: L.t("Назад к списку")
+                    onClicked: notesPage.backToList()
+                }
+                // Сохраняем не на каждую букву, а через паузу после последней:
+                // заметку пишут диктовкой, кусками по десятку слов, и писать файл
+                // на каждое нажатие незачем.
+                Timer {
+                    id: notesAutosave
+                    interval: 700
+                    onTriggered: B.saveNote(notesPage.notesCurrent, noteEditor.text)
+                }
+                Card {
+                    width: parent.width
+                    visible: notesPage.notesView === "editor"
+                    shadow: false
+                    Item {
+                        width: parent.width
+                        height: 380
+                        Flickable {
+                            id: noteFlick
+                            anchors.fill: parent
+                            anchors.margins: 16
+                            contentWidth: width
+                            contentHeight: noteEditor.paintedHeight + 20
+                            clip: true
+                            boundsBehavior: Flickable.StopAtBounds
+
+                            function ensureVisible(r) {
+                                if (contentY >= r.y)
+                                    contentY = r.y;
+                                else if (contentY + height <= r.y + r.height)
+                                    contentY = r.y + r.height - height;
+                            }
+
+                            TextEdit {
+                                id: noteEditor
+                                width: noteFlick.width
+                                wrapMode: TextEdit.Wrap
+                                selectByMouse: true
+                                font.family: T.sans
+                                font.pixelSize: T.tMd
+                                color: T.text
+                                // Та же краска выделения, что у поля словаря на
+                                // «Словах»: один вид выделения на всё окно.
+                                selectionColor: Qt.rgba(T.accent.r, T.accent.g, T.accent.b, 0.30)
+                                selectedTextColor: T.text
+                                // Автосейв только у заведённой заметки: пустой
+                                // notesCurrent - это открытый на миг список.
+                                onTextChanged: if (notesPage.notesCurrent) notesAutosave.restart()
+                                // Курсор не должен уезжать за край: текст
+                                // прибывает кусками, и без этого человек смотрит в
+                                // конец страницы, а пишется ниже.
+                                onCursorRectangleChanged: noteFlick.ensureVisible(cursorRectangle)
+                            }
+
+                            // Подсказка вместо placeholderText, которого у
+                            // TextEdit нет.
+                            Text {
+                                visible: noteEditor.text.length === 0
+                                text: L.t("Диктуйте или пишите. Сохраняется само.")
+                                font.family: T.sans; font.pixelSize: T.tMd
+                                color: T.textFaint
+                            }
+                        }
+                    }
+                }
+                // Действия: слева «Привести в порядок» и «Скопировать всё» с
+                // жалобой рядом, справа - «Удалить».
+                Item {
+                    width: parent.width
+                    visible: notesPage.notesView === "editor"
+                    height: 30
+                    Row {
+                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                        spacing: 8
+                        FlowButton {
+                            label: notesPage.busy ? L.t("Причёсываю…") : L.t("Привести в порядок")
+                            enabled: !notesPage.busy && noteEditor.text.trim().length > 0
+                            onClicked: { notesPage.busy = true; B.tidyNote(notesPage.notesCurrent, noteEditor.text) }
+                        }
+                        FlowButton {
+                            label: L.t("Скопировать всё")
+                            enabled: noteEditor.text.trim().length > 0
+                            onClicked: B.copyText(noteEditor.text)
+                        }
+                        // Почему «Привести в порядок» могло не сработать (правки
+                        // текста нет или молчит) - словами. Текст исключения при
+                        // этом остаётся в журнале.
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: notesPage.note !== ""
+                            text: notesPage.note
+                            font.family: T.sans; font.pixelSize: T.tSm
+                            color: T.danger
+                        }
+                    }
+                    FlowButton {
+                        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                        label: L.t("Удалить")
+                        kind: "danger"
+                        enabled: notesPage.notesCurrent !== ""
+                        // Удалили из редактора - к списку без сохранения: иначе
+                        // backToList пересоздал бы только что удалённую заметку.
+                        onClicked: {
+                            B.deleteNote(notesPage.notesCurrent);
+                            notesPage.notesCurrent = "";
+                            notesPage.toList();
+                        }
+                    }
+                }
+            }
+
             // ===== Диктовка =====
             // Бывшие Основное + Распознавание + Ввод: одна дверь вместо трёх.
             // Порядок секций - от того, что трогают чаще, к тому, что один раз.
@@ -1581,15 +1917,15 @@ Rectangle {
                         HotkeyField { field: "hotkey_transform"; allowClear: true }
                     }
                 }
-                // Остальные два: окно и отмена. Ни то ни другое не про речь.
+                // Остальные два: заметки и отмена. Ни то ни другое не про речь.
                 Card {
                     width: parent.width
                     SettingRow {
                         first: true
                         icon: ic.notes
                         title: L.t("Открыть заметки")
-                        subtitle: L.t("Отдельное окно для длинной диктовки")
-                        more: L.t("Открывается ещё из значка в трее и из главного окна")
+                        subtitle: L.t("Страница заметок для длинной диктовки")
+                        more: L.t("Открывается ещё из значка в трее")
                         HotkeyField { field: "hotkey_notes"; allowClear: true }
                     }
                     SettingRow {
@@ -2158,11 +2494,12 @@ Rectangle {
                     SettingRow {
                         icon: ic.notes
                         title: L.t("Заметки открываются")
-                        // По умолчанию теперь открывается СПИСОК заметок (см.
-                        // notes_qt.open) - владелец просил «список, а не пустой
-                        // лист». «прошлой»/«новой» оставлены тем, кто диктует В
-                        // окно сразу и хочет редактор под фокусом с первой
-                        // секунды; список им доступен кнопкой «Назад».
+                        // По умолчанию открывается СПИСОК заметок (страница
+                        // «Заметки», notesView="list") - владелец просил «список,
+                        // а не пустой лист». «прошлой»/«новой» оставлены тому,
+                        // кто диктует в заметку сразу и хочет редактор под
+                        // фокусом; читает это app.open_notes -> win.openNotes ->
+                        // notesPage.enter, а список доступен кнопкой «Назад».
                         subtitle: L.t("Что показать при открытии")
                         Segmented {
                             options: [{label: L.t("списком"), value: "list"},

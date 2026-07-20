@@ -11,8 +11,9 @@
 // Поэтому «Скопировать» и «Сохранить» берут текст ИЗ ПОЛЯ, а не то, что
 // приехало из Python.
 //
-// QtQuick.Controls тут нет по той же причине, что и в Notes.qml: его плагин не
-// поднимается из нашей сборки. Flickable + TextEdit делают то же самое.
+// QtQuick.Controls тут нет: его плагин не поднимается из нашей сборки по тем же
+// граблям, что разобраны в overlay_qt._preload_qml_deps. Flickable + TextEdit
+// делают то же самое.
 import QtQuick
 import "../controls"
 

@@ -59,6 +59,7 @@ import os
 
 import numpy as np
 
+import platform_api
 from recorder import SAMPLE_RATE
 
 # Что открываем. Список ЗАКРЫТЫЙ: неизвестное расширение честнее отвергнуть
@@ -340,10 +341,21 @@ class _PROPVARIANT(ctypes.Structure):
                 ("val", ctypes.c_uint64), ("pad", ctypes.c_uint64)]
 
 
+# ctypes.windll / ctypes.WINFUNCTYPE - только Windows. Модуль импортируется
+# лениво (app.py зовёт его на расшифровке файла), но GUID-константы и прототипы
+# ниже считаются на уровне модуля - то есть при самом импорте. Чтобы `import
+# audiofile` не падал на маке, _guid под darwin отдаёт нулевой GUID (он там всё
+# равно не используется: libsndfile берёт wav/mp3/ogg/opus сам, а ветка Media
+# Foundation для AAC/m4a под darwin отвергается в _mf_reader понятной фразой), а
+# прототипы строим через кроссплатформенный CFUNCTYPE-псевдоним.
+_WINFUNC = ctypes.WINFUNCTYPE if platform_api.IS_WINDOWS else ctypes.CFUNCTYPE
+
+
 def _guid(text: str) -> _GUID:
     out = _GUID()
-    ctypes.windll.ole32.CLSIDFromString(ctypes.c_wchar_p("{" + text + "}"),
-                                        byref(out))
+    if platform_api.IS_WINDOWS:
+        ctypes.windll.ole32.CLSIDFromString(ctypes.c_wchar_p("{" + text + "}"),
+                                            byref(out))
     return out
 
 
@@ -360,22 +372,22 @@ _BLOCK_ALIGN = _guid("322de230-9eeb-43bd-ab7a-ff412251541d")
 _BYTES_PER_SEC = _guid("1aab75c8-cfef-451c-ab95-ac034b8e1731")
 
 _HR = ctypes.c_long
-_Release = ctypes.WINFUNCTYPE(ctypes.c_ulong, c_void_p)
-_SetGUID = ctypes.WINFUNCTYPE(_HR, c_void_p, POINTER(_GUID), POINTER(_GUID))
-_SetU32 = ctypes.WINFUNCTYPE(_HR, c_void_p, POINTER(_GUID), c_uint32)
-_GetU32 = ctypes.WINFUNCTYPE(_HR, c_void_p, POINTER(_GUID), POINTER(c_uint32))
-_SetCurrentType = ctypes.WINFUNCTYPE(_HR, c_void_p, c_uint32,
-                                     POINTER(c_uint32), c_void_p)
-_GetCurrentType = ctypes.WINFUNCTYPE(_HR, c_void_p, c_uint32, POINTER(c_void_p))
-_GetPresentation = ctypes.WINFUNCTYPE(_HR, c_void_p, c_uint32, POINTER(_GUID),
-                                      POINTER(_PROPVARIANT))
-_ReadSample = ctypes.WINFUNCTYPE(_HR, c_void_p, c_uint32, c_uint32,
-                                 POINTER(c_uint32), POINTER(c_uint32),
-                                 POINTER(c_uint64), POINTER(c_void_p))
-_ToContiguous = ctypes.WINFUNCTYPE(_HR, c_void_p, POINTER(c_void_p))
-_Lock = ctypes.WINFUNCTYPE(_HR, c_void_p, POINTER(POINTER(ctypes.c_byte)),
-                           POINTER(c_uint32), POINTER(c_uint32))
-_Unlock = ctypes.WINFUNCTYPE(_HR, c_void_p)
+_Release = _WINFUNC(ctypes.c_ulong, c_void_p)
+_SetGUID = _WINFUNC(_HR, c_void_p, POINTER(_GUID), POINTER(_GUID))
+_SetU32 = _WINFUNC(_HR, c_void_p, POINTER(_GUID), c_uint32)
+_GetU32 = _WINFUNC(_HR, c_void_p, POINTER(_GUID), POINTER(c_uint32))
+_SetCurrentType = _WINFUNC(_HR, c_void_p, c_uint32,
+                           POINTER(c_uint32), c_void_p)
+_GetCurrentType = _WINFUNC(_HR, c_void_p, c_uint32, POINTER(c_void_p))
+_GetPresentation = _WINFUNC(_HR, c_void_p, c_uint32, POINTER(_GUID),
+                            POINTER(_PROPVARIANT))
+_ReadSample = _WINFUNC(_HR, c_void_p, c_uint32, c_uint32,
+                       POINTER(c_uint32), POINTER(c_uint32),
+                       POINTER(c_uint64), POINTER(c_void_p))
+_ToContiguous = _WINFUNC(_HR, c_void_p, POINTER(c_void_p))
+_Lock = _WINFUNC(_HR, c_void_p, POINTER(POINTER(ctypes.c_byte)),
+                 POINTER(c_uint32), POINTER(c_uint32))
+_Unlock = _WINFUNC(_HR, c_void_p)
 
 # Номера методов в таблице интерфейса. Держим именами, а не числами по месту:
 # промах на единицу здесь - это не исключение, а вызов чужой функции с чужими
@@ -405,6 +417,13 @@ def _ok(what: str, code: int) -> None:
 
 def _mf_reader(path: str):
     """Открыть файл через Media Foundation. Зовущий обязан Release и MFShutdown."""
+    if not platform_api.IS_WINDOWS:
+        # Media Foundation - Windows-only, и это единственная дорога к AAC/m4a.
+        # На маке замена - AVFoundation, отдельная задача; пока честный отказ.
+        # Ветку зовут _read_mf и _mf_duration, обе - только когда libsndfile
+        # уже отказался, то есть ровно на m4a/aac/wma.
+        raise AudioFileError("файлы m4a/aac на macOS пока не открою - "
+                             "пересохраните в wav, mp3 или ogg")
     mfplat = ctypes.windll.mfplat
     _ok("MFStartup", mfplat.MFStartup(_MF_VERSION, 1))
     reader = c_void_p()

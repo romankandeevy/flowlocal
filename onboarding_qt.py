@@ -71,6 +71,13 @@ class _Extra(QObject):
         self._watch_tail = False
         self._watch_hook = None
         self._watch_mouse_hook = None
+        # Последнее отданное состояние плашек. Зажатую клавишу Windows шлёт
+        # авто-повтором - десятки одинаковых "down" в секунду, - а на живой
+        # проверке жеста человек именно ДЕРЖИТ сочетание. Без этой памяти каждый
+        # повтор гнал бы сигнал через поток в QML; поток одинаковых состояний
+        # голодал GIL, и хук клавиатуры переставал укладываться в отведённые
+        # Windows 300 мс - весь ввод начинал лагать (HANDOFF, «тик оверлея»).
+        self._last_combo: tuple | None = None
         self._comboRaw.connect(self._relay_combo)
 
     def _log(self, msg: str) -> None:
@@ -103,6 +110,42 @@ class _Extra(QObject):
         """Автовыбор по языку (PLAN 2.4): вопрос не про железо, а про язык."""
         return models.pick(lang or None)
 
+    @Slot(str, result="QVariantMap")
+    def themeSwatch(self, name: str) -> dict:
+        """Краски КОНКРЕТНОЙ темы для мини-превью на шаге выбора оформления.
+
+        Не через глобальную T: там живёт ТЕКУЩАЯ тема, и все три карточки
+        показали бы одно и то же. Считаем пары бумага/чернила прямо из палитры
+        (theme._PALETTE) и сплавляем производные - глобальное состояние темы не
+        трогаем. «system» разворачиваем в реальную тему Windows: карточка
+        «Система» должна показывать то, что человек и увидит.
+
+        Отдаём готовыми «#rrggbb» - строку QML кладёт в color как есть.
+        """
+        t = T.resolve(name)                       # system -> light|dark
+        pal = T._PALETTE[t]
+        ink, paper = pal["ink"], pal["paper"]
+        a = dict(T._ALPHA)
+        a.update(pal.get("alpha") or {})
+
+        def flat(alpha: float) -> str:
+            # «серый» - это чернила поверх бумаги; сплавляем в непрозрачный цвет,
+            # ровно как theme._apply делает для текущей темы.
+            return T.hx(T.mix(paper, ink, alpha))
+
+        return {
+            "paper": T.hx(paper),
+            "ink": T.hx(ink),
+            "text": T.hx(ink),
+            "textMuted": flat(a["text_muted"]),
+            "textFaint": flat(a["text_faint"]),
+            "border": flat(a["border"]),
+            "fillStrong": flat(a["fill_strong"]),
+            "accent": T.hx(pal["accent"]),
+            "accentFg": T.hx(pal["accent_fg"]),
+            "success": T.hx(pal["success"]),
+        }
+
     # ---------- живое нажатие сочетания ----------
     #
     # Экран сочетания был единственным местом мастера, где человеку называли
@@ -128,6 +171,7 @@ class _Extra(QObject):
         self._watch_mods, self._watch_key, self._watch_mouse = mods, key, mouse
         self._watch_held = set()
         self._watch_tail = False
+        self._last_combo = None      # новый экран - первый emit должен пройти
         try:
             import keyboard
 
@@ -170,6 +214,7 @@ class _Extra(QObject):
         self._watch_hook = self._watch_mouse_hook = None
         self._watch_held = set()
         self._watch_tail = False
+        self._last_combo = None
         try:
             self._app._on_hotkey_capture(False)     # хоткеи приложению обратно
         except Exception as e:  # noqa: BLE001
@@ -183,7 +228,14 @@ class _Extra(QObject):
         down = [m in self._watch_held for m in self._watch_mods]
         if self._watch_key or self._watch_mouse:
             down.append(self._watch_tail)
-        self._comboRaw.emit(down, bool(down) and all(down))
+        lit = bool(down) and all(down)
+        # Шлём, только когда состояние реально изменилось: авто-повтор зажатой
+        # клавиши приносит то же самое десятки раз в секунду - см. _last_combo.
+        state = (tuple(down), lit)
+        if state == self._last_combo:
+            return
+        self._last_combo = state
+        self._comboRaw.emit(down, lit)
 
     # Колбэки ниже исполняются в потоке keyboard/mouse: только своё состояние
     # и сигнал, больше ничего.

@@ -23,7 +23,6 @@ WindowDoesNotAcceptFocus - проверено tools/probe_qt_overlay.py), кон
 рисованные в PIL, и pystray со своим потоком.
 """
 
-import ctypes
 import json
 import os
 import sys
@@ -84,7 +83,15 @@ os.chdir(APP_DIR)
 # exe активного окна для правил тона. Окно с попиксельной альфой оттуда больше
 # не нужно (его заменил Qt), но win32-хвост живёт до этапа 11 (platform/).
 import layered  # noqa: E402
-import keyboard  # noqa: E402
+import platform_api  # noqa: E402
+
+# keyboard - только Windows (см. requirements.txt и platform_api.CAN_HOTKEYS).
+# На macOS библиотеки нет вовсе; держим имя пустым, а вся привязка хоткеев ниже
+# уходит в заглушку. Так `import app` не падает на ModuleNotFoundError.
+if platform_api.IS_WINDOWS:
+    import keyboard  # noqa: E402
+else:
+    keyboard = None
 from PySide6.QtCore import QObject, QTimer, Signal  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -103,7 +110,8 @@ from version import __version__  # noqa: E402
 import cleaner  # noqa: E402
 from cleaner import _strip_fillers, clean, extract_commands, llm_command  # noqa: E402
 from inserter import (_set_clipboard_text, backspace,  # noqa: E402
-                      copy_selection, insert, press_enter, to_clipboard)
+                      copy_selection, grab_all, insert, press_enter,
+                      select_all, to_clipboard)
 from overlay_qt import Overlay  # noqa: E402
 from recorder import Recorder  # noqa: E402
 from transcriber import Transcriber  # noqa: E402
@@ -155,6 +163,11 @@ def log(msg: str) -> None:
     print(line, end="")   # под pythonw sys.stdout = None, print молча ничего не делает
 
 
+# Заглушки платформы (beep, single_instance, фатальное окно) пишут в тот же
+# журнал - отдаём им наш log сразу, как только он объявлен.
+platform_api.set_logger(log)
+
+
 def die(msg: str, detail: str = "") -> None:
     """Фатальная ошибка так, чтобы её увидели: под pythonw консоли нет и
     traceback уходит в никуда.
@@ -173,20 +186,15 @@ def die(msg: str, detail: str = "") -> None:
     открывается кнопкой, в этот момент ещё нет и уже не будет.
     """
     log(f"FATAL: {msg}" + (f" | {detail}" if detail else ""))
-    try:
-        ctypes.windll.user32.MessageBoxW(
-            None, f"{msg}\n\nЧто случилось - записано в журнале работы:\n{LOG_PATH}",
-            "FlowLocal", 0x10)
-    except Exception:  # noqa: BLE001
-        pass
+    # Окно средствами платформы: MessageBoxW на Windows, osascript на macOS -
+    # ctypes.windll там нет вовсе, и обращение к нему стало бы второй ошибкой
+    # поверх первой (ровно то, что роняло старт на не-Windows).
+    platform_api.fatal_message(msg, LOG_PATH)
 
 
 def beep(freq: int, dur: int, enabled: bool) -> None:
-    if not enabled:
-        return
-    import winsound
-
-    threading.Thread(target=winsound.Beep, args=(freq, dur), daemon=True).start()
+    # winsound - только Windows; ветвление внутри platform_api.beep.
+    platform_api.beep(freq, dur, enabled)
 
 
 class _UiBridge(QObject):
@@ -248,7 +256,6 @@ class App:
         self._last_use = time.time()  # когда последний раз диктовали
         self._update: dict | None = None   # свежая версия с GitHub, если нашлась
         self._wake = None            # слух за сном и разблокировкой экрана
-        self.notes_win = None        # окно заметок, создаётся при первом открытии
         self.transcript = None       # окно с расшифровкой файла
         # Идёт ли расшифровка файла. Отдельно от _recording: диктовать во время
         # расшифровки можно (она ждёт своей очереди на _work_lock), а вот
@@ -344,6 +351,12 @@ class App:
         | {n for names in _GENERIC_KEYS.values() for n in names})
 
     def _hotkey_bind(self) -> None:
+        if not platform_api.CAN_HOTKEYS:
+            # macOS: библиотеки keyboard нет, глобальные хоткеи пойдут через
+            # pynput+Quartz - отдельная большая работа. Пока тихо не привязываем
+            # ничего: окно, настройки и трей работают, диктовка по хоткею - нет.
+            platform_api.note_unsupported("горячие клавиши")
+            return
         self._hotkey_unbind()
         for mode in ("hold", "toggle", "command"):
             spec = str(self.cfg.get(f"hotkey_{mode}") or "").strip()
@@ -522,10 +535,11 @@ class App:
             return False
 
     def _bind_transform(self) -> None:
-        """Хоткей списка преобразований. Пусто - выключено.
+        """Хоткей преобразований текста. Пусто - выключено.
 
         Отдельным биндом, а не режимом диктовки: здесь нечего записывать.
-        Нажал - взяли выделение и показали список; всё остальное делает выбор.
+        Нажал - взяли ВЕСЬ текст поля (Ctrl+A, Ctrl+C) и показали пилюлю
+        выбора; выделять руками ничего не надо. Всё остальное делает выбор.
         """
         spec = str(self.cfg.get("hotkey_transform") or "").strip()
         if not spec:
@@ -576,23 +590,28 @@ class App:
                 log(f"bad {key} {spec!r}: {e}")
 
     def open_notes(self) -> None:
-        """Открыть окно заметок. ТОЛЬКО главный поток Qt.
+        """Открыть заметки. ТОЛЬКО главный поток Qt.
 
-        Диктовка в него работает сама: текст мы вставляем в активное окно через
-        Ctrl+V, а активным будет это окно с полем в фокусе. Специального кода
-        для этого нет и не нужно.
+        Заметки теперь страница главного окна, а не отдельное окно: диктуют в
+        поле редактора на ней. Открываем то же единственное окно (что трей и
+        «Пуск»), переводим его на страницу «Заметки» и по настройке «notes_open»
+        решаем, показать список или сразу редактор под фокусом - чтобы
+        надиктованному было куда лечь с первой секунды.
+
+        Диктовка в поле работает сама: текст мы вставляем в активное окно через
+        Ctrl+V, а активным будет это окно с полем в фокусе (страница берёт поле
+        под фокус при переходе в редактор). Специального кода для этого нет.
         """
         try:
-            if self.notes_win is None:
-                from notes_qt import NotesWindow
-
-                self.notes_win = NotesWindow(
-                    self.overlay.tokens, self.cfg, log, tidy_fn=self._tidy_note)
-            self.notes_win.open()
+            self._open_settings()
+            root = self.settings.view.rootObject() if self.settings.view else None
+            if root is None:
+                return
+            root.openNotes(str(self.cfg.get("notes_open") or "list"))
         except Exception as e:  # noqa: BLE001 - заметки не должны ронять диктовку
             import traceback
 
-            log("окно заметок не открылось:\n" + traceback.format_exc())
+            log("страница заметок не открылась:\n" + traceback.format_exc())
             self.ui(self.overlay.show_error, "заметки не открылись")
 
     # ---------- расшифровка готового файла (PLAN 11) ----------
@@ -779,8 +798,8 @@ class App:
         """Колбэк хука: только передать в главный поток и уйти.
 
         У низкоуровневого хука 300 мс на ответ, иначе Windows вышибает его
-        совсем. Ctrl+C с ожиданием буфера сюда не поместится, поэтому вся
-        работа - в потоке.
+        совсем. Ctrl+A и Ctrl+C с ожиданием буфера сюда не поместятся, поэтому
+        вся работа - в потоке.
         """
         if self._recording or self._capturing:
             return
@@ -810,7 +829,14 @@ class App:
         return "правка текста не установлена - откройте настройки"
 
     def _transform_grab(self) -> None:
-        """Снять выделение и показать список. Рабочий поток."""
+        """Взять весь текст поля и показать пилюлю выбора. Рабочий поток.
+
+        Проверки идут в таком порядке нарочно. Сперва спрашиваем, ЕСТЬ ли что
+        показывать (модель включена и преобразования не пусты), и лишь потом
+        трогаем чужое поле. Нет преобразований - выходим, ничего не тронув и не
+        забрав буфер: человек нажал зря, но для него не должно произойти вообще
+        ничего.
+        """
         if not self._work_lock.acquire(blocking=False):
             log("преобразование: занято")
             return
@@ -821,27 +847,31 @@ class App:
                 return
             items = transforms.all_for(self.cfg)
             if not items:
-                self.ui(self.overlay.show_error, "список преобразований пуст")
+                # Все готовые спрятаны и своих нет - показывать нечего. Коротко
+                # говорим и уходим, поля не касаясь.
+                self.ui(self.overlay.show_error, "нет преобразований")
                 return
-            # Окно запоминаем ДО Ctrl+C: список сейчас заберёт фокус себе, и
-            # спрашивать «какое окно активно» будет уже поздно - активным
-            # окажется наш собственный список.
+            # Окно запоминаем ДО Ctrl+A/Ctrl+C: пилюля сейчас заберёт фокус
+            # себе, и спрашивать «какое окно активно» будет уже поздно -
+            # активной окажется она сама.
             self._tf_hwnd = layered.foreground_window()
             self._inserting = True
             try:
-                sel, old_clip = copy_selection()
+                text, old_clip = grab_all()
             finally:
                 self._insert_window_closes()
-            if not sel or not sel.strip():
-                self.ui(self.overlay.show_error, "ничего не выделено")
+            if not text or not text.strip():
+                # Ctrl+A ничего не выделил - поле пустое, преобразовывать нечего.
+                # Буфер человека grab_all уже вернул на место.
+                self.ui(self.overlay.show_error, "нет текста")
                 return
-            self._tf_text, self._tf_clip = sel, old_clip
+            self._tf_text, self._tf_clip = text, old_clip
             self.ui(self._transform_show, items)
         finally:
             self._work_lock.release()
 
     def _transform_show(self, items: list) -> None:
-        """Показать список. ТОЛЬКО главный поток Qt."""
+        """Показать пилюлю выбора. ТОЛЬКО главный поток Qt."""
         if self.picker is None:
             from picker_qt import Picker
 
@@ -880,10 +910,17 @@ class App:
                 result = llm_command(text, t["instruction"],
                                      self.cfg.get("llm") or {}, log)
                 if not result:
+                    # Модель промолчала или Ollama отвалилась. Поле не трогаем
+                    # и возвращаем буфер человека: для него не случилось ничего.
+                    self._restore_clip(old_clip)
                     self.ui(self.overlay.show_error, "не получилось - текст не тронут")
                     return
                 self._inserting = True
                 try:
+                    # Весь текст поля заменяем целиком: заново выделяем его
+                    # (фокус уходил к пилюле, прежнее выделение снялось) и
+                    # вставляем результат поверх выделенного.
+                    select_all()
                     ok = insert(result, mode=self.cfg.get("insert_mode", "paste"),
                                 restore=False)
                 finally:
@@ -903,7 +940,17 @@ class App:
                     self.ui(self.overlay.show_error, "не удалось вставить")
             except Exception as e:  # noqa: BLE001
                 log(f"преобразование не вышло: {e}")
+                self._restore_clip(old_clip)
                 self.ui(self.overlay.show_error, "не получилось - текст не тронут")
+
+    def _restore_clip(self, old_clip) -> None:
+        """Вернуть буфер человека, если он был и если он вообще нужен.
+
+        Общий хвост неудачных путей преобразования: grab_all затёр буфер полем,
+        а раз результат никуда не лёг - буфер должен подтверждать, что для
+        человека не произошло ничего."""
+        if self.cfg.get("restore_clipboard", True) and old_clip is not None:
+            _set_clipboard_text(old_clip)
 
     def _bind_undo(self) -> None:
         """Хоткей отмены - отдельно от диктовки.
@@ -1666,7 +1713,7 @@ class App:
             llm_install=self.install_ollama,
             llm_busy=self.ollama_busy,
             redo_fn=self._redo_recording,
-            notes_fn=self.open_notes,
+            tidy_fn=self._tidy_note,
             transcribe_fn=self.transcribe_file)
 
     def _open_settings(self) -> None:
@@ -1787,7 +1834,7 @@ class App:
             i18n.set_language(str(new.get("ui_language") or "ru"))
             # Строки в QML - это привязки к L.t(), и сигнал заставляет их
             # пересчитаться. Пересобирать окно, как когда-то с темой, не надо.
-            for win in (self.settings, self.onboarding, self.notes_win):
+            for win in (self.settings, self.onboarding):
                 lang = getattr(win, "lang", None)
                 if lang is not None:
                     lang.retranslate()
@@ -2218,6 +2265,8 @@ class App:
         нельзя даже когда починить не вышло - сказать «оглох» полезнее, чем не
         сказать ничего.
         """
+        if not platform_api.CAN_HOTKEYS:
+            return          # хоткеев нет - и оглохнуть нечему (macOS)
         why = wakeup.listener_dead(keyboard)
         if not why or self._recording or self._capturing:
             return
@@ -2577,10 +2626,11 @@ class App:
             self.qapp.exec()
         finally:
             self._hotkey_unbind()
-            try:
-                keyboard.unhook_all()
-            except Exception:  # noqa: BLE001
-                pass
+            if keyboard is not None:
+                try:
+                    keyboard.unhook_all()
+                except Exception:  # noqa: BLE001
+                    pass
             if self.settings is not None:
                 self.settings.close()
             self.overlay.destroy()
@@ -2663,12 +2713,9 @@ IPC_NAME = "FlowLocal_ipc"
 
 
 def single_instance() -> bool:
-    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    k32.CreateMutexW.restype = ctypes.c_void_p
-    k32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
-    # хэндл намеренно не закрываем: мьютекс должен жить, пока живёт процесс
-    k32.CreateMutexW(None, False, "FlowLocal_single_instance")
-    return ctypes.get_last_error() != 183  # ERROR_ALREADY_EXISTS
+    # Мьютекс (Windows) или заглушка (macOS: пока без блокировки) - ветвление в
+    # platform_api, чтобы голого CreateMutexW в общем коде не было.
+    return platform_api.single_instance()
 
 
 def poke_running_instance() -> bool:
@@ -2843,9 +2890,9 @@ def main() -> None:
         _q = QApplication(sys.argv)
         if not poke_running_instance():
             # Пайпа нет: экземпляр от старой версии или умирает. Сказать вслух
-            # - лучше, чем молча выйти.
-            ctypes.windll.user32.MessageBoxW(
-                None, "FlowLocal уже запущен - иконка в трее.", "FlowLocal", 0x40)
+            # - лучше, чем молча выйти. Окно средствами платформы (на macOS эта
+            # ветка недостижима: single_instance там всегда True).
+            platform_api.already_running_notice()
         return
     C.bootstrap()      # свежий клон: config.json ещё нет, делаем из примера
     # --silent ставит себе автозапуск (app_paths.autostart_command): вход в

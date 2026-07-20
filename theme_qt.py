@@ -21,6 +21,7 @@ import sys
 from PySide6.QtCore import Property, QObject, Signal, Slot
 from PySide6.QtGui import QColor
 
+import platform_api
 import theme as T
 
 
@@ -48,6 +49,14 @@ def effects_ok() -> bool:
     места, где однажды починят только одно. lru_cache держит один ответ на
     процесс: DLL грузится единожды, спрашивать её состояние может кто угодно.
     """
+    # Грабли и лечение целиком про Windows: ctypes.WinDLL там нет вовсе, и его
+    # вызов упал бы не OSError (который мы ловим), а AttributeError - прямо на
+    # импорте overlay_qt, где эта функция и зовётся. На macOS зависимости
+    # QtQuick.Effects резолвятся штатным загрузчиком, наш подпорки не нужны;
+    # тени сейчас просто не будет, а окно покажется - QML грузит PillShadow/
+    # CardShadow через Loader только когда этот флаг True (см. Overlay.qml).
+    if not platform_api.IS_WINDOWS:
+        return False
     base = getattr(sys, "_MEIPASS", None)
     if base is None:
         import PySide6

@@ -274,7 +274,7 @@ Two deliberate departures from the system, both forced:
 | `inserter.py` | Insertion into the active window (clipboard + Ctrl+V, or character by character) |
 | `overlay_qt.py`, `qml/windows/Overlay.qml` | The pill |
 | `settings_qt.py`, `qml/windows/Settings.qml` | The app window: how things are going, history, stats and settings. Data in Python, layout in QML |
-| `notes_qt.py`, `notes.py` | The notes window |
+| `notes.py` | Notes: storage, search, tidy-up. Shown by the *Notes* page in the app window |
 | `i18n.py` | English interface; the translation key is the Russian string itself |
 | `theme.py`, `theme_qt.py` | Korti tokens - one source of truth, bridged into QML |
 

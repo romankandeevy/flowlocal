@@ -30,7 +30,9 @@ keyboard после этого считает клавишу зажатой на
 """
 
 import ctypes
-import ctypes.wintypes as wt
+import ctypes.wintypes as wt   # чистые псевдонимы типов, есть и на macOS
+
+import platform_api
 
 WM_POWERBROADCAST = 0x0218
 WM_WTSSESSION_CHANGE = 0x02B1
@@ -51,16 +53,22 @@ _WAKE_POWER = {PBT_APMRESUMESUSPEND, PBT_APMRESUMEAUTOMATIC}
 _WAKE_SESSION = {WTS_SESSION_UNLOCK, WTS_SESSION_LOGON,
                  WTS_CONSOLE_CONNECT, WTS_REMOTE_CONNECT}
 
-_WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, wt.HWND, ctypes.c_uint,
-                              ctypes.c_ulonglong, ctypes.c_longlong)
+# ctypes.WINFUNCTYPE - только Windows (AttributeError на маке), и вся ловля
+# пробуждения на нём и на скрытом окне держится. Механизм целиком Windows: на
+# macOS сон/пробуждение слушает NSWorkspace.notificationCenter, но главный повод
+# этого модуля - залипание клавиш в библиотеке keyboard - на маке отпадает
+# вместе с самой keyboard. Поэтому под darwin WakeWatcher - заглушка (start()
+# возвращает False), а класс и тип поднимаем только под Windows.
+if platform_api.IS_WINDOWS:
+    _WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, wt.HWND, ctypes.c_uint,
+                                  ctypes.c_ulonglong, ctypes.c_longlong)
 
-
-class _WNDCLASS(ctypes.Structure):
-    _fields_ = [("style", ctypes.c_uint), ("lpfnWndProc", _WNDPROC),
-                ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int),
-                ("hInstance", wt.HINSTANCE), ("hIcon", wt.HICON),
-                ("hCursor", wt.HANDLE), ("hbrBackground", wt.HBRUSH),
-                ("lpszMenuName", wt.LPCWSTR), ("lpszClassName", wt.LPCWSTR)]
+    class _WNDCLASS(ctypes.Structure):
+        _fields_ = [("style", ctypes.c_uint), ("lpfnWndProc", _WNDPROC),
+                    ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int),
+                    ("hInstance", wt.HINSTANCE), ("hIcon", wt.HICON),
+                    ("hCursor", wt.HANDLE), ("hbrBackground", wt.HBRUSH),
+                    ("lpszMenuName", wt.LPCWSTR), ("lpszClassName", wt.LPCWSTR)]
 
 
 class WakeWatcher:
@@ -72,12 +80,20 @@ class WakeWatcher:
         self.log = log
         self.hwnd = None
         self._registered = False
+        self._wts = None
+        if not platform_api.IS_WINDOWS:
+            # На маке ни _WNDPROC, ни WinDLL нет - и не нужно (см. блок выше).
+            self._proc = None
+            self._u32 = None
+            return
         self._proc = _WNDPROC(self._wndproc)   # ссылку держим полем, не локальной
         self._u32 = ctypes.WinDLL("user32", use_last_error=True)
-        self._wts = None
 
     def start(self) -> bool:
         """True - слушаем. False - не вышло, но программа работает как прежде."""
+        if not platform_api.IS_WINDOWS:
+            platform_api.note_unsupported("слух за сном и разблокировкой экрана")
+            return False
         try:
             self._create_window()
             self._subscribe_session()
@@ -224,6 +240,8 @@ def can_revive(keyboard) -> bool:
 
 def revive(keyboard, log) -> None:
     """Поднять слушателя заново. Звать только после can_revive()."""
+    if keyboard is None:            # не-Windows: библиотеки keyboard нет вовсе
+        return
     listener = keyboard._listener
     listener.listening = False      # иначе start_if_necessary() сочтёт, что всё уже идёт
     log("поднимаю слушателя клавиатуры заново")
@@ -240,6 +258,8 @@ def clear_stuck_keys(keyboard, log) -> int:
     состояние она не предлагает, а без сброса пересборка хоткеев бесполезна -
     сочетания сверяются именно с этим набором.
     """
+    if keyboard is None:            # не-Windows: библиотеки keyboard нет вовсе
+        return 0
     try:
         listener = keyboard._listener
         with listener.lock:

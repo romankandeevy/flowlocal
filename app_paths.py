@@ -6,7 +6,14 @@
 
 import os
 import sys
-import winreg
+
+import platform_api
+
+# winreg - только Windows: и сам модуль (ModuleNotFoundError на маке), и всё, что
+# им читается/пишется (автозапуск через HKCU\...\Run). На macOS автозапуск - это
+# LaunchAgent, отдельная задача; пока функции ниже отвечают заглушками.
+if platform_api.IS_WINDOWS:
+    import winreg
 
 def _app_dir() -> str:
     """Папка, рядом с которой живут данные: конфиг, лог, история, модель.
@@ -61,6 +68,8 @@ def autostart_command() -> str:
 
 
 def autostart_enabled() -> bool:
+    if not platform_api.IS_WINDOWS:
+        return False        # автозапуск на macOS пока не заведён - см. шапку
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
             value, _ = winreg.QueryValueEx(k, RUN_NAME)
@@ -72,6 +81,9 @@ def autostart_enabled() -> bool:
 
 
 def set_autostart(enabled: bool) -> None:
+    if not platform_api.IS_WINDOWS:
+        platform_api.note_unsupported("автозапуск")
+        return
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
         if enabled:
             winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, autostart_command())
@@ -88,6 +100,8 @@ def autostart_command_current() -> str:
     Нужна тому, кто решает, лечить запись или не трогать: из исходников
     переписывать команду, указывающую на установленную сборку, нельзя.
     """
+    if not platform_api.IS_WINDOWS:
+        return ""
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
             value, _ = winreg.QueryValueEx(k, RUN_NAME)
@@ -107,6 +121,8 @@ def autostart_command_stale() -> bool:
     Чинится на старте (app.py). Не при выключенном автозапуске: чего нет, то и
     чинить нечего.
     """
+    if not platform_api.IS_WINDOWS:
+        return False
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
             value, _ = winreg.QueryValueEx(k, RUN_NAME)

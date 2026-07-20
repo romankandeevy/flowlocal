@@ -30,6 +30,7 @@ from PySide6.QtQuick import QQuickView
 
 import app_paths
 import config as C
+import platform_api
 
 
 def _log(msg: str) -> None:
@@ -52,6 +53,7 @@ def _log(msg: str) -> None:
 
 import inputspec
 import models
+import notes
 import stats
 import theme as T
 from theme_qt import Tokens
@@ -147,12 +149,18 @@ class Backend(QObject):
     # Тот же приём и по той же причине: замер видеокарты кончается в своём
     # потоке, а решение по нему пишет конфиг - то есть дёргает QTimer в set().
     _dml_ready = Signal("QVariantMap")
+    # «Привести в порядок» на странице «Заметки»: id, готовый текст, жалоба
+    # ("" - всё вышло). Публичный, слушает QML (страница обновляет поле и список).
+    noteTidied = Signal(str, str, str)
+    # Приватный, тот же приём: причёсывание считает рабочий поток, а трогать QML
+    # и конфиг можно только из главного - сигнал переносит результат сам.
+    _note_ready = Signal(str, str)
 
     def __init__(self, on_change, on_hotkey_capture, info_fn,
                  history_path: str, log_path: str, on_onboarding=None,
                  update_fn=None, do_update=None,
                  llm_install=None, llm_busy=None, redo_fn=None,
-                 notes_fn=None, transcribe_fn=None) -> None:
+                 tidy_fn=None, transcribe_fn=None) -> None:
         super().__init__()
         self._on_change = on_change
         self._on_hotkey_capture = on_hotkey_capture
@@ -164,7 +172,7 @@ class Backend(QObject):
         self._llm_busy_fn = llm_busy
         self._redo_fn = redo_fn      # распознать сохранённую запись заново
         self._punct_busy = False     # идёт ли скачивание модели знаков
-        self._notes_fn = notes_fn    # открыть окно заметок
+        self._tidy_fn = tidy_fn      # причесать заметку (app._tidy_note)
         self._transcribe_fn = transcribe_fn   # расшифровать перетащенный файл
         self.history_path = history_path
         self.log_path = log_path
@@ -182,6 +190,7 @@ class Backend(QObject):
         self._dml_busy = False       # идёт ли проба видеокарты
         self._captured.connect(self._finish)
         self._dml_ready.connect(self._dml_apply)
+        self._note_ready.connect(self._on_note_ready)
 
     # ---------- конфиг ----------
 
@@ -255,11 +264,77 @@ class Backend(QObject):
         self.flashed.emit(f"{n} технических терминов "
                           + ("добавлено" if on else "убрано"), "accent")
 
-    @Slot()
-    def openNotes(self) -> None:
-        """Открыть окно заметок из панели."""
-        if self._notes_fn is not None:
-            self._notes_fn()
+    # ---------- заметки ----------
+    #
+    # Заметки - страница главного окна (qml/windows/Settings.qml), а не отдельное
+    # окно: диктуют в поле редактора на ней. Хранение, поиск и уборка - в notes.py;
+    # «привести в порядок» идёт через ту же правку текста, что и трансформы
+    # (app._tidy_note), вторым путём к Ollama не обзаводимся. Прежнее окно
+    # (notes_qt.NotesWindow) ретайрено, его логика перенесена сюда как есть.
+
+    @Slot(str, result="QVariantList")
+    def notesList(self, query: str = "") -> list:
+        """Заметки для страницы, свежие первыми. query - поиск по тексту."""
+        return notes.listing(query)
+
+    @Slot(str, result=str)
+    def noteText(self, note_id: str) -> str:
+        """Текст заметки целиком - страница кладёт его в поле редактора."""
+        d = notes.load(note_id)
+        return (d or {}).get("text", "") if d else ""
+
+    @Slot(result=str)
+    def newNote(self) -> str:
+        """Завести пустую заметку, вернуть идентификатор. Пусто - не вышло."""
+        return notes.save(notes.new_id(), "")
+
+    @Slot(str, str)
+    def saveNote(self, note_id: str, text: str) -> None:
+        """Сохранить заметку. Зовётся автосейвом и перед уходом к списку."""
+        if note_id:
+            notes.save(note_id, text)
+
+    @Slot(str)
+    def deleteNote(self, note_id: str) -> None:
+        notes.delete(note_id)
+
+    @Slot(str, str)
+    def tidyNote(self, note_id: str, text: str) -> None:
+        """«Привести в порядок»: причесать заметку моделью в отдельном потоке.
+
+        Тот же путь, что был в notes_qt.improve: работа долгая (целая страница),
+        поэтому уходит в поток, а результат возвращается сигналом - QML и конфиг
+        трогают только из главного потока (см. _captured).
+        """
+        def work() -> None:
+            got = ""
+            try:
+                if self._tidy_fn is not None:
+                    got = self._tidy_fn(text, notes.TIDY)
+            except Exception as e:  # noqa: BLE001 - заметки не должны ронять окно
+                _log(f"заметку не причесать: {e}")
+            self._note_ready.emit(note_id, got)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_note_ready(self, note_id: str, text: str) -> None:
+        """Итог «привести в порядок», уже в главном потоке (через _note_ready).
+
+        Пусто - правки текста нет или она молчит: говорим словами, почему, и
+        разница важна (поставить с нуля против разбудить). Иначе сохраняем
+        причёсанное и отдаём странице, чтобы поле и список обновились.
+        """
+        if not text:
+            import i18n
+            import ollama_setup as O
+
+            why = ("правка текста не отвечает"
+                   if O.state() == O.STATE_SLEEPING
+                   else "правка текста не установлена - откройте настройки")
+            self.noteTidied.emit(note_id, "", i18n.t(why))
+            return
+        notes.save(note_id, text)
+        self.noteTidied.emit(note_id, text, "")
 
     @Slot(str, str)
     def addToDictionary(self, heard: str, correct: str) -> None:
@@ -1106,6 +1181,11 @@ class Backend(QObject):
         """Ловим и клавиши, и боковые кнопки мыши: «ctrl+mouse4» - законный
         бинд. Клавиши - библиотекой keyboard, а не событиями Qt: приложение
         вешает хоткей через неё же, и имена должны совпадать."""
+        if not platform_api.CAN_HOTKEYS:
+            # macOS: библиотеки keyboard нет, ловить сочетание нечем. Не падаем
+            # на импорте из QML-слота - поле просто не начнёт захват.
+            platform_api.note_unsupported("захват сочетания клавиш")
+            return
         import keyboard
         from pynput import mouse as pmouse
 
@@ -1124,6 +1204,12 @@ class Backend(QObject):
     def cancelCapture(self) -> None:
         """Прервать захват. Безопасно звать всегда - в том числе при закрытии
         окна: иначе хук остался бы висеть, а приложение - вообще без хоткея."""
+        if not platform_api.CAN_HOTKEYS:
+            # На маке захват и не начинался (startCapture вышел рано) - но эту
+            # функцию зовут и на закрытии окна, безусловно. Импорт keyboard там
+            # уронил бы закрытие настроек, поэтому выходим до него.
+            self._cap_field = ""
+            return
         import keyboard
 
         if not self._cap_field:
@@ -1635,12 +1721,12 @@ class SettingsWindow:
                  history_path: str, log_path: str, on_onboarding=None,
                  update_fn=None, do_update=None,
                  llm_install=None, llm_busy=None, redo_fn=None,
-                 notes_fn=None, transcribe_fn=None) -> None:
+                 tidy_fn=None, transcribe_fn=None) -> None:
         self.backend = Backend(on_change, on_hotkey_capture, info_fn,
                                history_path, log_path, on_onboarding=on_onboarding,
                                update_fn=update_fn, do_update=do_update,
                                llm_install=llm_install, llm_busy=llm_busy,
-                               redo_fn=redo_fn, notes_fn=notes_fn,
+                               redo_fn=redo_fn, tidy_fn=tidy_fn,
                                transcribe_fn=transcribe_fn)
         self.tokens = Tokens()
         self.view: QQuickView | None = None

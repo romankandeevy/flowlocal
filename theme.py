@@ -36,6 +36,8 @@ import sys
 
 from PIL import ImageFont
 
+import platform_api
+
 
 def _assets_dir() -> str:
     """Где лежат шрифты.
@@ -310,6 +312,11 @@ def mode() -> str:
 def system_theme() -> str:
     """Что выбрано в оформлении Windows. Не спросить нельзя: «системная» -
     умолчание, а Windows про свою тему рассказывает только через реестр."""
+    if not platform_api.IS_WINDOWS:
+        # Реестра на маке нет; определение системной темы через NSAppearance -
+        # отдельная задача. Пока умолчание тёмное, как исторически и было
+        # (та же ветка, что и при отсутствующем ключе реестра ниже).
+        return "dark"
     import winreg
 
     try:
@@ -458,6 +465,12 @@ def register_fonts() -> bool:
     """
     global _registered
     if _registered:
+        return True
+    if not platform_api.IS_WINDOWS:
+        # На macOS приватной регистрации через GDI нет и не нужно: PIL берёт
+        # шрифт по пути напрямую (ImageFont.truetype ниже), а Qt подхватывает
+        # его сам через QFontDatabase. Отмечаемся сделанными и не трогаем WinDLL.
+        _registered = True
         return True
     gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
     gdi32.AddFontResourceExW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_void_p]

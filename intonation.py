@@ -86,15 +86,17 @@ def _f0(frame: np.ndarray) -> float:
     return SAMPLE_RATE / peak
 
 
-def rises(audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -> bool:
-    """Идёт ли тон вверх к концу фразы.
+def measure(audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -> dict:
+    """Замер подъёма тона к концу фразы - числами, а не «да/нет».
 
-    Сравниваем медиану первой половины звонких кадров хвоста с медианой
-    последней. Медиана, а не среднее: одна сорвавшаяся оценка тона не должна
-    решать за всю фразу.
+    Возвращает всё, по чему принимается решение: звонких кадров, тон в начале
+    и в конце хвоста, подъём в полутонах, порог. Нужно, чтобы порог можно было
+    подстроить под конкретный голос и микрофон по журналу, а не на глаз: у
+    разных людей и разных гарнитур своя граница, и «поставь пониже» вслепую
+    ловит ложные вопросы, которых вся эта осторожность и избегает.
     """
     if audio is None or audio.size < int(0.2 * sample_rate):
-        return False
+        return {"voiced": 0, "reason": "коротко"}
 
     tail = audio[-int(_TAIL_SEC * sample_rate):]
     frame_n = int(_FRAME * sample_rate)
@@ -107,7 +109,7 @@ def rises(audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -> bool:
             pitches.append(f)
 
     if len(pitches) < _MIN_VOICED:
-        return False
+        return {"voiced": len(pitches), "reason": "мало звонких"}
 
     # Опора - первая половина хвоста, куда подъём ещё не дошёл. Вершина - самый
     # конец, а не медиана второй половины: медиана попадает в СЕРЕДИНУ подъёма и
@@ -120,10 +122,18 @@ def rises(audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -> bool:
     before = float(np.median(pitches[:half]))
     after = float(np.median(pitches[-4:]))
     if before <= 0 or after <= 0:
-        return False
+        return {"voiced": len(pitches), "reason": "нулевой тон"}
 
     semitones = 12.0 * np.log2(after / before)
-    return bool(semitones >= _RISE_SEMITONES)
+    return {"voiced": len(pitches), "before": round(before, 1),
+            "after": round(after, 1), "semitones": round(semitones, 2),
+            "threshold": _RISE_SEMITONES, "rises": semitones >= _RISE_SEMITONES}
+
+
+def rises(audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -> bool:
+    """Идёт ли тон вверх к концу фразы. Обёртка над measure() ради тестов и
+    старых вызовов: им нужен только ответ, а не разбор."""
+    return bool(measure(audio, sample_rate).get("rises"))
 
 
 def maybe_question(text: str, audio: np.ndarray,
@@ -139,8 +149,10 @@ def maybe_question(text: str, audio: np.ndarray,
         return text
     stripped = text.rstrip()
     if not stripped.endswith("."):
+        _log_decision("не точка в конце", text)
         return text                     # «?», «!», многоточие - не наше дело
     if stripped.endswith("..."):
+        _log_decision("многоточие", text)
         return text
 
     # Смотрим только последнее предложение: вопросительное слово в середине
@@ -148,8 +160,37 @@ def maybe_question(text: str, audio: np.ndarray,
     # отношения не имеет.
     last = re.split(r"(?<=[.!?])\s+", stripped)[-1]
     if _WH.search(last):
+        _log_decision("вопросительное слово", text)
         return text
 
-    if not rises(audio, sample_rate):
+    m = measure(audio, sample_rate)
+    if not m.get("rises"):
+        _log_decision("тон не поднялся", text, m)
         return text
+    _log_decision("ВОПРОС", text, m)
     return stripped[:-1] + "?" + text[len(stripped):]
+
+
+def _log_decision(why: str, text: str, m: dict | None = None) -> None:
+    """Строка замера в журнал: почему поставили «?» или нет.
+
+    Нужна, чтобы подстроить порог под голос владельца по фактам, а не на глаз
+    (он пожаловался, что вопрос почти не ставится). Тихая: одна строка на
+    диктовку, только когда вопрос по голосу вообще включён. Импорт app лениво -
+    он импортирует нас, сверху вышло бы кольцо.
+    """
+    try:
+        from app import log
+
+        tail = text.rstrip()[-40:]
+        if m and "semitones" in m:
+            log(f"интонация: {why} | подъём {m['semitones']} пт "
+                f"(порог {m['threshold']}) | {m['before']}->{m['after']} Гц, "
+                f"звонких {m['voiced']} | «...{tail}»")
+        elif m:
+            log(f"интонация: {why} | {m.get('reason', '')} "
+                f"звонких {m.get('voiced', 0)} | «...{tail}»")
+        else:
+            log(f"интонация: {why} | «...{tail}»")
+    except Exception:  # noqa: BLE001 - замер не должен ронять диктовку
+        pass

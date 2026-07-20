@@ -333,10 +333,22 @@ Rectangle {
         // видит их уже в своём оформлении. Спросить об этом в конце значило бы
         // показать мастер дважды - один раз чужим, один раз своим.
         Column {
+            id: lookStep
             visible: wiz.step === 1
             anchors.top: parent.top
             width: parent.width
             spacing: 16
+
+            // Три темы карточками-превью. sub - подпись только у «Системы»: она
+            // показывает не свой фиксированный цвет, а тот, что стоит в Windows.
+            readonly property var themeCards: [
+                {value: "system", name: "Система", sub: "как в Windows"},
+                {value: "light",  name: "Светлая", sub: ""},
+                {value: "dark",   name: "Тёмная",  sub: ""}
+            ]
+            // Выбор держим локально: B.get() - вызов, а не привязка, и сам по
+            // «Дальше» не пересчитается. На клик пишем и сюда, и в конфиг.
+            property string chosenTheme: B.get("theme") || "system"
 
             PageTitle {
                 text: L.t("Как вам удобнее?")
@@ -358,12 +370,135 @@ Rectangle {
                 font.weight: Font.DemiBold; font.letterSpacing: 0.6
                 color: T.textFaint
             }
-            Segmented {
-                options: [{label: L.t("как в системе"), value: "system"},
-                          {label: L.t("светлая"), value: "light"},
-                          {label: L.t("тёмная"), value: "dark"}]
-                value: B.get("theme") || "system"
-                onPicked: (v) => B.set("theme", v)
+            // Выбор темы блоками-превью, а не переключателем: слово «тёмная»
+            // ничего не показывает, пока человек не увидел тёмную. Каждая
+            // карточка нарисована в СВОИХ красках (OB.themeSwatch считает пару
+            // бумага/чернила для нужной темы, не через текущую T), выбранная
+            // обведена акцентом. Клик пишет theme тем же B.set, что и раньше.
+            Row {
+                id: themesRow
+                width: parent.width
+                spacing: 10
+                Repeater {
+                    model: lookStep.themeCards
+                    Item {
+                        id: themeCard
+                        readonly property var meta: modelData
+                        // Краски этой темы - посчитаны в Python один раз, от
+                        // смены текущей темы не зависят: светлая карточка
+                        // остаётся светлой рядом с тёмной.
+                        readonly property var sw: OB.themeSwatch(modelData.value)
+                        readonly property bool sel: lookStep.chosenTheme === modelData.value
+                        width: (themesRow.width - 2 * themesRow.spacing) / 3
+                        height: frame.height + label.height + 8
+
+                        // Рамка-обводка выбранного - в красках ТЕКУЩЕЙ темы
+                        // (это уже наш интерфейс, а не превью), поэтому T.accent.
+                        Rectangle {
+                            id: frame
+                            width: parent.width
+                            height: 106
+                            radius: T.radiusMd + 2
+                            color: "transparent"
+                            border.width: themeCard.sel ? 2 : 1
+                            border.color: themeCard.sel ? T.accent : T.border
+                            Behavior on border.color { ColorAnimation { duration: T.durFast * 1000 } }
+
+                            // Мини-окно приложения в красках своей темы.
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.margins: themeCard.sel ? 5 : 6
+                                radius: T.radiusMd - 2
+                                color: themeCard.sw.paper
+                                border.width: 1
+                                border.color: themeCard.sw.border
+                                clip: true
+
+                                Column {
+                                    anchors.fill: parent
+                                    anchors.margins: 11
+                                    spacing: 9
+
+                                    // Строка настройки: два «текста» слева,
+                                    // переключатель справа. Ровно то, что стоит
+                                    // в образце ниже, только в миниатюре.
+                                    Item {
+                                        width: parent.width; height: 15
+                                        Column {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: 4
+                                            Rectangle { width: 44; height: 5; radius: 2.5; color: themeCard.sw.text }
+                                            Rectangle { width: 28; height: 4; radius: 2; color: themeCard.sw.textMuted }
+                                        }
+                                        // Переключатель включён: дорожка -
+                                        // чернила (в системе «включено» это
+                                        // чернила, не акцент), ручка - бумага.
+                                        Rectangle {
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 22; height: 13; radius: 6.5
+                                            color: themeCard.sw.ink
+                                            Rectangle {
+                                                width: 9; height: 9; radius: 4.5; y: 2
+                                                x: parent.width - width - 2
+                                                color: themeCard.sw.paper
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle { width: parent.width; height: 1; color: themeCard.sw.border }
+
+                                    // Акцентная кнопка с «подписью» внутри.
+                                    Rectangle {
+                                        width: parent.width; height: 18
+                                        radius: T.radiusSm
+                                        color: themeCard.sw.accent
+                                        Rectangle {
+                                            anchors.centerIn: parent
+                                            width: 32; height: 5; radius: 2.5
+                                            color: themeCard.sw.accentFg
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Подпись под карточкой.
+                        Column {
+                            id: label
+                            anchors.top: frame.bottom
+                            anchors.topMargin: 8
+                            width: parent.width
+                            spacing: 1
+                            Text {
+                                width: parent.width
+                                horizontalAlignment: Text.AlignHCenter
+                                text: L.t(themeCard.meta.name)
+                                font.family: T.sans; font.pixelSize: T.tSm
+                                font.weight: themeCard.sel ? Font.DemiBold : Font.Medium
+                                color: themeCard.sel ? T.text : T.textSecondary
+                                Behavior on color { ColorAnimation { duration: T.durFast * 1000 } }
+                            }
+                            Text {
+                                visible: themeCard.meta.sub !== ""
+                                width: parent.width
+                                horizontalAlignment: Text.AlignHCenter
+                                text: L.t(themeCard.meta.sub)
+                                font.family: T.sans; font.pixelSize: T.t2xs
+                                color: T.textFaint
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                lookStep.chosenTheme = themeCard.meta.value;
+                                B.set("theme", themeCard.meta.value);
+                            }
+                        }
+                    }
+                }
             }
 
             Item { width: 1; height: 8 }
@@ -773,7 +908,10 @@ Rectangle {
                 font.weight: Font.DemiBold; font.letterSpacing: 0.6
                 color: T.textFaint
             }
-            HotkeyField { field: "hotkey_hold" }
+            // keyStart: false - пробел из ctrl+shift+space не должен запускать
+            // захват, иначе проверка жеста выше дерётся с переназначением
+            // (см. HotkeyBox.keyStart). Менять клавишу - осознанным кликом.
+            HotkeyField { field: "hotkey_hold"; keyStart: false }
             Text {
                 width: parent.width
                 text: L.t("Кликните по полю и нажмите своё - подойдёт и боковая кнопка мыши. Дальше настроим второй жест: нажал один раз и говоришь со свободными руками.")
@@ -893,7 +1031,7 @@ Rectangle {
                 font.weight: Font.DemiBold; font.letterSpacing: 0.6
                 color: T.textFaint
             }
-            HotkeyField { id: toggleField; field: "hotkey_toggle" }
+            HotkeyField { id: toggleField; field: "hotkey_toggle"; keyStart: false }
             Text {
                 width: parent.width
                 text: L.t("Предложили сочетание, которое есть на любой клавиатуре. Можно оставить, поменять или назначить боковую кнопку мыши.")

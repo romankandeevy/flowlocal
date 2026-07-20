@@ -20,7 +20,9 @@ APPCOMMAND_MEDIA_PLAY_PAUSE - это ПЕРЕКЛЮЧАТЕЛЬ. Если муз
 """
 
 import ctypes
-from ctypes import wintypes
+from ctypes import wintypes   # чистые псевдонимы типов, есть и на macOS
+
+import platform_api
 
 WM_APPCOMMAND = 0x0319
 HWND_BROADCAST = 0xFFFF
@@ -37,12 +39,21 @@ _SILENCE = 0.01
 # И меряем дважды с паузой: хвост затухания за это время падает, а музыка нет.
 _SAMPLE_GAP = 0.07
 
-_user32 = ctypes.WinDLL("user32", use_last_error=True)
-_user32.SendMessageW.argtypes = [wintypes.HWND, ctypes.c_uint,
-                                 wintypes.WPARAM, wintypes.LPARAM]
+# WM_APPCOMMAND и весь замер уровня через COM - только Windows. На macOS
+# «системная пауза любому плееру» - частный API (MediaRemote), в открытом виде
+# его нет; практичный путь - AppleScript конкретным плеерам, но это отдельная
+# задача. Пока пауза музыки под darwin - заглушка: _send ничего не шлёт,
+# output_level честно отвечает «не спросил», и Music поэтому просто не трогает
+# ничего (playing() == False).
+if platform_api.IS_WINDOWS:
+    _user32 = ctypes.WinDLL("user32", use_last_error=True)
+    _user32.SendMessageW.argtypes = [wintypes.HWND, ctypes.c_uint,
+                                     wintypes.WPARAM, wintypes.LPARAM]
 
 
 def _send(command: int) -> None:
+    if not platform_api.IS_WINDOWS:
+        return
     _user32.SendMessageW(wintypes.HWND(HWND_BROADCAST), WM_APPCOMMAND,
                          wintypes.WPARAM(0), wintypes.LPARAM(command << 16))
 
@@ -75,6 +86,8 @@ def output_level() -> float:
     Через COM руками: pycaw ради одного числа тянуть не станем, а comtypes у
     нас нет и не нужен.
     """
+    if not platform_api.IS_WINDOWS:
+        return -1.0            # не Windows: спросить нечем, значит «не играет»
     ole32 = ctypes.oledll.ole32
     try:
         ole32.CoInitializeEx(None, 0)
@@ -146,6 +159,9 @@ class Music:
 
     def pause(self) -> None:
         if self._paused:
+            return
+        if not platform_api.IS_WINDOWS:
+            platform_api.note_unsupported("пауза музыки на время диктовки")
             return
         if not playing():
             return                 # нечего останавливать - и не трогаем

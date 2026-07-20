@@ -107,6 +107,32 @@ def _seed_history(path: str) -> None:
                                 "text": text}, ensure_ascii=False) + "\n")
 
 
+# Заметки для витрины страницы «Заметки». Как и история - выдуманные и с
+# фиксированными датами: страница читает НАСТОЯЩИЙ каталог заметок (notes.DIR),
+# и без подмены витрина сняла бы личные заметки того, кто её собирает, ровно как
+# когда-то сняла почту из «Замен». Пишем файлы напрямую, а не через notes.save:
+# так дата «updated» фиксирована, и картинка не едет от прогона к прогону.
+DEMO_NOTES = [
+    ("20260716-143000", "2026-07-16 14:30:00",
+     "Разбор конкурента\nПосмотрел их приложение: слева список заметок, справа "
+     "редактор. Понравилось, что причесать можно одной кнопкой. Забрать себе: "
+     "карточки со временем и превью первой строки."),
+    ("20260715-101200", "2026-07-15 10:12:00",
+     "Идеи к встрече в пятницу: сначала цифры за квартал, потом план на "
+     "следующий, в конце - вопросы от команды."),
+    ("20260714-090500", "2026-07-14 09:05:00",
+     "Список покупок: хлеб, молоко, кофе, батарейки."),
+]
+
+
+def _seed_notes(dir_: str) -> None:
+    os.makedirs(dir_, exist_ok=True)
+    for nid, updated, text in DEMO_NOTES:
+        with open(os.path.join(dir_, nid + ".json"), "w", encoding="utf-8") as f:
+            json.dump({"id": nid, "created": nid, "updated": updated,
+                       "text": text}, f, ensure_ascii=False)
+
+
 def _info() -> dict:
     """То же, что app._info(), но без живого транскрайбера и микрофона.
 
@@ -221,6 +247,13 @@ def main() -> None:
     tmp = tempfile.mkdtemp(prefix="flowlocal_preview_")
     _seed_history(os.path.join(tmp, "history.jsonl"))
     open(os.path.join(tmp, "flow.log"), "w").close()
+
+    # Заметки читают свой каталог напрямую (notes.DIR), а не мокнутый конфиг:
+    # уводим его в tmp с выдуманными заметками, иначе витрина снимет личные.
+    import notes  # noqa: E402
+
+    notes.DIR = os.path.join(tmp, "notes")
+    _seed_notes(notes.DIR)
 
     import theme as T
 
