@@ -15,6 +15,7 @@ import { cn } from "./cn";
 import { FormShowcase } from "./form/showcase";
 import { IconsShowcase } from "./icons.showcase";
 import { LayoutModeProvider, type LayoutMode } from "./layout-mode";
+import { MiscShowcase } from "./misc/showcase";
 import { SettingRow } from "./setting-row";
 import { Heading, Note } from "./text";
 
@@ -104,6 +105,10 @@ export function Showcase() {
 
           <Section title="Формы">
             <FormShowcase />
+          </Section>
+
+          <Section title="Таблицы и оболочка">
+            <MiscShowcase />
           </Section>
 
           <Section title="Иконки">
