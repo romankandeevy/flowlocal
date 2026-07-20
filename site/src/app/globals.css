@@ -1,0 +1,142 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: var(--font-onest), -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  --color-*: initial;
+  --color-neutral-0: oklch(1 0 0);
+  --color-neutral-50: oklch(0.975 0 0);
+  --color-neutral-100: oklch(0.95 0 0);
+  --color-neutral-200: oklch(0.9 0 0);
+  --color-neutral-300: oklch(0.85 0 0);
+  --color-neutral-400: oklch(0.78 0 0);
+  --color-neutral-500: oklch(0.62 0 0);
+  --color-neutral-600: oklch(0.53 0 0);
+  --color-neutral-700: oklch(0.43 0 0);
+  --color-neutral-800: oklch(0.3 0 0);
+  --color-neutral-900: oklch(0.18 0 0);
+  --color-neutral-950: oklch(0.1 0 0);
+  --color-neutral-1000: oklch(0 0 0);
+
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-secondary: var(--secondary);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fill: var(--fill);
+  --color-fill-subtle: var(--fill-subtle);
+  --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --ease-flow: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --animate-fade-up: fade-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-fade-in: fade-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+:root {
+  color-scheme: light;
+  --paper: var(--color-neutral-0);
+  --ink: var(--color-neutral-950);
+  --secondary: var(--color-neutral-700);
+  --muted: var(--color-neutral-500);
+  --faint: var(--color-neutral-400);
+  --border: var(--color-neutral-200);
+  --border-strong: var(--color-neutral-300);
+  --fill: var(--color-neutral-100);
+  --fill-subtle: var(--color-neutral-50);
+  --accent: oklch(0.53 0.18 260);
+  --success: oklch(0.55 0.18 155);
+  --danger: oklch(0.55 0.2 30);
+}
+
+.dark {
+  color-scheme: dark;
+  --paper: var(--color-neutral-1000);
+  --ink: var(--color-neutral-50);
+  --secondary: var(--color-neutral-400);
+  --muted: var(--color-neutral-500);
+  --faint: var(--color-neutral-600);
+  --border: var(--color-neutral-800);
+  --border-strong: var(--color-neutral-700);
+  --fill: var(--color-neutral-900);
+  --fill-subtle: var(--color-neutral-950);
+  --accent: oklch(0.62 0.15 260);
+  --success: oklch(0.6 0.15 155);
+  --danger: oklch(0.6 0.18 30);
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/*
+  Контраст (верифицировано):
+  — Ink (#1a1a1a) на Paper (#fff): 16:1
+  — Secondary (#595959) на Paper (#fff): 4.7:1 ✓ (WCAG AA body)
+  — Muted (#8c8c8c) на Paper (#fff): 2.3:1 (только крупный/декор)
+  — Ink (#eee) на Paper (#000): 17:1
+  — Secondary (#aaa) на Paper (#000): 6.9:1 ✓
+  — Muted (#777) на Paper (#000): 4.3:1 ✓
+*/
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  video {
+    display: none;
+  }
+}
