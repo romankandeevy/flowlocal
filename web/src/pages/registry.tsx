@@ -6,58 +6,37 @@
 // Порядок тот же, что в QML-версии: он не алфавитный и не случайный - сверху
 // то, куда заходят каждый день, снизу то, куда заходят раз в месяц.
 //
-// **Страница, которую ещё не перенесли, стоит здесь заглушкой.** Не пустым
-// местом и не пропуском в меню: человек, открывший программу, должен видеть
-// все разделы на своих местах, иначе ему покажется, что половина настроек
-// исчезла. Заглушка честно говорит, что раздел пока открывается в старом окне.
+// Заглушка «раздел пока в прежнем окне» здесь была и больше не нужна: все
+// восемь страниц переехали. Смысл её был не в вежливости - человек, открывший
+// программу на середине переезда, должен видеть все разделы на своих местах,
+// иначе ему кажется, что половина настроек исчезла. Понадобится снова - брать
+// из истории, а не писать заново.
 import type { ComponentType } from "react";
 
-import { t } from "../i18n";
 import type { IconName } from "../ui/icons";
-import { Card } from "../ui/card";
-import { SettingRow } from "../ui/setting-row";
-import { Heading } from "../ui/text";
+import { AboutPage } from "./about";
+import { AdvancedPage } from "./advanced";
 import { DictationPage } from "./dictation";
 import { HistoryPage } from "./history";
+import { HomePage } from "./home";
+import { NotesPage } from "./notes";
+import { StatsPage } from "./stats";
+import { WordsPage } from "./words";
 
 interface Page {
   icon: IconName;
   component: ComponentType;
 }
 
-/** Заглушка для того, что ещё не переехало. */
-function Soon({ name }: { name: string }) {
-  return (
-    <>
-      <Heading level="page">{t(name)}</Heading>
-      <Card>
-        <SettingRow
-          first
-          title={t("Этот раздел пока в прежнем окне")}
-          subtitle={t(
-            "Настройки на месте и работают - переезд идёт по одной странице.",
-          )}
-        />
-      </Card>
-    </>
-  );
-}
-
-function soon(name: string): ComponentType {
-  const C = () => <Soon name={name} />;
-  C.displayName = `Soon(${name})`;
-  return C;
-}
-
 export const PAGES = {
-  "Главная": { icon: "home", component: soon("Главная") },
+  "Главная": { icon: "home", component: HomePage },
   "Диктовка": { icon: "asr", component: DictationPage },
-  "Слова": { icon: "dictionary", component: soon("Слова") },
+  "Слова": { icon: "dictionary", component: WordsPage },
   "История": { icon: "history", component: HistoryPage },
-  "Статистика": { icon: "stats", component: soon("Статистика") },
-  "Заметки": { icon: "notes", component: soon("Заметки") },
-  "Дополнительно": { icon: "extra", component: soon("Дополнительно") },
-  "О программе": { icon: "about", component: soon("О программе") },
+  "Статистика": { icon: "stats", component: StatsPage },
+  "Заметки": { icon: "notes", component: NotesPage },
+  "Дополнительно": { icon: "extra", component: AdvancedPage },
+  "О программе": { icon: "about", component: AboutPage },
 } satisfies Record<string, Page>;
 
 export type PageKey = keyof typeof PAGES;
