@@ -205,6 +205,30 @@ def main() -> int:
     print(f"размер dist/{variant}: {size_of(out)}")
     print(f"библиотек Qt отдельными файлами: {len(qt_dlls)} (нужны для LGPL §4(d))")
     print(f"тексты лицензий в сборке: {'да' if os.path.isdir(lic) else 'НЕТ - не раздавать!'}")
+
+    # Окно настроек на странице: проверяем поимённо то, без чего оно не
+    # откроется. Проверка появилась не из осторожности, а по факту: первая
+    # сборка с вебвью прошла молча, а плагина бэкенда в ней не было - и окно
+    # настроек в собранной программе не открылось бы вовсе. PyInstaller
+    # собирает плагины Qt по видимым импортам, а наш лежит в лениво
+    # выполняемой строке внутри webwindow.py.
+    #
+    # Сборка от этого не падает: со старым QML-окном программа работает и без
+    # вебвью, и рушить выпуск из-за него неправильно. Но сказать надо громко.
+    need = {
+        "страница настроек": os.path.join(internal, "web", "dist", "index.html"),
+        "плагин вебвью": os.path.join(internal, "PySide6", "plugins",
+                                      "webview", "qtwebview_webview2.dll"),
+        "библиотека вебвью": os.path.join(internal, "PySide6", "Qt6WebView.dll"),
+        "словарь английского": os.path.join(internal, "web", "dist",
+                                            "i18n.en.json"),
+    }
+    missing = [name for name, path in need.items() if not os.path.exists(path)]
+    if missing:
+        print("ВНИМАНИЕ: настройки страницей НЕ заработают, не хватает: "
+              + ", ".join(missing))
+    else:
+        print("настройки страницей: всё на месте")
     if gpl:
         print(f"ВНИМАНИЕ: GPL-only модули Qt в сборке: {', '.join(gpl)}")
         print("  Их надо выбросить в flowlocal.spec (_QT_KEEP), иначе раздавать нельзя.")

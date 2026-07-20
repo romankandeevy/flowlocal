@@ -97,6 +97,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import config as C  # noqa: E402
 import inputspec  # noqa: E402
+import language  # noqa: E402
 import models  # noqa: E402
 import overlay_qt as OV  # noqa: E402
 import theme as T  # noqa: E402
@@ -110,7 +111,7 @@ from version import __version__  # noqa: E402
 import cleaner  # noqa: E402
 from cleaner import _strip_fillers, clean, extract_commands, llm_command  # noqa: E402
 from inserter import (_set_clipboard_text, backspace,  # noqa: E402
-                      copy_selection, grab_all, insert, press_enter,
+                      copy_selection, grab_text, insert, press_enter,
                       select_all, to_clipboard)
 from overlay_qt import Overlay  # noqa: E402
 from recorder import Recorder  # noqa: E402
@@ -250,6 +251,16 @@ class App:
         self._ready = False
         self._llm_note = ""          # модель Ollama, найденная автоопределением
         self._update_told = ""       # про какую версию уже сказали шариком
+        # Сказали ли уже, что английская модель не приехала. Один раз за
+        # запуск: шарик на каждую английскую фразу - это навязчивость, а
+        # догрузка всё равно идёт своим ходом.
+        self._english_told = False
+        # Настройки страницей: мост, окно и Backend под них. Поднимаются по
+        # требованию и только при включённом ui.web - вебвью стоит 123 МБ
+        # памяти, а программа висит в трее сутками.
+        self._web = None
+        self._bridge = None
+        self._web_backend = None
         self._ollama_busy = False    # идёт ли установка Ollama
         self._ollama_subs: list = []  # окна, которые хотят видеть ход
         self._last_insert = None     # (exe, когда, текст) - для склейки
@@ -267,6 +278,10 @@ class App:
         self._tf_text = ""           # что преобразуем
         self._tf_clip = None         # буфер человека, вернуть после вставки
         self._tf_hwnd = 0            # окно, куда возвращать фокус
+        # Взяли ли мы поле ЦЕЛИКОМ (Ctrl+A наш) или это выделение человека. От
+        # этого зависит вставка: своё выделение можно поставить заново, чужое -
+        # нельзя, см. _transform_work.
+        self._tf_all = False
         self._stream = None          # разбор речи на ходу, пока идёт запись
         self._stream_thread = None
         self._deaf_told = ""         # про какую глухоту уже сказали
@@ -538,8 +553,9 @@ class App:
         """Хоткей преобразований текста. Пусто - выключено.
 
         Отдельным биндом, а не режимом диктовки: здесь нечего записывать.
-        Нажал - взяли ВЕСЬ текст поля (Ctrl+A, Ctrl+C) и показали пилюлю
-        выбора; выделять руками ничего не надо. Всё остальное делает выбор.
+        Нажал - взяли текст поля и показали пилюлю выбора. Выделять руками
+        ничего не надо: выделил - возьмём выделение, не выделил - возьмём поле
+        целиком. Всё остальное делает выбор.
         """
         spec = str(self.cfg.get("hotkey_transform") or "").strip()
         if not spec:
@@ -828,14 +844,44 @@ class App:
             return "правке текста не хватает модели"
         return "правка текста не установлена - откройте настройки"
 
-    def _transform_grab(self) -> None:
-        """Взять весь текст поля и показать пилюлю выбора. Рабочий поток.
+    def _nothing_to_transform(self) -> str:
+        """Брать было нечего - сказать человеку, что делать. Фразой, не диагнозом.
 
-        Проверки идут в таком порядке нарочно. Сперва спрашиваем, ЕСТЬ ли что
-        показывать (модель включена и преобразования не пусты), и лишь потом
-        трогаем чужое поле. Нет преобразований - выходим, ничего не тронув и не
-        забрав буфер: человек нажал зря, но для него не должно произойти вообще
-        ничего.
+        Прежняя надпись («нет текста») называла состояние программы, а владелец
+        из неё вычитал поломку - и был по-своему прав: он ничего не выделял и
+        ждал, что преобразуется всё. Теперь всё и берётся, так что пусто бывает
+        по одной причине - фокус не в тексте.
+
+        Чаще всего фокус ушёл в наше же окно: человек щёлкнул по FlowLocal,
+        документ перестал быть активным. Это стоит назвать прямо, иначе совет
+        «щёлкните в текст» звучит как «попробуйте ещё раз» - непонятно, что
+        именно менять.
+
+        Своё окно узнаём по имени exe. В сборке это FlowLocal.exe, совпадений
+        быть не может; из исходников - python.exe, и соседнее приложение на
+        питоне даст ложное срабатывание. Цена ошибки - одна подсказка вместо
+        другой, поля мы в обоих случаях уже не трогаем.
+        """
+        try:
+            exe = (layered.foreground_process() or "").lower()
+            if exe and exe == os.path.basename(sys.executable).lower():
+                return "это окно FlowLocal - щёлкните в свой текст"
+        except Exception:  # noqa: BLE001 - подсказка не стоит падения
+            pass
+        return "щёлкните в свой текст и нажмите ещё раз"
+
+    def _transform_grab(self) -> None:
+        """Взять текст поля и показать пилюлю выбора. Рабочий поток.
+
+        Порядок проверок не случаен - тот же, что у _process_command: мы
+        собираемся вставить ПОВЕРХ чужого текста, а значит стереть его. Поэтому
+        сперва спрашиваем, есть ли что показывать, и лишь потом трогаем чужое
+        поле; на каждом сомнении - выходим, ничего не тронув.
+
+        Текст берём сами. Выделил человек - берём выделение; не выделил -
+        выделяем поле целиком (это и есть просьба владельца: «весь текст
+        преобразовывается»). Разбор двух случаев - в inserter.grab_text, там же
+        объяснено, почему Ctrl+A жмётся только вторым шагом.
         """
         if not self._work_lock.acquire(blocking=False):
             log("преобразование: занято")
@@ -845,33 +891,46 @@ class App:
             if not llm.get("enabled"):
                 self.ui(self.overlay.show_error, self._llm_missing())
                 return
+            # Окно запоминаем ДО всего: пилюля выбора заберёт фокус себе, и
+            # спрашивать «какое окно активно» будет уже поздно - активной
+            # окажется она сама.
+            self._tf_hwnd = layered.foreground_window()
             items = transforms.all_for(self.cfg)
             if not items:
-                # Все готовые спрятаны и своих нет - показывать нечего. Коротко
-                # говорим и уходим, поля не касаясь.
-                self.ui(self.overlay.show_error, "нет преобразований")
+                # Все готовые спрятаны и своих нет. Пилюлю всё равно
+                # показываем - со словом «нету»: человек нажал сочетание и
+                # обязан получить ответ, а тишина читается как поломка. Поля
+                # при этом не касаемся вовсе.
+                self._tf_text, self._tf_clip, self._tf_all = "", None, False
+                self.ui(self._transform_show, [])
                 return
-            # Окно запоминаем ДО Ctrl+A/Ctrl+C: пилюля сейчас заберёт фокус
-            # себе, и спрашивать «какое окно активно» будет уже поздно -
-            # активной окажется она сама.
-            self._tf_hwnd = layered.foreground_window()
             self._inserting = True
             try:
-                text, old_clip = grab_all()
+                text, old_clip, took_all = grab_text()
             finally:
                 self._insert_window_closes()
             if not text or not text.strip():
-                # Ctrl+A ничего не выделил - поле пустое, преобразовывать нечего.
-                # Буфер человека grab_all уже вернул на место.
-                self.ui(self.overlay.show_error, "нет текста")
+                # Ни выделения, ни текста в поле. Буфер человека grab_text уже
+                # вернул на место, поле не тронуто - остаётся объяснить.
+                #
+                # Спрашиваем ПОСЛЕ захвата, а не до: своё окно тоже бывает с
+                # текстом (заметки), и отказывать ему заранее значило бы
+                # отобрать работающую возможность ради подсказки.
+                log("преобразование: в активном окне нет текста")
+                self.ui(self.overlay.show_error, self._nothing_to_transform())
                 return
-            self._tf_text, self._tf_clip = text, old_clip
+            self._tf_text, self._tf_clip, self._tf_all = text, old_clip, took_all
             self.ui(self._transform_show, items)
         finally:
             self._work_lock.release()
 
     def _transform_show(self, items: list) -> None:
-        """Показать пилюлю выбора. ТОЛЬКО главный поток Qt."""
+        """Показать пилюлю выбора. ТОЛЬКО главный поток Qt.
+
+        Пустой список - тоже показ, а не тишина: пилюля скажет «нету». Фокус
+        она заберёт и в этом случае, но терять нечего - поля мы не трогали, а
+        Esc возвращает фокус обратно.
+        """
         if self.picker is None:
             from picker_qt import Picker
 
@@ -890,6 +949,7 @@ class App:
             _set_clipboard_text(self._tf_clip)
         layered.focus_window(self._tf_hwnd)
         self._tf_text, self._tf_clip, self._tf_hwnd = "", None, 0
+        self._tf_all = False
 
     def _transform_chosen(self, tid: str) -> None:
         t = transforms.find(self.cfg, tid)
@@ -901,7 +961,28 @@ class App:
         threading.Thread(target=self._transform_work, args=(t,), daemon=True).start()
 
     def _transform_work(self, t: dict) -> None:
+        """Прогнать текст через модель и положить результат ПОВЕРХ взятого.
+
+        Здесь единственное место, где мы стираем чужой текст, поэтому обе
+        опасные вещи обставлены проверками.
+
+        Первая - Ctrl+A. Он снимает выделение человека и ставит своё на весь
+        документ. Жмём его ТОЛЬКО если поле целиком забирали мы сами
+        (`took_all`): тогда «выделить всё» и есть ровно то, что мы взяли, и
+        замена совпадает с обещанием. Если текст выделял человек, Ctrl+A не
+        жмём вовсе - его выделение пережило уход фокуса к пилюле, и вставка
+        ляжет поверх него. А если не пережило, результат встанет рядом: это
+        видно глазами и снимается Ctrl+Z, тогда как Ctrl+A переписал бы весь
+        документ - непоправимо и молча.
+
+        Вторая - окно. Пока модель думает (секунды), человек успевает уйти
+        куда угодно, и Ctrl+A с вставкой уехали бы в чужой документ. Поэтому
+        прямо перед заменой сверяем активное окно с тем, откуда брали. Не
+        сошлось или окна мы не знаем - не трогаем ничего, результат кладём в
+        буфер и говорим об этом.
+        """
         text, old_clip = self._tf_text, self._tf_clip
+        took_all, hwnd = self._tf_all, self._tf_hwnd
         self._tf_text, self._tf_clip = "", None
         with self._work_lock:
             try:
@@ -915,12 +996,24 @@ class App:
                     self._restore_clip(old_clip)
                     self.ui(self.overlay.show_error, "не получилось - текст не тронут")
                     return
+                if not hwnd or layered.foreground_window() != hwnd:
+                    # Фокус не там, где мы брали текст. Замена уничтожила бы
+                    # чужой документ, поэтому не вставляем: результат в буфере,
+                    # человек ставит его сам куда хотел.
+                    #
+                    # Прежний буфер тут НЕ возвращаем намеренно: результат
+                    # сейчас единственная копия работы, и затереть его своей
+                    # уборкой значило бы выбросить её (та же логика, что у
+                    # insert() при отказе UIPI).
+                    log("преобразование: окно сменилось, вставку не делаем")
+                    to_clipboard(result)
+                    self.ui(self.overlay.show_error,
+                            "окно сменилось - результат в буфере, Ctrl+V")
+                    return
                 self._inserting = True
                 try:
-                    # Весь текст поля заменяем целиком: заново выделяем его
-                    # (фокус уходил к пилюле, прежнее выделение снялось) и
-                    # вставляем результат поверх выделенного.
-                    select_all()
+                    if took_all:
+                        select_all()
                     ok = insert(result, mode=self.cfg.get("insert_mode", "paste"),
                                 restore=False)
                 finally:
@@ -946,7 +1039,7 @@ class App:
     def _restore_clip(self, old_clip) -> None:
         """Вернуть буфер человека, если он был и если он вообще нужен.
 
-        Общий хвост неудачных путей преобразования: grab_all затёр буфер полем,
+        Общий хвост неудачных путей преобразования: grab_text затёр буфер полем,
         а раз результат никуда не лёг - буфер должен подтверждать, что для
         человека не произошло ничего."""
         if self.cfg.get("restore_clipboard", True) and old_clip is not None:
@@ -1373,10 +1466,26 @@ class App:
                 # что программа за вас исправила, и какое слово она путает чаще
                 # прочих, - без этого такой счёт не восстановить задним числом.
                 raw = text
+                # Говорили по-английски? Тогда у нас на руках не текст, а
+                # английские звуки, записанные русскими буквами, - «дуис пик
+                # инглиш». Переспрашиваем ту же запись моделью, которая пишет
+                # латиницей, и отдаём её ответ. Русскую фразу это не стоит
+                # ничего: одна проверка текста без звука и без модели.
                 _t = time.perf_counter()
-                text = clean(text, self.cfg, log, process=process)
+                english = self._english_retry(text, audio)
+                lat["english"] = time.perf_counter() - _t
+                _t = time.perf_counter()
+                if english:
+                    # Чистку английскому не отдаём, и это не экономия. Весь
+                    # cleaner устроен под русский: словарь, паразиты, правила
+                    # запятых, приведение к русской заглавной. Знаки и
+                    # заглавные в английском уже расставила сама модель.
+                    text = english
+                    lat["punct"] = 0.0
+                else:
+                    text = clean(text, self.cfg, log, process=process)
+                    lat["punct"] = cleaner.last_punct_sec
                 lat["clean"] = time.perf_counter() - _t
-                lat["punct"] = cleaner.last_punct_sec
                 # Команды - ПОСЛЕ полировки: LLM не должна их видеть, иначе
                 # перепишет или послушается, оба исхода хуже.
                 before_commands = text
@@ -1385,8 +1494,12 @@ class App:
                 # Сказали «нажми энтер» - последние полсекунды записи это она,
                 # и интонация там про команду, а не про фразу. Разбирать её
                 # значило бы гадать по чужому хвосту.
+                #
+                # И не для английского: там знак уже поставила своя модель, а
+                # правила подъёма тона в intonation.py писались под русскую
+                # ИК-3 - в английском вопрос звучит иначе.
                 if (self.cfg.get("question_by_voice", True)
-                        and text == before_commands):
+                        and not english and text == before_commands):
                     import intonation
 
                     try:
@@ -1468,6 +1581,102 @@ class App:
             # Сверх лимита не копим: спасение не должно стать свалкой.
             recordings.prune()
             self._set_tray_state("idle")
+
+    # ---------- английская речь ----------
+
+    def _english_retry(self, text: str, audio) -> str:
+        """Английскую фразу переспросить моделью, которая пишет латиницей.
+
+        Возвращает английский текст или пустую строку - тогда всё идёт как
+        всегда, кириллицей и через обычную чистку.
+
+        Порядок проверок от дешёвой к дорогой: выключатель, разбор текста,
+        наличие модели, и только потом сам звук. На русской фразе дальше
+        второго шага дело не заходит.
+
+        Ошибку глотаем молча и отдаём кириллицу. Английский - улучшение, а не
+        обязанность, и уронить из-за него обычную диктовку нельзя.
+        """
+        if not self.cfg.get("english_speech", True):
+            return ""
+        try:
+            if not language.looks_english(text):
+                return ""
+        except Exception as e:  # noqa: BLE001 - разбор текста не стоит фразы
+            log(f"определитель языка: {e}")
+            return ""
+        log(f"похоже на английский ({language.ru_score(text):.2f}): {text!r}")
+        if not language.installed():
+            self.ui(self._tell_english_missing)
+            return ""
+        try:
+            en = language.shared(log)
+            if not en.loaded:
+                # Полсекунды на подъём, и человеку надо видеть, за что он
+                # ждёт: слово на пилюле вместо молчаливой паузы.
+                self.ui(self.overlay.show_downloading, i18n.t("английский"))
+                en.load()
+                self.ui(self.overlay.set_hint, "")
+                self.ui(self.overlay.show_processing)
+            out = en.transcribe(audio)
+        except Exception as e:  # noqa: BLE001
+            log(f"английский переспрос не вышел: {type(e).__name__}: {e}")
+            return ""
+        # Ответ без единой латинской буквы - это не английский, а что-то
+        # пошедшее не так. Отдаём то, что было: хуже кириллицы только пустота.
+        if not out or not any(c.isascii() and c.isalpha() for c in out):
+            log(f"переспрос вернул не английский: {out!r} - оставляю как было")
+            return ""
+        log(f"английский: {out!r}")
+        return out
+
+    def _tell_english_missing(self) -> None:
+        """Английский услышали, а писать его нечем. Главный поток.
+
+        Так бывает у тех, кто обновился со старой версии: мастер первого
+        запуска они проходили давно, а модель добавилась только сейчас.
+        Молчать нельзя - человек увидит «дуис пик инглиш» и решит, что
+        программа так и умеет. И заставлять его искать кнопку в настройках
+        не за что: качаем сами, один раз, и говорим сколько.
+        """
+        if self._english_told:
+            return
+        self._english_told = True
+        threading.Thread(target=self._fetch_english_bg, daemon=True).start()
+        if self.tray is None:
+            return
+        self.tray.showMessage(
+            "Похоже, вы говорили по-английски",
+            f"Программа умеет писать английский как положено - буквами. "
+            f"Догружаю недостающее, {language.SIZE_MB} МБ, один раз. "
+            f"Следующая фраза уже будет английской.")
+
+    def _fetch_english_bg(self) -> None:
+        """Догрузить английскую модель. Отдельным ПРОЦЕССОМ, как и основную.
+
+        Причина та же (см. download_model_cli): сборку сессии делает C-код,
+        который держит GIL секундами, и всё это время окно не отвечает, а хук
+        клавиатуры не укладывается в свои 300 мс.
+        """
+        import subprocess
+
+        try:
+            r = subprocess.run(
+                _download_cmd(language.DOWNLOAD_ID),
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception as e:  # noqa: BLE001
+            log(f"английская модель: загрузчик не запустился: {e}")
+            return
+        if r.returncode == 0 and language.installed():
+            log(f"английская модель готова, {language.size_mb():.0f} МБ")
+        else:
+            # Не получилось - пусть попробует ещё раз на следующей английской
+            # фразе. Одна неудачная сеть не должна выключать возможность.
+            self._english_told = False
+            log("английская модель не скачалась: "
+                + (r.stderr or r.stdout or "").strip()[:300])
 
     # ---------- куда уходит распознанный текст ----------
     #
@@ -1726,6 +1935,9 @@ class App:
         так что пришедший «посмотреть, что надиктовано» попадает именно туда, а
         настройки ждут второй группой в панели.
         """
+        if self.cfg.get("ui.web", False) and self._open_settings_web():
+            return
+
         from settings_qt import SettingsWindow
 
         if self.settings is None:
@@ -1733,6 +1945,55 @@ class App:
                 self._on_config_change, self._on_hotkey_capture,
                 self._info, HISTORY_PATH, LOG_PATH, **self._win_args())
         self.settings.open()
+
+    def _open_settings_web(self) -> bool:
+        """Открыть настройки страницей. True - получилось.
+
+        **Обе версии окна живут рядом, и это условие плана, а не осторожность
+        сверх меры.** Страница проверена машиной целиком - типы, доступность,
+        мост, - но ни разу не открывалась человеком: ни одна из восьми страниц,
+        ни мастер. Выбросить работающее QML-окно раньше, чем новое посмотрели
+        глазами, значит оставить владельца без настроек, если что-то не так.
+
+        Выключатель в конфиге (`ui.web`), а не сборкой: переключиться туда и
+        обратно должно быть можно на живой программе, ничего не пересобирая.
+
+        Не вышло - возвращаем False, и открывается прежнее окно. Молча падать
+        тут нельзя: человек нажал «Настройки», и окно обязано появиться хоть
+        какое-то.
+        """
+        try:
+            import bridge
+            import webwindow
+
+            if self._web is None:
+                from settings_qt import Backend
+
+                if self._web_backend is None:
+                    self._web_backend = Backend(
+                        self._on_config_change, self._on_hotkey_capture,
+                        self._info, HISTORY_PATH, LOG_PATH, **self._win_args())
+                extra = []
+                try:
+                    from onboarding_qt import _Extra
+
+                    extra.append(_Extra(self))
+                except Exception as e:  # noqa: BLE001 - мастер тут не главное
+                    log(f"мост без объекта мастера: {e}")
+                self._bridge = bridge.Bridge(self._web_backend, extra)
+                self._web = webwindow.WebWindow(
+                    self._bridge, self.overlay.tokens, self._web_lang(), log)
+            self._web.show()
+            return True
+        except Exception as e:  # noqa: BLE001
+            log(f"настройки страницей не открылись, беру прежнее окно: "
+                f"{type(e).__name__}: {e}")
+            return False
+
+    def _web_lang(self):
+        from theme_qt import Lang
+
+        return Lang()
 
     def _redo_recording(self, path: str) -> None:
         """Распознать сохранённую запись заново - по кнопке из «О программе».
@@ -2316,6 +2577,10 @@ class App:
             return          # идёт распознавание - не мешаем
         try:
             self.transcriber.unload()
+            # Английскую отпускаем той же рукой. Она поднимается за полсекунды,
+            # а держать её в памяти между английскими фразами, которых у
+            # большинства не будет вовсе, незачем.
+            language.release()
         finally:
             self._work_lock.release()
 
@@ -2740,10 +3005,24 @@ def poke_running_instance() -> bool:
     return True
 
 
+def _download_cmd(model_id: str) -> list:
+    """Чем звать загрузчик модели: собранный .exe или свой же исходник.
+
+    Двойник этой функции есть в settings_qt - там она нужна окну настроек.
+    Держим отдельно намеренно: тащить сюда весь settings_qt (а с ним QtWidgets)
+    ради шести строк, да ещё из рабочего потока, дороже, чем повторить их.
+    """
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--download-model", model_id]
+    return [sys.executable, os.path.join(APP_DIR, "app.py"),
+            "--download-model", model_id]
+
+
 def download_model_cli() -> int:
     """Скачать модель и выйти. Служебный режим, человеку не показывается.
 
         FlowLocal.exe --download-model gigaam-v2-ctc
+        FlowLocal.exe --download-model english
 
     Зачем отдельный процесс. Раньше модель качалась потоком внутри окна
     настроек, и владелец, проходя мастер первого запуска, написал: «после
@@ -2765,15 +3044,50 @@ def download_model_cli() -> int:
     if not model_id:
         print("использование: --download-model <идентификатор>")
         return 2
+    import shutil
+
     import models
     from transcriber import model_dir
+
+    # Английская модель идёт особняком: в каталоге моделей распознавания её
+    # нет и быть не должно. Каталог - это выбор человека («Обычная» или
+    # «Внимательная»), а английская не выбирается: она приезжает вместе с
+    # основной и работает сама.
+    if model_id in (language.DOWNLOAD_ID, language.MODEL):
+        err = language.download()
+        if err:
+            log(f"скачивание английской модели не вышло: {err}")
+            print(f"не скачалось: {err}")
+            return 1
+        log(f"скачано: английская модель, {language.size_mb():.0f} МБ")
+        print("готово")
+        return 0
 
     m = models.get(model_id)
     if m is None:
         print(f"нет такой модели: {model_id}")
         return 2
     d = model_dir(m.id, m.quant)
-    os.makedirs(d, exist_ok=True)
+    # Папку НЕ создаём заранее, и это не мелочь: для onnx-asr существующая
+    # папка означает «работаем офлайн», качать в неё он не пойдёт и упадёт на
+    # ненайденном файле. Здесь раньше стоял makedirs - то есть первое же
+    # скачивание в мастере отвечало «не удалось скачать, проверьте интернет»
+    # при живом интернете.
+    #
+    # Неполную папку от оборванной скачки сносим по той же причине: докачать в
+    # неё нельзя. А полную не трогаем - иначе повторное нажатие «Скачать»
+    # стирало бы готовую модель и качало её заново.
+    if os.path.isdir(d):
+        try:
+            on_disk = sum(os.path.getsize(os.path.join(d, f))
+                          for f in os.listdir(d)) / 1e6
+        except OSError:
+            on_disk = 0.0
+        if on_disk >= m.size_mb * 0.9:
+            log(f"{model_id} уже на месте, {on_disk:.0f} МБ")
+            print("готово")
+            return 0
+        shutil.rmtree(d, ignore_errors=True)
     try:
         import onnx_asr
 

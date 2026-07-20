@@ -25,6 +25,18 @@ Card {
     property string label: ""    // подпись рядом с числом
     property string record: ""   // строка рекорда под подписью, напр. «рекорд 7»
 
+    // Дуга умеет раскрываться в календарь по дням - об этом просил владелец
+    // словами «если нажать на стрик, сделай календарь». Сам календарь рисует не
+    // она: метрика в ряду из трёх не может развернуться на всю ширину страницы,
+    // не сломав сетку. Поэтому здесь только нажатие и шеврон, а показывает
+    // календарь страница (Settings.qml, «Статистика»).
+    //
+    // Выключено по умолчанию: без обработчика нажатия курсор-рука и шеврон
+    // обещали бы то, чего не будет.
+    property bool expandable: false
+    property bool open: false
+    signal activated()
+
     // Доля кольца. best может быть нулём только при пустой истории, а там
     // страница показывает пустое состояние, не эту дугу, - но делим осторожно.
     readonly property real target: best > 0 ? Math.min(1, value / best) : 0
@@ -62,9 +74,25 @@ Card {
     Component.onCompleted: { runArc(); runNum() }
     onProgressChanged: canvas.requestPaint()
 
+    // Иконки своим инстансом, а не через `ic` окна-хозяина: тот же довод, что в
+    // SettingRow - компонент не должен знать, в каком окне он стоит.
+    Icons { id: ico }
+
     Item {
+        id: box
         width: parent.width
         implicitHeight: 82
+
+        // Подсветка нажатия - под содержимым, поэтому объявлена первой. Радиус
+        // берём у карточки; в раскладке «линии» коробки нет, и скругления тоже.
+        Rectangle {
+            anchors.fill: parent
+            visible: ring.expandable
+            radius: ring.lines ? 0 : T.radiusLg
+            color: hit.pressed ? T.fillStrong
+                 : hit.containsMouse ? T.fill : "transparent"
+            Behavior on color { ColorAnimation { duration: T.durFast * 1000 } }
+        }
 
         Row {
             anchors { left: parent.left; leftMargin: 16
@@ -137,7 +165,66 @@ Card {
                     font.pixelSize: T.t2xs
                     color: T.textFaint
                 }
+                // Что случится по нажатию - словом, а не одним шевроном.
+                // Программу ставят людям, которые просто пишут письма: значок
+                // им ещё надо узнать, а слово они прочитают (тот же довод, что
+                // у «подробнее» в SettingRow).
+                Text {
+                    visible: ring.expandable
+                    text: ring.open ? L.t("свернуть") : L.t("по дням")
+                    font.family: T.sans
+                    font.pixelSize: T.t2xs
+                    font.weight: Font.Medium
+                    color: hit.containsMouse ? T.text : T.textMuted
+                }
             }
+        }
+
+        Icon {
+            visible: ring.expandable
+            anchors { right: parent.right; rightMargin: 16
+                      verticalCenter: parent.verticalCenter }
+            path: ico.chevron
+            size: 14
+            // Мелкая иконка требует штриха потолще - как в SettingRow.
+            weight: 2.4
+            color: hit.containsMouse ? T.text : T.textMuted
+            rotation: ring.open ? 180 : 0
+            Behavior on rotation {
+                NumberAnimation { duration: T.durBase * 1000
+                                  easing.type: Easing.Bezier
+                                  easing.bezierCurve: T.easeOut }
+            }
+        }
+
+        // Клавиатура доходит и сюда: календарь за дугой - единственная дверь к
+        // виду по дням, и обходить её табом стороной нельзя.
+        activeFocusOnTab: ring.expandable
+        property bool mouseFocus: false
+        onActiveFocusChanged: if (!activeFocus) mouseFocus = false
+        Keys.onPressed: (e) => {
+            if (e.key === Qt.Key_Space || e.key === Qt.Key_Return
+                    || e.key === Qt.Key_Enter) {
+                ring.activated();
+                e.accepted = true;
+            }
+        }
+        // Радиус задаём явно: цель - Item, у него скругления нет вовсе, и
+        // кольцо вышло бы прямоугольным вокруг круглой карточки.
+        FocusRing {
+            target: box
+            targetRadius: ring.lines ? 0 : T.radiusLg
+            on: box.activeFocus && !box.mouseFocus
+        }
+
+        MouseArea {
+            id: hit
+            anchors.fill: parent
+            enabled: ring.expandable
+            hoverEnabled: ring.expandable
+            cursorShape: Qt.PointingHandCursor
+            onPressed: { box.mouseFocus = true; box.forceActiveFocus() }
+            onClicked: ring.activated()
         }
     }
 }

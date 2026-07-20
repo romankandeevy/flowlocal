@@ -1,0 +1,109 @@
+/* Токены Korti для вебвью. СГЕНЕРИРОВАНО из theme.py - руками не править.
+ *
+ *   python tools/gen_theme.py           переписать
+ *   python tools/gen_theme.py --check   сверить (стоит в CI)
+ *
+ * Подключать после `@import "tailwindcss"` - разбирать @theme больше некому.
+ *
+ * Тёмная тема - атрибут data-theme="dark" на <html>, его ставит Python при
+ * смене темы. Не prefers-color-scheme: тему выбирают в настройках программы,
+ * а системная там лишь один вариант из трёх.
+ */
+
+@theme static {
+  --color-*: initial;
+  --font-*: initial;
+  --text-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --ease-*: initial;
+
+  /* краски: две настоящие, остальные - чернила поверх бумаги */
+  --color-ink: #1a1a18;
+  --color-paper: #fbfbfa;
+  --color-bg: #fbfbfa;
+  --color-surface: #fbfbfa;
+  --color-surface-sunken: #f4f4f3;
+  --color-text: #1a1a18;
+  --color-text-secondary: color-mix(in srgb, var(--color-ink) 64%, transparent);
+  --color-text-muted: color-mix(in srgb, var(--color-ink) 62%, transparent);
+  --color-text-faint: color-mix(in srgb, var(--color-ink) 48%, transparent);
+  --color-text-inverse: #fbfbfa;
+  --color-border: color-mix(in srgb, var(--color-ink) 13%, transparent);
+  --color-border-strong: color-mix(in srgb, var(--color-ink) 24%, transparent);
+  --color-fill-subtle: color-mix(in srgb, var(--color-ink) 4%, transparent);
+  --color-fill: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  --color-fill-strong: color-mix(in srgb, var(--color-ink) 14%, transparent);
+  --color-primary: #1a1a18;
+  --color-primary-fg: #fbfbfa;
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d51c7;
+  --color-accent-fg: #ffffff;
+  --color-success: #10a05a;
+  --color-danger: #e01f2b;
+
+  /* тень */
+  --shadow-card: 0 6px 24px rgb(7 18 42 / 0.122);
+
+  /* типографика */
+  --font-sans: Onest, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --text-2xs: 11px;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-xl: 20px;
+  --text-display: 26px;
+
+  /* метрика */
+  --spacing: 4px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 999px;
+
+  /* движение */
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 280ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Тёмная тема. Здесь только то, что от темы зависит: блок печатается разницей
+ * двух css_vars(), поэтому радиусы и кегли сюда не попадают физически.
+ *
+ * Обе лестницы прозрачностей разные, и это не небрежность - у тёмной темы свои
+ * доли, выправленные по замеру контраста (theme.py, ключ "alpha").
+ *
+ * Вне слоёв: @theme у Tailwind уезжает в @layer theme, а неслоёные правила
+ * бьют слоёные при любой специфичности - значит, переопределение сработает,
+ * что бы там ни насчитал каскад.
+ */
+:root[data-theme="dark"] {
+  --color-ink: #f7f7f4;
+  --color-paper: #141414;
+  --color-bg: #141414;
+  --color-surface: #141414;
+  --color-surface-sunken: #1b1b1b;
+  --color-text: #f7f7f4;
+  --color-text-secondary: color-mix(in srgb, var(--color-ink) 74%, transparent);
+  --color-text-muted: color-mix(in srgb, var(--color-ink) 60%, transparent);
+  --color-text-faint: color-mix(in srgb, var(--color-ink) 44%, transparent);
+  --color-text-inverse: #141414;
+  --color-border: color-mix(in srgb, var(--color-ink) 20%, transparent);
+  --color-border-strong: color-mix(in srgb, var(--color-ink) 34%, transparent);
+  --color-fill-subtle: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  --color-fill: color-mix(in srgb, var(--color-ink) 10%, transparent);
+  --color-fill-strong: color-mix(in srgb, var(--color-ink) 20%, transparent);
+  --color-primary: #f7f7f4;
+  --color-primary-fg: #141414;
+  --color-accent: #6e9bff;
+  --color-accent-hover: #8fb4ff;
+  --color-accent-fg: #0b1220;
+  --color-success: #34d07d;
+  --color-danger: #ff5a61;
+  --shadow-card: 0 6px 24px rgb(0 0 0 / 0.4);
+}

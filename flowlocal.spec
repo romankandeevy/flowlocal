@@ -51,11 +51,27 @@ datas = [
     # строкой `import "../controls"`, то есть путь между папками должен дожить
     # до сборки в том же виде; плоское копирование сломало бы каждое окно.
     ("qml", "qml"),
+    # Собранная страница настроек. Кладём web/dist, а не web/ целиком: в
+    # исходниках рядом лежат node_modules на сотни мегабайт и сами исходники
+    # вёрстки, а пользователю едет только результат сборки.
+    #
+    # Собирать её надо ДО PyInstaller - `cd web && npm run build`. Забыли -
+    # окно настроек откроется пустым, и понять почему будет неоткуда: файлов
+    # нет, а сервер отдаёт честный 404. Поэтому здесь стоит проверка ниже.
+    ("web/dist", "web/dist"),
     # Тексты лицензий - требование LGPLv3 §4(a) и OFL для шрифтов: их надо
     # раздавать вместе со сборкой, а не только упоминать в README.
     ("LICENSE", "licenses"),
     ("licenses", "licenses"),
 ]
+
+# Страница не собрана - останавливаемся здесь, а не отдаём человеку установщик
+# с пустым окном настроек. Отказ на сборке чинится одной командой; отказ у
+# пользователя не чинится вовсе.
+if not os.path.exists(os.path.join(os.getcwd(), "web", "dist", "index.html")):
+    raise SystemExit(
+        "нет web/dist/index.html - сперва соберите страницу:\n"
+        "    cd web && npm ci && npm run build")
 
 # Две вещи, без которых собранный .exe падает на первой же загрузке модели, а
 # из исходников всё работает:
@@ -88,7 +104,31 @@ hiddenimports = [
     "soundfile",
 ]
 
-binaries = [
+def _webview_plugin() -> list:
+    """Плагин бэкенда вебвью - тот, что на самом деле рисует.
+
+    **Без него окно настроек не открывается вовсе, а сборка проходит молча.**
+    Поймано замером собранной папки: Qt6WebView.dll на месте, QML-плагин на
+    месте, а plugins/webview/ пусто. PyInstaller собирает плагины Qt по тому,
+    что видит в импортах, а `from PySide6.QtWebView import QtWebView` у нас
+    стоит внутри webwindow.py и выполняется лениво - статический анализ до
+    него не доходит.
+
+    Кладём поимённо, а не всю папку plugins: рядом лежит qtwebview_webengine,
+    и он тянет Chromium на 200 МБ.
+    """
+    import PySide6
+
+    src = os.path.join(os.path.dirname(PySide6.__file__),
+                       "plugins", "webview", "qtwebview_webview2.dll")
+    if not os.path.exists(src):
+        raise SystemExit(
+            "нет qtwebview_webview2.dll в PySide6 - вебвью не заработает.\n"
+            "Проверьте версию PySide6: плагин появился в 6.4.")
+    return [(src, "PySide6/plugins/webview")]
+
+
+binaries = _webview_plugin() + [
     # Грузится через ctypes из overlay_qt._preload_qml_deps(), а не импортом -
     # PyInstaller про такую зависимость не догадается, и тень у пилюли молча
     # пропадёт. Зачем этот костыль вообще нужен - см. PLAN 3.0.
@@ -138,10 +178,19 @@ if not CUDA:
 # Список - то, что нужно QtQuick, плюс наше: Widgets (трей и меню), Network
 # (QLocalServer для «повторный запуск открывает окно»), QuickEffects (тень
 # MultiEffect у пилюли).
+#
+# Вебвью добавлено 20.07.2026 вместе с переездом настроек на React. Три
+# библиотеки на 0.4 МБ: сам WebView, его QML-обёртка и WebSockets для моста.
+# Движок в них не входит - рисует WebView2 Runtime, а он часть Windows 11 и
+# приезжает на Windows 10 через Windows Update. Своего веса в установщике ноль.
+#
+# Для сравнения, чем это НЕ является: QtWebEngine несёт с собой Chromium и
+# весит 208.6 МБ - установщик вырос бы с 70 до ~140. Замер в PLAN, фаза 0.
 _QT_KEEP = {
     "qt6core", "qt6gui", "qt6network", "qt6opengl", "qt6qml", "qt6qmlmeta",
     "qt6qmlmodels", "qt6qmlworkerscript", "qt6quick", "qt6quickeffects",
     "qt6quickshapes", "qt6shadertools", "qt6svg", "qt6widgets",
+    "qt6webview", "qt6webviewquick", "qt6websockets",
 }
 
 
@@ -157,6 +206,11 @@ def _drop_qt(name: str) -> bool:
 a.binaries = TOC([e for e in a.binaries if not _drop_qt(e[0])])
 # Плагины и QML-модули выброшенных модулей тоже не нужны: без своей библиотеки
 # они всё равно не загрузятся, а место занимают.
+#
+# qtwebengine здесь остаётся в списке на выброс, и это НЕ описка: у PySide6
+# лежат оба бэкенда вебвью - webengine и webview2. Нам нужен второй, а первый
+# тянет Chromium на 200 МБ. Плагин webview2 не трогаем: он живёт отдельно, в
+# pyside6/plugins/webview, и без него окно настроек не откроется вовсе.
 _DATA_DROP = ("pyside6/qml/qtquick3d", "pyside6/qml/qtcharts", "pyside6/qml/qtgraphs",
               "pyside6/qml/qtquick/timeline", "pyside6/qml/qtwebengine",
               "pyside6/qml/qtmultimedia", "pyside6/qml/qt3d",

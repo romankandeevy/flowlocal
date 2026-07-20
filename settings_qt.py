@@ -52,6 +52,7 @@ def _log(msg: str) -> None:
 
 
 import inputspec
+import language
 import models
 import notes
 import stats
@@ -614,7 +615,34 @@ class Backend(QObject):
         # показаны блоком «Готовые» выше, и дублировать их там - ровно то, чего
         # задача велит не делать. Живут они при этом в тех же snippets.
         hide = self._preset_says() if key == "snippets" else set()
-        return [{"k": str(k), "v": str(v)} for k, v in d.items() if k not in hide]
+        # Признак «эту строку принесли мы» - по нему таблица прячет полторы
+        # сотни технических терминов под свёрнутый пункт: владелец сказал, что
+        # среди них не найти собственных трёх подстановок. Не удаляем и не
+        # запираем - убираем с глаз.
+        #
+        # Критерий тот же, что у techdict.strip_from, и это не совпадение, а
+        # условие. Там он решает, что можно снять при выключении терминов, здесь -
+        # что можно спрятать; разойдись они, человек получил бы строку, которую
+        # прячут как нашу, а при выключении оставляют как его. Сверяем и ключ, и
+        # значение: переписал «апи» на своё - строка стала его и уезжает наверх,
+        # к своим.
+        #
+        # Словарь берём один раз на всю таблицу, а не на строку: строк тут под
+        # две сотни.
+        tech = self._tech_terms(key)
+        return [{"k": str(k), "v": str(v),
+                 "ready": str(k).lower() in tech and str(v) == tech[str(k).lower()]}
+                for k, v in d.items() if k not in hide]
+
+    @staticmethod
+    def _tech_terms(key: str) -> dict:
+        """Технические термины - или пусто, если таблица не про подстановки.
+        Правила тона (второй хозяин PairTable) наших строк не содержат вовсе."""
+        if key != "snippets":
+            return {}
+        import techdict
+
+        return techdict.TERMS
 
     @Slot(str, "QVariantList")
     def setPairs(self, key: str, rows) -> None:
@@ -822,6 +850,59 @@ class Backend(QObject):
         return [{"title": t["title"], "instruction": t["instruction"]}
                 for t in transforms.custom_of(self.cfg)]
 
+    @Slot(result="QVariantList")
+    def pickerItems(self) -> list:
+        """Что показать в списке преобразований - с идентификаторами.
+
+        Не customTransforms: тот отдаёт только название и указание, потому что
+        обслуживает таблицу правки на странице «Слова», где id ни к чему. А
+        выбор без id молча уходит в никуда - применять-то нечего.
+
+        Берём transforms.all_for, то есть ровно тот же список, по которому
+        работает Python. Собирать его на странице нельзя: готовые лежат кодом,
+        спрятанные - в конфиге, и второй сборщик разъехался бы с первым в
+        первый же день.
+        """
+        import transforms
+
+        return [dict(x) for x in transforms.all_for(self.cfg)]
+
+    @Slot(str, str, result=str)
+    def saveText(self, text: str, suggest: str = "") -> str:
+        """Спросить, куда сохранить, и сохранить. Возвращает путь или пустое.
+
+        Диалог выбора файла живёт в Python и жить будет: у страницы нет
+        доступа к диску, а «сохранить как» из браузера отдаёт файл в загрузки,
+        а не туда, куда человек показал.
+
+        Имя предлагаем от исходного, если его дали: человек, расшифровавший
+        десять голосовых, иначе получил бы десять «Новый текстовый документ».
+        """
+        import time
+
+        from PySide6.QtWidgets import QFileDialog
+
+        import i18n
+
+        stem = (os.path.splitext(suggest)[0]
+                or time.strftime("Расшифровка-%Y-%m-%d"))
+        path, _ = QFileDialog.getSaveFileName(
+            None, i18n.t("Куда сохранить"), stem + ".txt",
+            i18n.t("Текст") + " (*.txt)")
+        if not path:
+            return ""
+        try:
+            # Переводы строк windows-овские: файл откроют Блокнотом, а он до
+            # сих пор показывает одинокий \n одной длинной строкой.
+            with open(path, "w", encoding="utf-8", newline="\r\n") as f:
+                f.write(text)
+        except OSError as e:
+            _log(f"не сохранилось: {e}")
+            self.flashed.emit(i18n.t("файл не сохранился"), "danger")
+            return ""
+        self.flashed.emit(i18n.t("сохранено"), "")
+        return path
+
     @Slot("QVariantList")
     def setCustomTransforms(self, rows) -> None:
         import transforms
@@ -981,6 +1062,37 @@ class Backend(QObject):
             "typingWpm": stats.TYPING_WPM,
         }
 
+    @Slot(result="QVariantMap")
+    def calendar(self) -> dict:
+        """Клетки по дням за полгода - для календаря под серией («Статистика»).
+
+        Отдельным слотом, а не полем _stats, намеренно. Календарь раскрывают
+        нажатием на серию, и открывают его далеко не в каждый заход; _stats же
+        зовётся и «Главной» (homeData) при каждом открытии окна. Сто восемьдесят
+        клеток с подписями, которые Главной не нужны вовсе, ездили бы туда
+        просто так. Здесь они считаются, когда на них нажали.
+
+        Подсказки собраны тут, а не в QML, по той же причине, что у недельного
+        графика: русское склонение числительных живёт в Python (util.plural), и
+        заводить его второй раз на JavaScript - верный способ получить «1 слов».
+        """
+        cal = stats.calendar(stats.load(self.history_path))
+        return {
+            "weeks": cal["weeks"],
+            "weekdays": cal["weekdays"],
+            "months": cal["months"],
+            "days": [{
+                "level": d["level"],
+                "today": d["today"],
+                "future": d["future"],
+                # У будущих дней подсказки нет: показывать «19 июля · 0 слов»
+                # про послезавтра значит утверждать, что там уже ноль.
+                "hint": "" if d["future"] else
+                        (f"{d['human']} · {d['words']} "
+                         f"{plural(d['words'], 'слово', 'слова', 'слов')}"),
+            } for d in cal["days"]],
+        }
+
     # ---------- экран «Модели» (PLAN 2.4) ----------
 
     modelsChanged = Signal()
@@ -1057,6 +1169,89 @@ class Backend(QObject):
                          + (r.stderr or r.stdout or "").strip()[:300])
                     self.flashed.emit("не удалось скачать - проверьте интернет",
                                       "danger")
+            except Exception as e:  # noqa: BLE001
+                _log(f"загрузчик модели не запустился: {e}")
+                self.flashed.emit("не вышло начать скачивание", "danger")
+            finally:
+                self._downloading.discard(model_id)
+                self.modelsChanged.emit()
+
+        threading.Thread(target=poll, daemon=True).start()
+        threading.Thread(target=work, daemon=True).start()
+
+    @Slot(result=bool)
+    def englishReady(self) -> bool:
+        """Приехала ли модель, которая пишет английский буквами."""
+        return language.installed()
+
+    @Slot(result=int)
+    def starterMb(self) -> int:
+        """Во что обойдётся первый запуск: обе модели вместе.
+
+        Цену называем ДО скачивания, а не после, - как на экране Ollama
+        («Скачаем 3.3 ГБ»). Человек должен знать, во что ввязался, до того как
+        нажал, а не по проценту на полосе.
+        """
+        m = models.get(str(self.cfg.get("model") or models.DEFAULT))
+        return int((m.size_mb if m else 0) + language.SIZE_MB)
+
+    @Slot(str)
+    def downloadStarter(self, model_id: str) -> None:
+        """Мастер первого запуска: обе модели одной полосой.
+
+        Английская не выбирается и не ищется в настройках - она приезжает
+        вместе с основной. Владелец сказал прямо: «она обязательная, а то
+        человек зайдёт, увидит что у нас английский не даётся и не найдёт в
+        настройках». Настройка, которую надо найти, для человека не существует.
+
+        Отсюда и одна полоса на две скачки: два места в интерфейсе - это два
+        решения, а решать тут нечего.
+        """
+        from transcriber import model_dir
+
+        m = models.get(model_id)
+        if m is None or model_id in self._downloading:
+            return
+        self._downloading.add(model_id)
+        self.modelsChanged.emit()
+        dirs = [(model_dir(m.id, m.quant), float(m.size_mb)),
+                (language.folder(), float(language.SIZE_MB))]
+        total = sum(size for _d, size in dirs)
+
+        def poll() -> None:
+            # Прогресс - по росту папок: huggingface_hub наружу процентов не
+            # отдаёт, а размер честный (models.py сверен с метаданными
+            # репозитория, английский - с настоящей скачкой).
+            while model_id in self._downloading:
+                got = 0.0
+                for d, _size in dirs:
+                    try:
+                        got += (sum(os.path.getsize(os.path.join(d, f))
+                                    for f in os.listdir(d)) / 1e6
+                                if os.path.isdir(d) else 0.0)
+                    except OSError:
+                        pass
+                self.modelProgress.emit(model_id, min(0.99, got / total))
+                time.sleep(0.4)
+
+        def work() -> None:
+            # Отдельными процессами и по очереди, а не двумя сразу: у человека
+            # один канал, и параллельная качка только запутает полосу. Про
+            # процесс вместо потока - см. app.download_model_cli.
+            try:
+                for what in (model_id, language.DOWNLOAD_ID):
+                    r = subprocess.run(
+                        _download_cmd(what), capture_output=True, text=True,
+                        encoding="utf-8", errors="replace",
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                    if r.returncode != 0:
+                        _log(f"{what} не скачалась: "
+                             + (r.stderr or r.stdout or "").strip()[:300])
+                        self.flashed.emit("не удалось скачать - проверьте интернет",
+                                          "danger")
+                        return
+                self.modelProgress.emit(model_id, 1.0)
+                self.flashed.emit("всё скачано", "")
             except Exception as e:  # noqa: BLE001
                 _log(f"загрузчик модели не запустился: {e}")
                 self.flashed.emit("не вышло начать скачивание", "danger")

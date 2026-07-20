@@ -298,22 +298,47 @@ def _set_clipboard_text(text: str) -> bool:
     return False
 
 
+# Метка, которой мы чистим буфер перед Ctrl+C.
+#
+# Ловушка, ради которой она заведена: если ничего не выделено, Ctrl+C НЕ
+# ОЧИЩАЕТ буфер - в нём останется то, что человек копировал час назад. Без
+# метки мы приняли бы вчерашнюю копию за текст поля и переписали бы Ollama
+# чужой текст, а результат вставили бы поверх пустого места.
+#
+# Метка, а не пустая строка: EmptyClipboard() снимает формат CF_UNICODETEXT
+# целиком, и _get_clipboard_text вернёт None и на «пусто», и на «в буфере
+# картинка». Своя метка отличает «мы вычистили, и Ctrl+C ничего не дал» от
+# всего остального.
+_PROBE = "\x00flowlocal-selection-probe\x00"
+
+
+def _await_probe(timeout: float) -> str | None:
+    """Дождаться, пока Ctrl+C сменит нашу метку на настоящий текст.
+
+    None - метка на месте, значит копировать было нечего.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        cur = _get_clipboard_text()
+        if cur is not None and cur != _PROBE:
+            return cur
+        time.sleep(0.03)
+    return None
+
+
+def _drop_probe(old: str | None) -> None:
+    """Убрать метку за собой: вернуть прежний буфер, а не было его - оставить пусто."""
+    _set_clipboard_text(old if old is not None else "")
+
+
 def copy_selection(timeout: float = 0.6) -> tuple[str | None, str | None]:
     """Забрать выделенное в активном окне. Возвращает (выделение, прежний буфер).
 
     Выделение - None, если не выделено ничего. Прежний буфер отдаём наружу,
     чтобы вызвавший вернул его на место, когда закончит.
 
-    Ловушка, ради которой всё и написано так: если ничего не выделено, Ctrl+C
-    НЕ ОЧИЩАЕТ буфер - в нём останется то, что человек копировал час назад. Без
-    проверки мы приняли бы это за выделение и молча переписали бы Ollama чужой
-    текст, а результат вставили бы поверх пустого места. Поэтому: чистим буфер
-    сами, жмём Ctrl+C, ждём - и если пусто, значит выделения не было.
-
-    Метка вместо пустой строки: EmptyClipboard() оставляет буфер вовсе без
-    формата CF_UNICODETEXT, и _get_clipboard_text вернёт None и на «пусто», и
-    на «в буфере картинка». Своя метка отличает «мы вычистили, и Ctrl+C ничего
-    не дал» от всего остального.
+    Ничего в чужом окне не меняет: Ctrl+C только читает. Про метку в буфере -
+    см. комментарий к _PROBE выше.
     """
     if not platform_api.IS_WINDOWS:
         # Забрать выделение из чужого окна = послать ему Ctrl+C, а это тот же
@@ -324,31 +349,27 @@ def copy_selection(timeout: float = 0.6) -> tuple[str | None, str | None]:
         return None, None
     _wait_modifiers_released()
     old = _get_clipboard_text()
-    mark = "\x00flowlocal-selection-probe\x00"
-    if not _set_clipboard_text(mark):
+    if not _set_clipboard_text(_PROBE):
         return None, old
     _send_ctrl_c()
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        cur = _get_clipboard_text()
-        if cur is not None and cur != mark:
-            return cur, old
-        time.sleep(0.03)
+    sel = _await_probe(timeout)
+    if sel is not None:
+        return sel, old
     # Метка на месте - Ctrl+C ничего не положил, выделения не было.
-    if old is not None:
-        _set_clipboard_text(old)
-    else:
-        _set_clipboard_text("")
+    _drop_probe(old)
     return None, old
 
 
 def select_all() -> None:
     """Выделить весь текст активного поля - Ctrl+A, и ничего больше.
 
-    Нужна перед вставкой результата преобразования: фокус уходил к пилюле
-    выбора, прежнее выделение снялось, и весь текст надо выделить заново, чтобы
-    вставка легла ПОВЕРХ него, а не рядом. Копировать при этом нечего - это не
-    grab_all.
+    Нужна перед вставкой результата преобразования, но ТОЛЬКО когда поле
+    целиком мы же и забирали (grab_text вернул третьим значением True). Фокус
+    уходил к пилюле выбора, прежнее выделение могло сняться, и весь текст надо
+    выделить заново, чтобы вставка легла ПОВЕРХ него, а не рядом.
+
+    Если текст выделял человек - звать эту функцию НЕЛЬЗЯ: она расширит его
+    выделение с абзаца на весь документ, и результат ляжет поверх всего.
 
     Модификаторы ждём сами: сочетание-хоткей могло прийти с зажатым Shift, и
     Ctrl+A под ним превратился бы в Ctrl+Shift+A - не выделение (та же ловушка,
@@ -361,42 +382,62 @@ def select_all() -> None:
     _send_ctrl_a()
 
 
-def grab_all(timeout: float = 0.6) -> tuple[str | None, str | None]:
-    """Забрать ВЕСЬ текст активного поля: Ctrl+A, затем Ctrl+C.
+def grab_text(timeout: float = 0.6) -> tuple[str | None, str | None, bool]:
+    """Взять текст активного поля. Возвращает (текст, прежний буфер, взяли ли всё).
 
-    Отличие от copy_selection в одном: там человек выделил текст сам, здесь
-    курсор просто стоит в поле, а выделяем всё мы. Дальше механика та же слово
-    в слово - чистим буфер своей меткой, копируем, ждём смены. Метка на месте
-    после Ctrl+C значит, что выделять было нечего: поле пустое. Это не сбой
-    захвата, а честное «нет текста», и наверх уходит None - ровно как «ничего
-    не выделено» у copy_selection.
+    Два шага, и порядок у них не про удобство, а про безопасность.
 
-    Возвращает (весь текст, прежний буфер); вернуть прежний буфер на место -
-    забота вызвавшего, как и у copy_selection.
+    Сперва спрашиваем выделение одним Ctrl+C - это чтение, в чужом окне оно не
+    меняет ничего. Выделил человек сам - берём ровно его кусок и Ctrl+A не жмём
+    вовсе. Только если выделения нет (или в нём одни пробелы), выделяем поле
+    целиком сами.
+
+    Ctrl+A в чужом окне - самое опасное, что мы вообще делаем: он снимает
+    выделение человека и ставит своё на ВЕСЬ документ, а поверх этого выделения
+    потом ляжет результат. Отсюда третье возвращаемое значение: «поле целиком».
+    Только при нём вставляющая сторона имеет право выделить всё заново; при
+    выделении человека такое переписало бы документ вместо правки абзаца.
+
+    Метка ставится заново ПЕРЕД каждым Ctrl+C. Первый шаг мог оставить в буфере
+    пробелы, и второй тогда принял бы их за свежую копию, не дождавшись
+    настоящей.
+
+    Метка на месте после обоих шагов - честное «текста нет»: поле пустое, либо
+    это вовсе не текст (Ctrl+C в проводнике кладёт файлы, а не CF_UNICODETEXT).
+    Наверх уходит None, и трогать там ничего не станут. Наше «выделить всё» в
+    таком окне остаётся висеть - в проводнике это подсвеченные файлы. Обидно,
+    но безобидно: выделение снимется первым же щелчком, а вставки не будет.
+
+    Вернуть прежний буфер на место - забота вызвавшего, как и у copy_selection.
     """
     if not platform_api.IS_WINDOWS:
-        platform_api.note_unsupported("захват всего текста поля")
-        return None, None
+        platform_api.note_unsupported("захват текста поля")
+        return None, None, False
     _wait_modifiers_released()
     old = _get_clipboard_text()
-    mark = "\x00flowlocal-selection-probe\x00"
-    if not _set_clipboard_text(mark):
-        return None, old
+
+    # 1) выделение человека, если оно есть
+    if not _set_clipboard_text(_PROBE):
+        # Буфер занят намертво. Поле не трогаем: без метки мы не отличим
+        # свежую копию от вчерашней, а гадать тут нечем.
+        return None, old, False
+    _send_ctrl_c()
+    sel = _await_probe(timeout)
+    if sel is not None and sel.strip():
+        return sel, old, False
+
+    # 2) выделения нет - выделяем поле целиком
+    if not _set_clipboard_text(_PROBE):
+        _drop_probe(old)
+        return None, old, False
     _send_ctrl_a()
     time.sleep(0.03)      # дать полю выделиться, прежде чем копировать
     _send_ctrl_c()
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        cur = _get_clipboard_text()
-        if cur is not None and cur != mark:
-            return cur, old
-        time.sleep(0.03)
-    # Метка на месте - Ctrl+C ничего не положил, поле пустое.
-    if old is not None:
-        _set_clipboard_text(old)
-    else:
-        _set_clipboard_text("")
-    return None, old
+    whole = _await_probe(timeout)
+    if whole is not None and whole.strip():
+        return whole, old, True
+    _drop_probe(old)
+    return None, old, True
 
 
 # Сколько ждать после Ctrl+V, прежде чем вернуть прежний буфер.

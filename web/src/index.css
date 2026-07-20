@@ -1,0 +1,65 @@
+/* Точка входа стилей. Здесь только подключения и шрифты - краски и размеры
+ * живут в theme.css, а он печатается из theme.py и руками не правится.
+ */
+
+@import "tailwindcss";
+@import "./theme.css";
+
+/* Шрифты те же, что у Qt, и берутся из того же места. theme.py ставит их в
+ * систему через AddFontResourceExW - это для Qt, странице от системной
+ * установки толку нет, ей нужен @font-face.
+ *
+ * Файлы отдаёт наш же QTcpServer из assets/fonts (см. bridge.py), поэтому
+ * путь абсолютный от корня раздачи, а не относительный от css: в собранном
+ * виде css лежит в dist/assets, и ../../assets/fonts указывал бы мимо.
+ *
+ * Оба шрифта переменные - один файл на все начертания, отсюда диапазон в
+ * font-weight. font-display: block, а не swap: подмена системным гротеском на
+ * долю секунды в СВОЁМ окне выглядит поломкой, а не заботой о скорости.
+ * Ждать нечего - файл лежит на этой же машине.
+ */
+@font-face {
+  font-family: "Onest";
+  src: url("/fonts/Onest-Variable.ttf") format("truetype-variations");
+  font-weight: 100 900;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Variable.ttf") format("truetype-variations");
+  font-weight: 100 800;
+  font-display: block;
+}
+
+/* Своё окно, а не страница в интернете: выделять текст мышью незачем нигде,
+ * кроме полей ввода и того, что человек может захотеть скопировать. Иначе
+ * двойной щелчок по подписи подсвечивает её синим, и окно сразу выглядит
+ * веб-страницей, а не программой.
+ */
+@layer base {
+  body {
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-user-select: none;
+    user-select: none;
+    overflow-x: hidden;
+  }
+
+  input,
+  textarea,
+  [data-selectable] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* Кольцо фокуса рисуем сами и только для клавиатуры: :focus-visible не
+   * загорается от щелчка мышью. В QML это отдельный контрол FocusRing, здесь
+   * хватает одного правила на всё окно.
+   */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+}
