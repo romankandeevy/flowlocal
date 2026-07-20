@@ -562,3 +562,132 @@ ease_in = _bezier(0.4, 0, 1, 1)            # --ease-in
 
 def lerp(a: float, b: float, t: float) -> float:
     return a + (b - a) * t
+
+
+# ---------- CSS: те же токены для вебвью ----------
+# Окна настроек переезжают в вебвью, а краска у программы одна. Разъедется она
+# между пилюлей и страницей - заметит это владелец, а не тест. Поэтому CSS не
+# пишут руками: его печатает tools/gen_theme.py отсюда, ключ --check ловит
+# расхождение, а test_theme.py меряет контраст уже по готовому файлу.
+#
+# Прозрачности уезжают в CSS прозрачностями, а не сплавленными числами. Здесь
+# наконец можно записать то, что заявлено в шапке этого файла и чего не умеет
+# tkinter: отдельных серых токенов нет, есть чернила поверх бумаги. Положенный
+# на бумагу color-mix(... N%, transparent) даёт ровно flat(N) - равенство
+# сверяет test_theme.py, разбирая CSS и сравнивая с константами.
+
+
+def _pct(x: float) -> str:
+    """0.64 -> '64', 0.045 -> '4.5'. Хвост нулей в CSS читать нечем."""
+    return f"{x * 100:.4f}".rstrip("0").rstrip(".") or "0"
+
+
+def _ink_css(alpha: float) -> str:
+    """Чернила с прозрачностью - так, как это пишут в CSS.
+
+    Через color-mix от --color-ink, а не готовым rgb(26 26 24 / .13): так вся
+    лестница остаётся привязанной к краске, и тёмная тема перекрашивает её,
+    переопределив одну переменную - ровно как _apply() пересчитывает
+    производные из двух красок.
+    """
+    return f"color-mix(in srgb, var(--color-ink) {_pct(alpha)}%, transparent)"
+
+
+def _shadow_css(c) -> str:
+    """Тень карточки в записи box-shadow.
+
+    Геометрия не своя: смещение 6 и размытие 24 стоят в
+    qml/controls/CardShadow.qml - это --shadow-lg из Korti, ужатая под карточку.
+    Цвет тем более не свой - SHADOW_FAR, уже тонированный в _apply по теме.
+    """
+    return f"0 6px 24px rgb({c[0]} {c[1]} {c[2]} / {round(c[3] / 255, 3)})"
+
+
+def _alpha(mode: str) -> dict:
+    """Действующая лестница прозрачностей темы: канон плюс её переопределения.
+
+    Собирается так же, как в _apply(). Разъехаться этим двум местам не даст
+    test_theme.py: он сверяет разобранный CSS с константами, а константы
+    считает как раз _apply.
+    """
+    a = dict(_ALPHA)
+    a.update(_PALETTE[mode].get("alpha") or {})
+    return a
+
+
+def css_vars(mode: str | None = None) -> dict[str, str]:
+    """Токены одной темы -> CSS-переменные Tailwind v4.
+
+    Ключ - имя переменной вместе с двумя дефисами, значение - готовая правая
+    часть. Порядок объявления сохраняется: генератор печатает словарь как есть,
+    а тёмный блок считает разницей двух вызовов, поэтому туда попадает ровно
+    то, что от темы зависит, и ни строкой больше.
+
+    Тему на время вызова приходится переключать: краски здесь - глобали, их
+    пересчитывает _apply. По выходе возвращаем как было, иначе спросить цвета
+    для вебвью значило бы перекрасить пилюлю.
+    """
+    prev = _mode
+    try:
+        set_theme(mode or prev)
+        a = _alpha(_mode)
+        return {
+            # Две краски, из которых собрано всё остальное.
+            "--color-ink": hx(INK),
+            "--color-paper": hx(PAPER),
+            "--color-bg": hx(BG),
+            "--color-surface": hx(SURFACE),
+            # Единственный «серый», который едет сплавленным: его доля не в
+            # лестнице _ALPHA, а под утопленной поверхностью всё равно всегда
+            # бумага. Берём готовую константу - расходиться нечему.
+            "--color-surface-sunken": hx(SURFACE_SUNKEN),
+            "--color-text": hx(TEXT),
+            "--color-text-secondary": _ink_css(a["text_secondary"]),
+            "--color-text-muted": _ink_css(a["text_muted"]),
+            "--color-text-faint": _ink_css(a["text_faint"]),
+            "--color-text-inverse": hx(TEXT_INVERSE),
+            "--color-border": _ink_css(a["border"]),
+            "--color-border-strong": _ink_css(a["border_strong"]),
+            "--color-fill-subtle": _ink_css(a["fill_subtle"]),
+            "--color-fill": _ink_css(a["fill"]),
+            "--color-fill-strong": _ink_css(a["fill_strong"]),
+            "--color-primary": hx(PRIMARY),
+            "--color-primary-fg": hx(PRIMARY_FG),
+            "--color-accent": hx(ACCENT),
+            "--color-accent-hover": hx(ACCENT_HOVER),
+            "--color-accent-fg": hx(ACCENT_FG),
+            "--color-success": hx(SUCCESS),
+            "--color-danger": hx(DANGER),
+            # Тень одна: та, которой окно рисует карточки. SHADOW_OVER сюда не
+            # едет - она для пилюли, а пилюля остаётся на Qt.
+            "--shadow-card": _shadow_css(SHADOW_FAR),
+            # Onest, а не Hanken Grotesk - почему, в разделе «типографика».
+            # Segoe UI в запасных - цепочка подмены из самого токена Korti.
+            "--font-sans": f'{TK_SANS}, "Segoe UI", sans-serif',
+            "--font-mono": f'"{TK_MONO}", monospace',
+            "--text-2xs": f"{T_2XS}px",
+            "--text-sm": f"{T_SM}px",
+            "--text-md": f"{T_MD}px",
+            "--text-xl": f"{T_XL}px",
+            "--text-display": f"{T_DISPLAY}px",
+            # Шаг сетки. У Tailwind это --spacing, из него он считает всю
+            # линейку отступов: p-1 станет 4px, p-2 - 8px.
+            "--spacing": f"{SPACE}px",
+            "--radius-xs": f"{RADIUS_XS}px",
+            "--radius-sm": f"{RADIUS_SM}px",
+            "--radius-md": f"{RADIUS_MD}px",
+            "--radius-lg": f"{RADIUS_LG}px",
+            "--radius-xl": f"{RADIUS_XL}px",
+            "--radius-full": f"{RADIUS_FULL}px",
+            "--dur-fast": f"{round(T_FAST * 1000)}ms",
+            "--dur": f"{round(T_DUR * 1000)}ms",
+            "--dur-slow": f"{round(T_SLOW * 1000)}ms",
+            # Те же кривые, что у _bezier выше. Числа повторены, как и в
+            # theme_qt.easeOut: доставать точки из замыкания дороже, чем
+            # держать их рядом с вызовом.
+            "--ease-out": "cubic-bezier(0.2, 0.8, 0.2, 1)",
+            "--ease-in": "cubic-bezier(0.4, 0, 1, 1)",
+            "--ease-in-out": "cubic-bezier(0.4, 0, 0.2, 1)",
+        }
+    finally:
+        set_theme(prev)
