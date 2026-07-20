@@ -46,6 +46,15 @@ MODULES = [
     "layered", "inserter", "media", "wakeup", "audiofile",
     "cleaner", "intonation", "stats", "notes", "transforms", "updater",
     "theme_qt", "overlay_qt", "settings_qt", "onboarding_qt",
+    # Переезд визуала на React, 20.07.2026. Дописаны сюда не для полноты:
+    # webwindow.py звал `os.add_dll_directory` на уровне модуля, а такой
+    # функции на macOS нет ВООБЩЕ - импорт падал бы с AttributeError. Проба
+    # этого не поймала, потому что про новые модули не знала, и нашлось это
+    # вопросом владельца, а не проверкой.
+    #
+    # Отсюда правило: завёл модуль - впиши сюда. Список руками, а не обходом
+    # папки, нарочно: обход втянул бы и tools, и тесты, а у них своя жизнь.
+    "bridge", "webwindow", "language",
     "app",
 ]
 
