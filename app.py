@@ -259,7 +259,13 @@ class App:
         # требованию и только при включённом ui.web - вебвью стоит 123 МБ
         # памяти, а программа висит в трее сутками.
         self._web = None
-        self._bridge = None
+        # ВНИМАНИЕ: это НЕ self._bridge. Тот выше (_UiBridge, строка ~223) -
+        # переброс вызовов в главный поток, на нём держится весь self.ui(). Мост
+        # вебвью держим отдельным именем: пока он звался тоже _bridge, эта строка
+        # затирала _UiBridge на None, и любой self.ui() падал с
+        # «'NoneType' object has no attribute 'invoke'» - ложным FATAL про
+        # распознавание и мёртвой диктовкой (нажал хоткей - ничего). См. 2.2.
+        self._web_bridge = None
         self._web_backend = None
         self._ollama_busy = False    # идёт ли установка Ollama
         self._ollama_subs: list = []  # окна, которые хотят видеть ход
@@ -1978,9 +1984,9 @@ class App:
                     extra.append(_Extra(self))
                 except Exception as e:  # noqa: BLE001 - мастер тут не главное
                     log(f"мост без объекта мастера: {e}")
-                self._bridge = bridge.Bridge(self._web_backend, extra)
+                self._web_bridge = bridge.Bridge(self._web_backend, extra)
                 self._web = webwindow.WebWindow(
-                    self._bridge, self.overlay.tokens, self._web_lang(), log)
+                    self._web_bridge, self.overlay.tokens, self._web_lang(), log)
             self._web.show()
             return True
         except Exception as e:  # noqa: BLE001
