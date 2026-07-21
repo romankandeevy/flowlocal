@@ -35,9 +35,15 @@
 // Пилюля подросла с 34 до 44 (PILL_H), волна с ней заодно - смотрят на неё
 // краем глаза, и мелкой ей быть нельзя. И появился живой счётчик слов: разбор
 // на ходу - главная работа последних версий, а снаружи он был невидим совсем.
-// Человек не знал, что его речь уже разбирается, пока он говорит. Теперь
-// знает, и по-прежнему НЕ ВИДИТ самого текста - показ распознанного по ходу
-// речи в плане прямо запрещён.
+//
+// ------- переработка 21.07.2026 -------
+// Владелец: под запись пилюля должна нести ТОЛЬКО волну. Убраны точка «в
+// эфире», таймер и живой счётчик слов - всё, что показывало «сколько» и «как
+// долго». То, что человек ловит краем глаза, - «слышу тебя, пишу», и это без
+// остатка говорит сама волна; цифры при этом только тянут взгляд с дела.
+// Меняет вид пилюля лишь под системное: загрузка модели, ошибка, скачивание
+// обновления, молчащий микрофон - и под итог диктовки («распознаю» → «готово»
+// с галочкой). Их движением не выразишь, они и остались.
 
 // Контролы лежат в соседней папке, поэтому импорт каталога: соседства,
 // на котором QML находит типы сам, между windows/ и controls/ уже нет.
@@ -60,15 +66,9 @@ Item {
     property string state_: "loading"     // loading|recording|processing|done|error
     property string message: ""
     property string hint: ""              // только скачивание обновления
-    property real   seconds: 0
     property var    bars: []              // WAVE_BARS чисел 0..1
     property bool   shown: false
     property bool   silence: false        // запись идёт, а микрофон молчит
-    // Слов разобрано на ходу. 0 - счётчика на пилюле нет вовсе: до первого
-    // разобранного куска показывать нечего, а «0 слов» под запись выглядит
-    // как обвинение.
-    property int    words: 0
-    property string wordsLabel: ""        // «23 слова», согласовано в Python
     // Доля выполнения 0..1, или -1 если считать нечего. Пока её не было,
     // скачивание обновления показывало ту же лежащую ниточку, что и
     // распознавание фразы: «обновление 0.4.2» и всё. Человек не знал ни
@@ -191,33 +191,11 @@ Item {
             opacity: isBusy ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: T.durFast * 1000 } }
 
-            // Точка «в эфире». Зелёная, а не красная: в Korti зелёный - это
-            // «успех/в эфире», а красный - ошибка. Мигать красным во время
-            // нормальной диктовки значило бы врать. В «распознаю» точки нет
-            // вовсе (visible, а не opacity): эфир кончился, а прозрачный элемент
-            // Row всё равно держит spacing - и пилюля была бы шире.
-            Rectangle {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: root.isRec
-                width: T.px(9); height: width; radius: width / 2
-                color: T.success
-                // Пульс только прозрачностью: масштаб - это уже пружинка.
-                //
-                // 920 мс и InOutSine - ВНЕ трёх токенов, и это единственно
-                // возможный выбор. Токены отмеряют ПЕРЕХОД: было одно, стало
-                // другое, чем быстрее, тем лучше. Здесь ничего не меняется -
-                // точка дышит, пока идёт запись, и у дыхания свой темп, около
-                // вдоха. На 280 мс это уже не дыхание, а тревожное мигание, и
-                // ease_out (быстрый старт, долгий выкат) в петле даёт рывок на
-                // стыке - синус на то и синус, что стыка не видно.
-                SequentialAnimation on opacity {
-                    running: root.isRec; loops: Animation.Infinite
-                    NumberAnimation { from: 0.45; to: 1.0; duration: 920
-                                      easing.type: Easing.InOutSine }
-                    NumberAnimation { from: 1.0; to: 0.45; duration: 920
-                                      easing.type: Easing.InOutSine }
-                }
-            }
+            // Точка «в эфире», таймер и счётчик слов убраны 21.07.2026 по
+            // просьбе владельца: под запись пилюля несёт только волну. То, что
+            // человек видит краем глаза, - «слышу тебя, пишу», и это говорит
+            // сама волна. Служебное (скачивание обновления, молчащий микрофон)
+            // осталось - его движением не выразишь.
 
             // Полоса выполнения на месте осциллограммы: та же ширина, чтобы
             // пилюля не прыгала. Заливка акцентом - обновление в Korti как раз
@@ -296,77 +274,19 @@ Item {
                                   easing.type: Easing.InOutSine }
             }
 
-            // Метаданные записи: таймер и счётчик слов. Обе цифры - голос
-            // терминала, поэтому таймер моноширинный, а вместе они читаются
-            // одной строкой «0:12 · 23 слова», а не двумя надписями.
-            //
-            // В распознавании здесь пусто: волна легла в ниточку и дышит - это
-            // и есть ответ на «что сейчас происходит». Единственное исключение
-            // - скачивание обновления: его надписью не заменишь.
+            // Единственная надпись в ряду - скачивание обновления: у него есть
+            // измеримый конец, и показать его движением волны нельзя. Под
+            // запись и под обычное «распознаю» здесь пусто (width 0, элемент
+            // невидим - иначе Row держал бы под него spacing и уводил волну из
+            // центра). Таймер и счётчик слов, что стояли тут раньше, убраны.
             Item {
                 anchors.verticalCenter: parent.verticalCenter
-                width: root.isProc ? (root.hint !== "" ? procLbl.implicitWidth : 0)
-                                   : metaRow.implicitWidth
-                height: Math.max(metaRow.implicitHeight, procLbl.implicitHeight)
+                visible: root.isProc && root.hint !== ""
+                width: visible ? procLbl.implicitWidth : 0
+                height: procLbl.implicitHeight
                 Behavior on width { NumberAnimation { duration: T.durBase * 1000
                                                       easing.type: Easing.Bezier
                                                       easing.bezierCurve: T.easeOut } }
-                Row {
-                    id: metaRow
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: T.px(6)
-                    opacity: root.isProc ? 0 : 1
-                    Behavior on opacity { NumberAnimation { duration: T.durBase * 1000 } }
-
-                    Text {
-                        id: timerText
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: Math.floor(root.seconds / 60) + ":"
-                              + ("0" + Math.floor(root.seconds % 60)).slice(-2)
-                        font.family: T.mono; font.pixelSize: T.px(T.t2xs)
-                        font.weight: Font.Medium
-                        // Табличные цифры. У JetBrains Mono они такие и без
-                        // просьбы, но семейство берётся по имени из системы, и
-                        // если оно не встало - подменыш будет пропорциональным,
-                        // а «0:09 -> 0:10» задёргает всю строку.
-                        font.features: ({ "tnum": 1 })
-                        color: T.textSecondary
-                    }
-
-                    // Счётчик слов - ответ на «оно вообще что-нибудь делает?».
-                    // Пока человек говорит, программа уже разбирает сказанное,
-                    // и до этой строки узнать об этом было неоткуда.
-                    //
-                    // Под тишину прячем, и не только ради ширины: «не слышу
-                    // микрофон» и «23 слова» рядом противоречат друг другу, а
-                    // верна в этот момент жалоба.
-                    // Разделитель - отдельная надпись, а не первые два символа
-                    // счётчика. Пока точка жила внутри строки («· » + подпись),
-                    // отступ ей задавал пробел в тексте: величина, которой нет
-                    // ни в токенах, ни в раскладке, и которая менялась бы со
-                    // сменой шрифта. Теперь её место держит spacing ряда, как
-                    // и у всех соседей, а цвет тот же, что у таймера, - точка
-                    // принадлежит ему, а не счётчику.
-                    Text {
-                        id: wordsDot
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: wordsText.visible
-                        text: "·"
-                        font.family: T.sans; font.pixelSize: T.px(T.t2xs)
-                        font.weight: Font.Medium
-                        color: timerText.color
-                    }
-
-                    Text {
-                        id: wordsText
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: root.isRec && root.words > 0 && !root.silence
-                        text: root.wordsLabel
-                        font.family: T.sans; font.pixelSize: T.px(T.t2xs)
-                        font.weight: Font.Medium
-                        color: T.textSecondary
-                    }
-                }
                 Text {
                     id: procLbl
                     anchors.verticalCenter: parent.verticalCenter

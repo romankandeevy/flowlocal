@@ -35,7 +35,6 @@ from PySide6.QtQuick import QQuickView
 
 import theme as T
 from theme_qt import Tokens, effects_ok
-from util import plural
 
 # Windows: попадание мыши в окно. HTTRANSPARENT - «меня здесь нет, отдайте
 # клик тому, кто ниже»; ровно этим окно пилюли и притворяется везде, кроме
@@ -99,7 +98,6 @@ class Overlay(QObject):
         self._state: str | None = None
         self._shown = False
         self._msg = ""
-        self._rec_at = 0.0
         self._peak = 0.02
         self._bars = [0.0] * T.WAVE_BARS
         self._last_level_at = 0.0
@@ -107,7 +105,6 @@ class Overlay(QObject):
         self._silence = False
         self._position = "bottom"        # bottom | top | off
         self._last_progress = -1.0       # чтобы не дёргать QML на каждый килобайт
-        self._words = 0                  # слов разобрано на ходу
         self._hwnd = 0                   # окно пилюли, кэш; см. _install_hit_filter
 
         self.tokens = Tokens(1.0)
@@ -297,49 +294,12 @@ class Overlay(QObject):
     def show_loading(self) -> None:
         self._to(LOADING)
 
-    def set_words(self, n: int) -> None:
-        """Сколько слов разобрано, пока человек ещё говорит.
-
-        Число только растёт. Куски приходят из рабочего потока, и отставший
-        меньший откатил бы счётчик назад - на глаз это читается как «часть
-        речи потерялась», хотя не потерялось ничего.
-        """
-        n = max(0, int(n))
-        if n <= self._words:
-            return
-        self._words = n
-        self.root.setProperty("words", n)
-        # Согласование числительного считаем здесь: в QML для этого нет ничего,
-        # а «23 слово» на пилюле человек прочитает как поломку.
-        #
-        # В английском согласование другое и проще - две формы вместо трёх, -
-        # поэтому язык решает не переводом готовой строки, а выбором правила.
-        # Прогнать через словарь готовое «23 слова» нельзя: ключом была бы
-        # строка с числом, и словарь пришлось бы вести до бесконечности.
-        import i18n
-
-        if i18n.language() == "en":
-            word = "word" if n == 1 else "words"
-        else:
-            word = plural(n, "слово", "слова", "слов")
-        self.root.setProperty("wordsLabel", f"{n} {word}")
-
     def show_recording(self) -> None:
-        self._rec_at = time.perf_counter()
         self._peak = 0.02
         self._bars = [0.0] * T.WAVE_BARS
-        # Счётчик обнуляем на старте, а не в конце: диктовка кончается по-
-        # разному (ошибкой, отменой, «готово»), а начинается всегда одинаково.
-        #
-        # Оба свойства, а не одно число. Подпись живёт своей жизнью, и
-        # оставленное «23 слова» от прошлой диктовки сейчас не видно только
-        # потому, что QML прячет счётчик по words > 0. Держать чистоту своих
-        # данных на условии в чужом файле нельзя: поправят там - вылезет тут.
-        self._words = 0
-        self.root.setProperty("words", 0)
-        self.root.setProperty("wordsLabel", "")
-        self._last_level_at = self._rec_at
-        self._last_voice_at = self._rec_at
+        now = time.perf_counter()
+        self._last_level_at = now
+        self._last_voice_at = now
         self._set_silence(False)
         self._to(RECORDING)
 
@@ -465,7 +425,6 @@ class Overlay(QObject):
             if self._state == RECORDING:
                 self._pump_bars(now)
                 self.root.setProperty("bars", self._bars)
-                self.root.setProperty("seconds", max(0.0, now - self._rec_at))
         except Exception:  # noqa: BLE001 - кадр пропустить не страшно, упасть - страшно
             pass
 

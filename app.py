@@ -144,7 +144,7 @@ def _words_label(n: int) -> str:
 
     Согласование числительного считается здесь, а язык выбирает правило, а не
     перевод готовой строки: ключом в словаре была бы строка с числом, и вести
-    его пришлось бы до бесконечности. Тот же приём, что в overlay_qt.set_words.
+    его пришлось бы до бесконечности.
     """
     if i18n.language() == "en":
         return f"{n} word" if n == 1 else f"{n} words"
@@ -1201,9 +1201,7 @@ class App:
             return
         self._stream = streaming.Stream(
             self.transcriber.transcribe, log,
-            min_tail=streaming.min_tail_sec(self.cfg),
-            # Счётчик слов на пилюлю: разбор на ходу иначе снаружи невидим.
-            on_words=lambda n: self.ui(self.overlay.set_words, n))
+            min_tail=streaming.min_tail_sec(self.cfg))
         self._stream_thread = threading.Thread(target=self._stream_work, daemon=True)
         self._stream_thread.start()
 
