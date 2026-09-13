@@ -25,6 +25,11 @@ jobs:
   fast:
     runs-on: windows-latest
     timeout-minutes: 20
+    # 12.09.2026: код переехал в old/ (см. TREE.md) - все `run:`-шаги ниже
+    # исполняются оттуда, кроме тех, что явно указывают свой working-directory.
+    defaults:
+      run:
+        working-directory: old
 
     steps:
       - uses: actions/checkout@v4
@@ -124,22 +129,22 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: old/web/package-lock.json
 
       # npm ci, а не install: ставит ровно то, что в package-lock, и падает при
       # расхождении. install молча подтянул бы новые версии, и «у меня
       # собирается» перестало бы значить «соберётся у всех».
       - name: зависимости страницы
         run: npm ci
-        working-directory: web
+        working-directory: old/web
 
       - name: типы и сборка страницы
         run: npm run build
-        working-directory: web
+        working-directory: old/web
 
       - name: доступность витрины
         run: npm run test
-        working-directory: web
+        working-directory: old/web
 
     env:
       # Иначе кириллица в выводе превращается в мусор и провал не прочитать.

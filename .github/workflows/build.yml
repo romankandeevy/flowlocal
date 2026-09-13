@@ -26,6 +26,11 @@ jobs:
     env:
       # Иначе кириллица в выводе build.py превращается в мусор.
       PYTHONIOENCODING: utf-8
+    # 12.09.2026: код переехал в old/ (см. TREE.md) - все `run:`-шаги ниже
+    # исполняются оттуда, кроме тех, что явно указывают свой working-directory.
+    defaults:
+      run:
+        working-directory: old
 
     steps:
       - uses: actions/checkout@v4
@@ -65,14 +70,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: flowlocal-windows-installer
-          path: dist/FlowLocal-*-setup.exe
+          path: old/dist/FlowLocal-*-setup.exe
           if-no-files-found: warn
 
       - name: артефакт - папка onedir (фолбэк и для проверки)
         uses: actions/upload-artifact@v4
         with:
           name: flowlocal-windows-onedir
-          path: dist/cpu/FlowLocal
+          path: old/dist/cpu/FlowLocal
           if-no-files-found: error
 
   # ------------------------------------------------------------------ macOS
@@ -84,6 +89,11 @@ jobs:
     # Сборка здесь - разведка «встанут ли зависимости и заведётся ли упаковщик»,
     # а не рабочий дистрибутив. Красный шаг тут ожидаем и не валит весь workflow.
     continue-on-error: true
+    # 12.09.2026: код переехал в old/ (см. TREE.md) - все `run:`-шаги ниже
+    # исполняются оттуда, кроме тех, что явно указывают свой working-directory.
+    defaults:
+      run:
+        working-directory: old
 
     steps:
       - uses: actions/checkout@v4
@@ -135,6 +145,6 @@ jobs:
         with:
           name: flowlocal-macos
           path: |
-            dist/FlowLocal-macos.dmg
-            dist/*.app
+            old/dist/FlowLocal-macos.dmg
+            old/dist/*.app
           if-no-files-found: ignore
