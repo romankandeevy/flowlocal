@@ -29,6 +29,16 @@ enum Tab: String, CaseIterable, Identifiable {
         case .settings: return "Настройки"
         }
     }
+
+    /// SF Symbols (Apple Design system, «04 · Иконки») - глиф раздела в сайдбаре.
+    var symbol: String {
+        switch self {
+        case .home: return "waveform"
+        case .history: return "clock.arrow.circlepath"
+        case .stats: return "chart.bar.xaxis"
+        case .settings: return "gearshape"
+        }
+    }
 }
 
 /// Язык распознавания: авто - GigaAM и переспрос Parakeet по кускам.
@@ -99,7 +109,7 @@ func wordsLabel(_ n: Int) -> String {
     "\(n) \(plural(n, "слово", "слова", "слов"))"
 }
 
-/// Разряды - неразрывным пробелом, как требует Verkstad: «1 284».
+/// Разряды - неразрывным пробелом: «1 284».
 func grouped(_ n: Int) -> String {
     let f = NumberFormatter()
     f.numberStyle = .decimal
@@ -108,12 +118,6 @@ func grouped(_ n: Int) -> String {
 }
 
 final class AppState: ObservableObject {
-    @Published var theme: ThemeKind {
-        didSet {
-            UserDefaults.standard.set(theme.rawValue, forKey: "theme")
-            NSApp.appearance = theme.appearance
-        }
-    }
     /// «Зажать»: пишем, пока держат.
     @Published var hotkey: HotkeyPreset {
         didSet { hotkey.save(.hold) }
@@ -123,6 +127,7 @@ final class AppState: ObservableObject {
         didSet { toggleHotkey.save(.toggle) }
     }
     @Published var tab: Tab = .home
+    @Published var historyQuery = ""              // поиск «Истории» - поле в строке заголовка
     @Published var backend: BackendState = .starting
     @Published var englishReady = false
     @Published var phase: Phase = .idle
@@ -165,11 +170,10 @@ final class AppState: ObservableObject {
     @Published var micDevices: [AudioDevice] = []
     @Published var launchAtLogin = false
 
-    var palette: Palette { .of(theme) }
+    let palette: Palette = .dark
 
     init() {
         let d = UserDefaults.standard
-        theme = ThemeKind(rawValue: d.string(forKey: "theme") ?? "") ?? .system
         hotkey = HotkeyPreset.load(.hold)
         toggleHotkey = HotkeyPreset.load(.toggle)
         insertAutomatically = d.object(forKey: "insertAutomatically") as? Bool ?? true

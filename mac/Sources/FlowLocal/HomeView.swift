@@ -1,12 +1,12 @@
 import AppKit
 import SwiftUI
 
-// Вкладка «Главная» - пять состояний макета: 1a покой, 1b запись,
-// 1c распознавание, 1d нет микрофона, 1e загрузка моделей. Размеры сбавлены
-// против макета: на 37-40 px и 44 px клавиш окно выглядело громоздким.
+// «Главная» - пять состояний: покой, запись, распознавание, нет микрофона,
+// загрузка моделей. Справа, если хватает ширины, - «Недавние».
 struct HomeView: View {
     @EnvironmentObject var state: AppState
     let actions: AppActions
+    let wide: Bool
 
     private enum Mode { case idle, recording, processing, micError, loading }
 
@@ -20,285 +20,396 @@ struct HomeView: View {
     }
 
     var body: some View {
-        let p = state.palette
-        Group {
-            switch mode {
-            case .recording: recording(p)
-            case .processing: processing(p)
-            case .micError: scroll { micError(p) }
-            case .loading: scroll { loading(p) }
-            case .idle: scroll { idle(p) }
+        HStack(spacing: 0) {
+            stage
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .transition(.opacity)
+            if wide {
+                FLSeparator(vertical: true)
+                RecentPanel(actions: actions)
+                    .frame(width: 300)
             }
         }
-        .padding(Space.s5)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .animation(Motion.page, value: mode)
     }
-
-    private func scroll<C: View>(@ViewBuilder _ content: () -> C) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.s5) { content() }
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .scrollIndicators(.never)
-    }
-
-    // MARK: - 1a покой
 
     @ViewBuilder
-    private func idle(_ p: Palette) -> some View {
-        statusLine(p)
-        VStack(alignment: .leading, spacing: Space.s3) {
-            Text("Говорите — текст на месте")
-                .displayTitle(p.text, size: FontSize.fs5, weight: .bold)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("Работает в любом окне: письмо, чат, документ. Голос не покидает этот компьютер.")
-                .font(Fonts.text(FontSize.fs2))
-                .foregroundStyle(p.textMuted)
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        VStack(alignment: .leading, spacing: Space.s3) {
-            ForEach(HotkeyRole.allCases) { role in
-                HStack(alignment: .center, spacing: Space.s4) {
-                    Text(role.title).monoLabel(p.textMuted).frame(width: 64, alignment: .leading)
-                    HotkeyRow(role: role, actions: actions, height: 36)
-                }
-            }
-        }
-        if !state.axTrusted {
-            VKAlert(mark: "Внимание", title: "Вставка отключена",
-                    text: "Нет права «Универсальный доступ»: текст ложится в буфер, вставка — ⌘V вручную. Если Flow Local уже в списке, удалите его и добавьте снова.",
-                    palette: p) {
-                Button("Открыть настройки") {
-                    Inserter.requestTrust()
-                    Inserter.openAccessibilitySettings()
-                }
-                .buttonStyle(VKButtonStyle(palette: p, kind: .primary, size: .sm))
-            }
-        }
-        VKDivider(palette: p)
-        StatTiles()
-        MicRow()
-    }
-
-    private func statusLine(_ p: Palette) -> some View {
-        HStack(spacing: Space.s3) {
-            switch state.backend {
-            case .ready:
-                Rectangle().fill(p.success).frame(width: 8, height: 8)
-                Text("Готов").monoLabel(p.text)
-                Text("/ \(state.langMode.title) / " + (state.englishReady ? "GigaAM v3 · Parakeet" : "GigaAM v3"))
-                    .monoLabel(p.textMuted).lineLimit(1)
-            case .starting:
-                Rectangle().fill(p.warning).frame(width: 8, height: 8)
-                Text("Загрузка").monoLabel(p.text)
-            case let .failed(msg):
-                Rectangle().fill(p.danger).frame(width: 8, height: 8)
-                Text("Ошибка").monoLabel(p.text)
-                Text("/ \(msg)").monoLabel(p.textMuted).lineLimit(2)
-            }
+    private var stage: some View {
+        switch mode {
+        case .idle: IdleStage()
+        case .recording: RecordingStage()
+        case .processing: ProcessingStage(actions: actions)
+        case .micError: MicErrorStage()
+        case .loading: LoadingStage(actions: actions)
         }
     }
+}
 
-    // MARK: - 1b запись
+/// Микрофоны для выбора: системный - первым, с именем того, что сейчас стоит.
+func micOptions(_ state: AppState) -> [(String?, String)] {
+    [(nil, "Системный · \(AudioDevices.defaultInput()?.name ?? "по умолчанию")")]
+        + state.micDevices.map { ($0.uid, $0.name) }
+}
 
-    private func recording(_ p: Palette) -> some View {
-        let since: Date
-        let locked: Bool
-        if case let .recording(s, l) = state.phase { since = s; locked = l } else { since = Date(); locked = false }
+/// Нет доступа: спросить, если macOS ещё не спрашивала, иначе - открыть настройки.
+func openMicrophoneAccess(_ state: AppState) {
+    if Recorder.permission == .notDetermined {
+        Recorder.requestPermission { _ in state.refreshPermissions() }
+    } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+        NSWorkspace.shared.open(url)
+    }
+}
+
+// MARK: - покой
+
+private struct IdleStage: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        PageScroll(maxWidth: 640) {
+            HeroCard()
+                .padding(.top, Space.s2)
+            if !state.axTrusted {
+                FLNotice(symbol: "exclamationmark.triangle.fill", title: "Вставка отключена",
+                         text: "Без права «Универсальный доступ» текст ложится в буфер обмена, и вставлять его нужно самому, ⌘V. Если Flow Local уже есть в списке, удалите его и добавьте снова.") {
+                    Button {
+                        Inserter.requestTrust()
+                        Inserter.openAccessibilitySettings()
+                    } label: {
+                        Label("Открыть настройки", systemImage: "arrow.up.forward.app")
+                    }
+                    .buttonStyle(FLButtonStyle(kind: .primary, size: .small))
+                }
+            }
+            VStack(alignment: .leading, spacing: Space.s2) {
+                SectionTitle("Сегодня")
+                StatTiles()
+            }
+        }
+    }
+}
+
+/// Главное на «Главной» - как начать: основное сочетание крупными клавишами
+/// MacBook и одна фраза, что будет; второй способ - строкой ниже. Менять
+/// сочетания - в настройках: здесь только то, что нужно, чтобы начать.
+private struct HeroCard: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        let p = state.palette
+        VStack(spacing: 0) {
+            VStack(spacing: Space.s4) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(p.accent)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(p.wash(p.accent)))
+                VStack(spacing: 6) {
+                    Text("Удерживайте и говорите").textStyle(.title2, p.text, weight: .semibold)
+                    Text("Отпустите клавиши — текст встанет туда, где стоит курсор: в письмо, чат или документ.")
+                        .textStyle(.body, p.textMuted)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 380)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                KeyCapRow(keys: state.hotkey.keys)
+                    .padding(.top, Space.s1)
+            }
+            .padding(.top, Space.s6)
+            .padding(.bottom, Space.s5)
+            .padding(.horizontal, Space.s5)
+            FLSeparator()
+            HStack(spacing: Space.s2) {
+                Text("Долгая диктовка").textStyle(.subheadline, p.textMuted).lineLimit(1)
+                KeyCapRow(keys: state.toggleHotkey.keys, size: .small)
+                Text("— начать, ещё раз — вставить").textStyle(.subheadline, p.textMuted).lineLimit(1)
+                Spacer(minLength: Space.s2)
+                Button("Изменить…") { state.tab = .settings }
+                    .buttonStyle(FLButtonStyle(kind: .plain, size: .small))
+                    .help("Сочетания клавиш — в настройках")
+            }
+            .padding(.leading, Space.s4)
+            .padding(.trailing, Space.s2)
+            .frame(height: 44)
+        }
+        .frame(maxWidth: .infinity)
+        .card()
+    }
+}
+
+// MARK: - запись
+
+private struct RecordingStage: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        let p = state.palette
+        let info = recording
         let expanded = state.transcriptExpanded
-        return VStack(alignment: .leading, spacing: Space.s4) {
-            TimelineView(.periodic(from: since, by: 0.25)) { ctx in
-                let t = ctx.date.timeIntervalSince(since)
+        VStack(alignment: .leading, spacing: Space.s4) {
+            TimelineView(.periodic(from: info.since, by: 0.25)) { ctx in
+                let t = ctx.date.timeIntervalSince(info.since)
                 let wpm = t > 3 ? Int(Double(state.liveWords) / (t / 60)) : 0
-                HStack(alignment: .firstTextBaseline, spacing: Space.s4) {
+                HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
                     Text(MainView.clock(t))
-                        .displayTitle(p.text, size: expanded ? FontSize.fs4 : 48, weight: .bold)
+                        .font(.system(size: expanded ? 22 : 44, weight: .light))
                         .monospacedDigit()
-                    Text("\(wordsLabel(state.liveWords)) / \(wpm) сл/мин").monoLabel(p.textMuted)
+                        .foregroundStyle(p.text)
+                    Text("\(wordsLabel(state.liveWords)) · \(wpm) сл/мин")
+                        .textStyle(.body, p.textMuted)
+                        .monospacedDigit()
                     Spacer()
-                    VKBadge(text: locked ? "Нажать" : "Зажать", tone: .outline, palette: p)
+                    FLTag(text: info.locked ? "По нажатию" : "Удерживая")
                 }
             }
             if !expanded {
-                LiveLevels(color: p.accent, count: 44, spacing: 3, height: 64, floor: 0.08)
-                    .padding(Space.s4)
-                    .background(p.surface)
-                    .overlay(Rectangle().strokeBorder(p.border, lineWidth: Space.hairline))
+                LiveWaveform(count: 64, height: 72)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Space.s5)
+                    .card()
+                    .transition(.opacity)
             }
-            LiveTranscript(title: "Расшифровка в ходе речи", caret: true)
-            HStack(spacing: Space.s4) {
-                VKKeycap(text: locked ? state.toggleHotkey.label : state.hotkey.label,
-                         palette: p, height: 32, accent: true)
-                Text(locked ? "Нажмите ещё раз — текст встанет в активное окно" : "Отпустите — текст встанет в активное окно")
-                    .font(Fonts.text(FontSize.fs2))
-                    .foregroundStyle(p.textMuted)
-                    .lineLimit(2)
+            LiveTranscript(title: "Расшифровка", caret: true)
+            HStack(spacing: Space.s3) {
+                KeyCapRow(keys: (info.locked ? state.toggleHotkey : state.hotkey).keys, size: .small, active: true)
+                Text(info.locked ? "Нажмите ещё раз — текст встанет в активное окно"
+                                 : "Отпустите — текст встанет в активное окно")
+                    .textStyle(.body, p.textMuted)
+                    .lineLimit(1)
+                Spacer(minLength: Space.s3)
+                Text("Esc — отмена").textStyle(.subheadline, p.textMuted)
             }
         }
-        .animation(Motion.base, value: expanded)
+        .frame(maxWidth: 760, maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, Space.s5)
+        .padding(.top, Space.s1)
+        .padding(.bottom, Space.s5)
+        .frame(maxWidth: .infinity)
+        .animation(Motion.page, value: expanded)
     }
 
-    // MARK: - 1c распознавание
+    private var recording: (since: Date, locked: Bool) {
+        if case let .recording(since, locked) = state.phase { return (since, locked) }
+        return (Date(), false)
+    }
+}
 
-    private func processing(_ p: Palette) -> some View {
+// MARK: - распознавание
+
+private struct ProcessingStage: View {
+    @EnvironmentObject var state: AppState
+    let actions: AppActions
+
+    var body: some View {
+        let p = state.palette
         VStack(alignment: .leading, spacing: Space.s4) {
-            VStack(alignment: .leading, spacing: Space.s2) {
-                Text("Собираю текст").displayTitle(p.text, size: FontSize.fs5, weight: .bold)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Собираю текст").textStyle(.largeTitle, p.text)
                 Text("Запись \(MainView.clock(state.recordSeconds)) · \(wordsLabel(state.liveWords)) на ходу. Остался хвост — меньше секунды.")
-                    .font(Fonts.text(FontSize.fs2))
-                    .foregroundStyle(p.textMuted)
+                    .textStyle(.body, p.textMuted)
             }
-            VKProgress(value: nil, palette: p, height: 4)
+            ProgressView()
+                .progressViewStyle(.linear)
+                .tint(p.accent)
             LiveTranscript(title: "Предварительный текст", caret: false, skeleton: true)
             HStack(spacing: Space.s3) {
-                Button("Отменить", action: actions.cancelProcessing)
-                    .buttonStyle(VKButtonStyle(palette: p, kind: .secondary, size: .sm))
-                Text(state.insertAutomatically ? "Текст вставится сам и останется в истории" : "Текст останется в истории")
-                    .font(Fonts.text(FontSize.fs2))
-                    .foregroundStyle(p.textMuted)
+                Button(action: actions.cancelProcessing) { Label("Отменить", systemImage: "xmark") }
+                    .buttonStyle(FLButtonStyle(kind: .secondary))
+                Text(state.insertAutomatically ? "Текст вставится сам и останется в истории"
+                                               : "Текст останется в истории")
+                    .textStyle(.body, p.textMuted)
+            }
+        }
+        .frame(maxWidth: 760, maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, Space.s5)
+        .padding(.top, Space.s1)
+        .padding(.bottom, Space.s5)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - нет доступа к микрофону
+
+private struct MicErrorStage: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        let p = state.palette
+        VStack(spacing: Space.s3) {
+            Image(systemName: "mic.slash.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(p.danger)
+                .padding(.bottom, Space.s1)
+            Text("Нет доступа к микрофону").textStyle(.title2, p.text, weight: .semibold)
+            Text("macOS не разрешает Flow Local слушать вход. Откройте «Конфиденциальность и безопасность» → «Микрофон», включите Flow Local и вернитесь сюда.")
+                .textStyle(.body, p.textMuted)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: Space.s2) {
+                Button { openMicrophoneAccess(state) } label: {
+                    Label("Открыть настройки macOS", systemImage: "arrow.up.forward.app")
+                }
+                .buttonStyle(FLButtonStyle(kind: .primary))
+                Button { state.refreshPermissions() } label: {
+                    Label("Проверить снова", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(FLButtonStyle(kind: .secondary))
+            }
+            .padding(.top, Space.s2)
+            Text("Пока доступа нет, горячие клавиши молчат. История и настройки на месте.")
+                .textStyle(.subheadline, p.textMuted)
+                .padding(.top, Space.s1)
+        }
+        .padding(Space.s6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - загрузка моделей
+
+private struct LoadingStage: View {
+    @EnvironmentObject var state: AppState
+    let actions: AppActions
+
+    var body: some View {
+        let p = state.palette
+        PageScroll {
+            VStack(alignment: .leading, spacing: Space.s2) {
+                Text("Загружаю модели").textStyle(.largeTitle, p.text)
+                Text("Несколько секунд при каждом запуске. Дальше всё работает без сети: звук и текст не уходят с этого Mac.")
+                    .textStyle(.body, p.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, Space.s2)
+            VStack(spacing: 0) {
+                step(p, state: .done, title: "Доступ к микрофону выдан", detail: nil)
+                FLSeparator(inset: 48)
+                step(p, state: .active, title: "Модели распознавания", detail: "RU · GigaAM v3    EN · Parakeet TDT")
+                FLSeparator(inset: 48)
+                step(p, state: .next, title: "Первая диктовка", detail: "Зажмите \(state.hotkey.label) и говорите")
+            }
+            .card()
+            VStack(alignment: .leading, spacing: Space.s2) {
+                FLCheck(isOn: Binding(get: { state.launchAtLogin }, set: { actions.setLaunchAtLogin($0) }),
+                        label: "Запускать при входе в систему")
+                FLCheck(isOn: $state.showPill, label: "Показывать островок во время диктовки")
             }
         }
     }
 
-    // MARK: - 1d нет доступа к микрофону
+    private enum StepState { case done, active, next }
 
-    @ViewBuilder
-    private func micError(_ p: Palette) -> some View {
-        VKAlert(mark: "Ошибка", title: "Доступ к микрофону не выдан",
-                text: "macOS не разрешает Flow Local слушать вход. Откройте «Конфиденциальность и безопасность» → «Микрофон» и включите Flow Local, затем вернитесь сюда.",
-                tone: .danger, palette: p) { EmptyView() }
-        VStack(alignment: .leading, spacing: Space.s3) {
-            Text("Диктовка выключена").displayTitle(p.text, size: FontSize.fs5, weight: .bold)
-            Text("Горячие клавиши не сработают, пока нет доступа. История и настройки остаются на месте.")
-                .font(Fonts.text(FontSize.fs2))
-                .foregroundStyle(p.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+    private func step(_ p: Palette, state s: StepState, title: String, detail: String?) -> some View {
         HStack(spacing: Space.s3) {
-            Button("Открыть настройки macOS") {
-                if Recorder.permission == .notDetermined {
-                    Recorder.requestPermission { _ in state.refreshPermissions() }
-                } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
-                    NSWorkspace.shared.open(url)
+            ZStack {
+                switch s {
+                case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(p.success)
+                case .active: ProgressView().controlSize(.small)
+                case .next: Image(systemName: "circle").foregroundStyle(p.textTertiary)
                 }
             }
-            .buttonStyle(VKButtonStyle(palette: p, kind: .primary))
-            Button("Проверить снова") { state.refreshPermissions() }
-                .buttonStyle(VKButtonStyle(palette: p, kind: .secondary))
-        }
-        VStack(spacing: 0) {
-            HStack {
-                Text("Устройство ввода").monoLabel(p.textMuted)
-                Spacer()
-                VKBadge(text: "Нет сигнала", tone: .danger, palette: p)
+            .font(.system(size: 16))
+            .frame(width: 20, height: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).textStyle(.body, s == .next ? p.textMuted : p.text)
+                if let detail { Text(detail).textStyle(.subheadline, p.textMuted) }
             }
-            .padding(.horizontal, Space.s4)
-            .padding(.vertical, Space.s3)
-            VKDivider(palette: p)
-            HStack(spacing: Space.s4) {
-                Text(state.micName).font(Fonts.text(FontSize.fs2)).foregroundStyle(p.text).lineLimit(1)
-                Spacer()
-                Button("Выбрать другой") { pickMic() }
-                    .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm))
-            }
-            .padding(.horizontal, Space.s4)
-            .padding(.vertical, Space.s3)
-        }
-        .background(p.surface)
-        .overlay(Rectangle().strokeBorder(p.border, lineWidth: Space.hairline))
-    }
-
-    private func pickMic() {
-        state.refreshDevices()
-        let options: [(String?, String)] = [(nil, "Системный по умолчанию")] + state.micDevices.map { ($0.uid, $0.name) }
-        MenuPresenter.show(options.map { ($0.1, $0.0 == state.micUID) }) { i in
-            actions.selectMic(options[i].0)
-        }
-    }
-
-    // MARK: - 1e загрузка моделей
-
-    @ViewBuilder
-    private func loading(_ p: Palette) -> some View {
-        VStack(alignment: .leading, spacing: Space.s3) {
-            Text("Загружаю модели распознавания")
-                .displayTitle(p.text, size: FontSize.fs5, weight: .bold)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("Несколько секунд при каждом запуске. Дальше приложение работает без сети: аудио и текст не уходят с компьютера.")
-                .font(Fonts.text(FontSize.fs2))
-                .foregroundStyle(p.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        VStack(alignment: .leading, spacing: Space.s2) {
-            Text("RU · GigaAM v3  /  EN · Parakeet").monoLabel(p.textMuted)
-            VKProgress(value: nil, palette: p, height: 4)
-        }
-        VStack(spacing: 0) {
-            step(p, mark: state.micGranted ? "Ок" : "Сейчас", markColor: state.micGranted ? p.success : p.accentInk,
-                 text: state.micGranted ? "Доступ к микрофону выдан" : "Доступ к микрофону", active: !state.micGranted)
-            VKDivider(palette: p)
-            step(p, mark: "Сейчас", markColor: p.accentInk, text: "Загрузка моделей", active: true)
-            VKDivider(palette: p)
-            step(p, mark: "Далее", markColor: p.textMuted, text: "Первая диктовка: \(state.hotkey.label)", active: false)
-        }
-        .background(p.surface)
-        .overlay(Rectangle().strokeBorder(p.border, lineWidth: Space.hairline))
-        VStack(alignment: .leading, spacing: Space.s3) {
-            VKCheck(isOn: Binding(get: { state.launchAtLogin }, set: { actions.setLaunchAtLogin($0) }),
-                    label: "Запускать при входе в систему", palette: p)
-            VKCheck(isOn: $state.showPill, label: "Показывать плашку поверх окон", palette: p)
-        }
-    }
-
-    private func step(_ p: Palette, mark: String, markColor: Color, text: String, active: Bool) -> some View {
-        HStack(spacing: Space.s4) {
-            Text(mark).monoLabel(markColor).frame(width: 60, alignment: .leading)
-            Text(text).font(Fonts.text(FontSize.fs2)).foregroundStyle(active ? p.text : p.textMuted)
             Spacer()
         }
         .padding(.horizontal, Space.s4)
         .padding(.vertical, Space.s3)
-        .background(active ? p.surface2 : Color.clear)
     }
 }
 
 // MARK: - сочетание с захватом
 
-/// Клавиши сочетания и «Изменить». Захват - как в наборе 1g: клавиша
-/// становится акцентной, надпись меняется на приглашение.
+enum HotkeyRowStyle { case hero, row }
+
+/// Сочетание и «Изменить». hero - большие клавиши MacBook на «Главной»,
+/// row - маленькие в настройках. Места мало - клавиши уходят под текст.
 struct HotkeyRow: View {
     @EnvironmentObject var state: AppState
     let role: HotkeyRole
     let actions: AppActions
-    var height: CGFloat = 36
+    var style: HotkeyRowStyle = .row
 
     var body: some View {
         let p = state.palette
-        let preset = state.hotkey(for: role)
         VStack(alignment: .leading, spacing: Space.s2) {
-            HStack(spacing: Space.s2) {
-                if state.capturing == role {
-                    VKKeycap(text: "Нажмите клавиши", palette: p, height: height, accent: true)
-                    Button("Отмена", action: actions.cancelCapture)
-                        .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm))
-                } else {
-                    VKCombo(keys: preset.keys, palette: p, height: height)
-                    Button("Изменить") { actions.beginCapture(role) }
-                        .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm))
-                        .padding(.leading, Space.s2)
-                    if !preset.same(as: HotkeyPreset.defaultPreset(role)) {
-                        Button("Сбросить") { actions.resetHotkey(role) }
-                            .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm))
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Space.s4) {
+                    texts(p)
+                    Spacer(minLength: Space.s4)
+                    keys(p)
+                    buttons
+                }
+                VStack(alignment: .leading, spacing: Space.s3) {
+                    texts(p)
+                    HStack(spacing: Space.s3) {
+                        keys(p)
+                        buttons
                     }
                 }
             }
-            if state.capturing == role {
-                Text("Сочетание с Ctrl, Option, Shift или Cmd. Esc — отмена.")
-                    .font(Fonts.text(FontSize.fs1)).foregroundStyle(p.textMuted)
-            } else if let err = state.hotkeyError[role] {
-                Text(err).font(Fonts.text(FontSize.fs1)).foregroundStyle(p.danger)
+            // Иначе выбранный вариант встаёт по центру карточки и строки
+            // «Зажать» и «Нажать» начинаются с разных отступов.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            note(p)
+        }
+        .padding(.horizontal, Space.s4)
+        .padding(.vertical, style == .hero ? Space.s4 : 10)
+        .animation(Motion.page, value: state.capturing)
+    }
+
+    private func texts(_ p: Palette) -> some View {
+        HStack(spacing: Space.s3) {
+            if style == .row { SettingIcon(symbol: role.symbol) }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(role.title).textStyle(.body, p.text)
+                Text(role.hint).textStyle(.subheadline, p.textMuted)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func keys(_ p: Palette) -> some View {
+        if state.capturing == role {
+            Text("Нажмите сочетание…")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, Space.s3)
+                .frame(height: style == .hero ? 40 : Metric.buttonSmall)
+                .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(p.accent))
+        } else {
+            KeyCapRow(keys: state.hotkey(for: role).keys, size: style == .hero ? .large : .small)
+        }
+    }
+
+    @ViewBuilder
+    private var buttons: some View {
+        HStack(spacing: Space.s1) {
+            if state.capturing == role {
+                Button("Отмена", action: actions.cancelCapture)
+                    .buttonStyle(FLButtonStyle(kind: .plain, size: .small))
+            } else {
+                Button("Изменить") { actions.beginCapture(role) }
+                    .buttonStyle(FLButtonStyle(kind: .secondary, size: .small))
+                if !state.hotkey(for: role).same(as: HotkeyPreset.defaultPreset(role)) {
+                    FLIconButton(symbol: "arrow.uturn.backward", help: "Вернуть по умолчанию") {
+                        actions.resetHotkey(role)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func note(_ p: Palette) -> some View {
+        if state.capturing == role {
+            Text("Сочетание с ⌃, ⌥, ⇧ или ⌘. Esc — отмена.").textStyle(.subheadline, p.textMuted)
+        } else if let err = state.hotkeyError[role] {
+            Text(err).textStyle(.subheadline, p.danger)
         }
     }
 }
@@ -309,35 +420,10 @@ struct StatTiles: View {
     @EnvironmentObject var state: AppState
 
     var body: some View {
-        let p = state.palette
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.hairline), count: 3),
-                  spacing: Space.hairline) {
-            VKStatTile(label: "Слов сегодня", value: grouped(state.wordsToday), palette: p, size: FontSize.fs5)
-            VKStatTile(label: "Скорость", value: "\(state.speedWPM)", unit: "сл/мин", palette: p, size: FontSize.fs5)
-            VKStatTile(label: "Сэкономлено", value: "\(state.savedMinutes)", unit: "мин", palette: p, size: FontSize.fs5)
-        }
-        .background(p.border)
-        .overlay(Rectangle().strokeBorder(p.border, lineWidth: Space.hairline))
-    }
-}
-
-// MARK: - микрофон
-
-struct MicRow: View {
-    @EnvironmentObject var state: AppState
-    @ObservedObject private var meter = LevelStore.shared
-
-    var body: some View {
-        let p = state.palette
-        let options: [(String?, String)] = [(nil, "Системный · \(AudioDevices.defaultInput()?.name ?? "по умолчанию")")]
-            + state.micDevices.map { ($0.uid, $0.name) }
-        VStack(alignment: .leading, spacing: Space.s2) {
-            Text("Микрофон").monoLabel(p.textMuted)
-            HStack(spacing: Space.s4) {
-                VKSelect(options: options, selection: $state.micUID, palette: p, small: true)
-                VKLevelBars(levels: meter.levels, color: p.textMuted, count: 5, spacing: 3, barWidth: 3, height: 20)
-                Text(meter.peak > 0.1 ? "Сигнал" : "Тишина").monoLabel(p.textMuted).frame(width: 60, alignment: .leading)
-            }
+        HStack(spacing: Space.s2) {
+            StatTile(symbol: "text.alignleft", label: "Слов сегодня", value: grouped(state.wordsToday))
+            StatTile(symbol: "speedometer", label: "Скорость", value: "\(state.speedWPM)", unit: "сл/мин")
+            StatTile(symbol: "hourglass", label: "Сэкономлено", value: "\(state.savedMinutes)", unit: "мин")
         }
     }
 }
@@ -346,7 +432,7 @@ struct MicRow: View {
 
 /// Уже разобранный текст. Куски приходят окончательными: текст только
 /// дописывается и не мигает. Сам прокручивается к новому; последний кусок -
-/// цветом текста, прежнее - приглушённым. «Развернуть» отдаёт ему всё окно.
+/// label, прежнее - secondaryLabel. «Развернуть» отдаёт ему всю сцену.
 struct LiveTranscript: View {
     @EnvironmentObject var state: AppState
     let title: String
@@ -356,58 +442,64 @@ struct LiveTranscript: View {
     var body: some View {
         let p = state.palette
         VStack(alignment: .leading, spacing: Space.s3) {
-            HStack(spacing: Space.s3) {
-                Text(title).monoLabel(p.textMuted)
-                Text(wordsLabel(state.liveWords)).monoLabel(p.textMuted)
+            HStack(spacing: Space.s2) {
+                Text(title).textStyle(.headline, p.text)
+                Text(wordsLabel(state.liveWords)).textStyle(.subheadline, p.textMuted).monospacedDigit()
                 Spacer()
                 if caret {
-                    Button(state.transcriptExpanded ? "Свернуть" : "Развернуть") {
-                        state.transcriptExpanded.toggle()
+                    FLIconButton(symbol: state.transcriptExpanded ? "arrow.down.right.and.arrow.up.left"
+                                                                  : "arrow.up.left.and.arrow.down.right",
+                                 help: state.transcriptExpanded ? "Свернуть" : "Развернуть") {
+                        withAnimation(Motion.page) { state.transcriptExpanded.toggle() }
                     }
-                    .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm))
                 }
             }
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: Space.s3) {
-                        TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
-                            let on = Int(ctx.date.timeIntervalSinceReferenceDate * 2) % 2 == 0
-                            transcript(p, caretOn: on)
-                                .font(Fonts.text(FontSize.fs3 + 2))
-                                .lineSpacing(6)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                                // Новый кусок раньше влетал разом - дёргано. Кросс-фейд
-                                // делает появление слов плавным, без прыжков верстки.
-                                .contentTransition(.opacity)
-                                .animation(Motion.base, value: state.liveText)
+                        if caret {
+                            TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
+                                transcriptText(p, caretOn: Int(ctx.date.timeIntervalSinceReferenceDate * 2) % 2 == 0)
+                            }
+                        } else {
+                            transcriptText(p, caretOn: false)
                         }
                         if skeleton {
-                            VKSkeleton(palette: p, height: 12)
-                            VKSkeleton(palette: p, height: 12, delay: 0.15).frame(maxWidth: 240)
+                            FLSkeleton()
+                            FLSkeleton(width: 240)
                         }
                         Color.clear.frame(height: 1).id("end")
                     }
                 }
                 .scrollIndicators(.never)
                 .onChange(of: state.liveText) { _, _ in
-                    withAnimation(Motion.base) { proxy.scrollTo("end", anchor: .bottom) }
+                    withAnimation(Motion.page) { proxy.scrollTo("end", anchor: .bottom) }
                 }
                 .onAppear { proxy.scrollTo("end", anchor: .bottom) }
             }
         }
         .padding(Space.s4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(p.surface)
-        .overlay(Rectangle().strokeBorder(p.border, lineWidth: Space.hairline))
-        .overlay(alignment: .leading) { Rectangle().fill(p.accent).frame(width: Space.strong) }
+        .card()
+    }
+
+    private func transcriptText(_ p: Palette, caretOn: Bool) -> some View {
+        transcript(p, caretOn: caretOn)
+            .font(TextStyle.title3.font())
+            .lineSpacing(6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            // Короткий кросс-фейд: длинный читался как задержка распознавания.
+            .contentTransition(.opacity)
+            .animation(Motion.press, value: state.liveText)
     }
 
     private func transcript(_ p: Palette, caretOn: Bool) -> Text {
+        let mark = Text(" ▍").foregroundColor(caretOn ? p.accent : .clear)
         if state.liveText.isEmpty {
             let hint = Text(skeleton ? "" : "Говорите — текст появится здесь по мере разбора.")
                 .foregroundColor(p.textMuted)
-            return caret ? hint + Text(" ▌").foregroundColor(caretOn ? p.accent : .clear) : hint
+            return caret ? hint + mark : hint
         }
         // Сравниваем обрезанное: хвостовой пробел ломал hasSuffix, и тогда
         // весь текст уходил в приглушённый цвет вместе со свежим куском.
@@ -419,13 +511,13 @@ struct LiveTranscript: View {
         if split {
             text = text + Text(latest).foregroundColor(p.text)
         }
-        return caret ? text + Text(" ▌").foregroundColor(caretOn ? p.accent : .clear) : text
+        return caret ? text + mark : text
     }
 }
 
-// MARK: - панель истории справа
+// MARK: - «Недавние» справа
 
-struct HistoryPanel: View {
+struct RecentPanel: View {
     @EnvironmentObject var state: AppState
     let actions: AppActions
     @State private var copied = false
@@ -434,40 +526,31 @@ struct HistoryPanel: View {
         let p = state.palette
         VStack(spacing: 0) {
             HStack {
-                Text("История").monoLabel(p.text)
+                Text("Недавние").textStyle(.headline, p.text)
                 Spacer()
-                Text("\(state.history.count)").monoLabel(p.textMuted)
+                if !state.history.isEmpty {
+                    Text("\(state.history.count)").textStyle(.subheadline, p.textMuted).monospacedDigit()
+                }
             }
             .padding(.horizontal, Space.s4)
-            .padding(.vertical, Space.s3)
-            VKDivider(palette: p)
+            .frame(height: 36)
             live(p)
             if state.history.isEmpty {
-                VKEmpty(title: "Диктовок ещё нет",
-                        text: "Зажмите \(state.hotkey.label) и скажите первую фразу.", palette: p)
-                    .padding(Space.s4)
-                Spacer(minLength: 0)
+                EmptyState(symbol: "waveform", title: "Диктовок ещё нет",
+                           text: "Зажмите \(state.hotkey.label) и скажите первую фразу.")
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(state.history.prefix(60).enumerated()), id: \.element.id) { i, e in
-                            PanelRow(entry: e, first: i == 0 && isIdle, actions: actions)
-                            VKDivider(palette: p)
+                    LazyVStack(spacing: 2) {
+                        ForEach(state.history.prefix(60)) { entry in
+                            RecentRow(entry: entry, actions: actions)
                         }
                     }
+                    .padding(.horizontal, Space.s2)
+                    .padding(.bottom, Space.s2)
                 }
-                .scrollIndicators(.never)
             }
-            VKDivider(palette: p)
-            footer(p)
-        }
-        .background(p.surface)
-    }
-
-    private var isIdle: Bool {
-        switch state.phase {
-        case .recording, .processing: return false
-        default: return true
+            FLSeparator()
+            footer
         }
     }
 
@@ -475,124 +558,144 @@ struct HistoryPanel: View {
     private func live(_ p: Palette) -> some View {
         switch state.phase {
         case .recording:
-            VStack(alignment: .leading, spacing: Space.s2) {
-                Text("Сейчас").monoLabel(p.accentInk)
-                Text(state.liveText.isEmpty ? "…" : state.liveText)
-                    .font(Fonts.text(FontSize.fs2)).foregroundStyle(p.text).lineLimit(3)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    StatusDot(color: p.danger, pulse: true)
+                    Text("Сейчас").textStyle(.subheadline, p.text, weight: .semibold)
+                }
+                Text(state.liveText.isEmpty ? "Слушаю…" : state.liveText)
+                    .textStyle(.body, state.liveText.isEmpty ? p.textMuted : p.text)
+                    .lineLimit(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, Space.s4)
-            .padding(.vertical, Space.s3)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(p.surface2)
-            .overlay(alignment: .leading) { Rectangle().fill(p.accent).frame(width: Space.strong) }
-            VKDivider(palette: p)
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: Radius.popover, style: .continuous).fill(p.surface))
+            .padding(.horizontal, Space.s2)
+            .padding(.bottom, Space.s2)
         case .processing:
             VStack(alignment: .leading, spacing: Space.s2) {
-                Text("Готовится").monoLabel(p.textMuted)
-                VKSkeleton(palette: p, height: 12)
-                VKSkeleton(palette: p, height: 12, delay: 0.15).frame(maxWidth: 180)
+                Text("Готовится").textStyle(.subheadline, p.textMuted, weight: .semibold)
+                FLSkeleton()
+                FLSkeleton(width: 160)
             }
-            .padding(.horizontal, Space.s4)
-            .padding(.vertical, Space.s3)
-            VKDivider(palette: p)
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: Radius.popover, style: .continuous).fill(p.surface))
+            .padding(.horizontal, Space.s2)
+            .padding(.bottom, Space.s2)
         default:
             EmptyView()
         }
     }
 
-    @ViewBuilder
-    private func footer(_ p: Palette) -> some View {
-        if case .recording = state.phase {
-            HStack {
-                Text(state.micName).monoLabel(p.textMuted).lineLimit(1)
-                Spacer()
+    private var footer: some View {
+        HStack(spacing: Space.s2) {
+            Button {
+                guard let last = state.history.first(where: { !$0.failed }) else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(last.text, forType: .string)
+                withAnimation(Motion.press) { copied = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+            } label: {
+                Label(copied ? "Скопировано" : "Скопировать последнюю", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    .contentTransition(.symbolEffect(.replace))
             }
-            .padding(.horizontal, Space.s4)
-            .frame(height: 48)
-        } else {
-            HStack(spacing: Space.s2) {
-                Button(copied ? "Скопировано" : "Копировать") {
-                    guard let last = state.history.first(where: { !$0.failed }) else { return }
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(last.text, forType: .string)
-                    copied = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
-                }
-                .buttonStyle(VKButtonStyle(palette: p, kind: .secondary, size: .sm, fill: true))
-                .disabled(state.history.isEmpty)
-                Button("Открыть все") { state.tab = .history }
-                    .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm, fill: true))
-            }
-            .padding(.horizontal, Space.s4)
-            .padding(.vertical, Space.s3)
+            .buttonStyle(FLButtonStyle(kind: .secondary, fill: true))
+            .disabled(state.history.isEmpty)
+            FLIconButton(symbol: "list.bullet", help: "Вся история") { state.tab = .history }
         }
+        .padding(Space.s3)
     }
-
-    static let time: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
 }
 
-/// Запись в панели: свёрнута в три строки, клик - раскрыть. Текст не
-/// выделяемый намеренно: выделяемый текст на macOS игнорирует lineLimit и
-/// вылезал поверх соседних записей.
-struct PanelRow: View {
+/// Запись в «Недавних»: три строки, клик - раскрыть с действиями. Текст не
+/// выделяемый намеренно: выделяемый текст на macOS игнорирует lineLimit.
+struct RecentRow: View {
     @EnvironmentObject var state: AppState
     let entry: Entry
-    let first: Bool
     let actions: AppActions
     @State private var open = false
     @State private var hover = false
 
     var body: some View {
         let p = state.palette
-        VStack(alignment: .leading, spacing: Space.s2) {
+        let busy = state.rerecognizing.contains(entry.id)
+        VStack(alignment: .leading, spacing: Space.s1) {
             HStack(spacing: Space.s2) {
-                Text(HistoryPanel.time.string(from: entry.date)).monoLabel(p.textMuted)
-                if entry.failed { VKBadge(text: "Не распознано", tone: .warning, palette: p) }
+                Text(HistoryFormat.time.string(from: entry.date)).textStyle(.subheadline, p.textMuted).monospacedDigit()
+                if entry.failed { FLTag(text: "Не распознано", tone: .warning) }
                 Spacer()
-                Text(wordsLabel(entry.words)).monoLabel(p.textMuted)
+                Text(wordsLabel(entry.words)).textStyle(.subheadline, p.textMuted)
             }
             Text(entry.failed ? "Речь не распознана. Запись сохранена — её можно перераспознать." : entry.text)
-                .font(Fonts.text(FontSize.fs2))
-                .foregroundStyle(first || open ? p.text : p.textMuted)
-                .lineSpacing(3)
+                .textStyle(.body, entry.failed ? p.textMuted : p.text)
                 .lineLimit(open ? nil : 3)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
             if open {
-                HStack(spacing: Space.s2) {
-                    Button("Копировать") {
+                HStack(spacing: Space.s1) {
+                    Button {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(entry.text, forType: .string)
+                    } label: {
+                        Label("Копировать", systemImage: "doc.on.doc")
                     }
-                    .buttonStyle(VKButtonStyle(palette: p, kind: .secondary, size: .sm))
+                    .buttonStyle(FLButtonStyle(kind: .secondary, size: .small))
                     .disabled(entry.failed)
                     if entry.audio != nil {
-                        Button(state.rerecognizing.contains(entry.id) ? "Распознаю…" : "Перераспознать") {
-                            actions.rerecognize(entry)
+                        Button { actions.rerecognize(entry) } label: {
+                            Label(busy ? "Распознаю…" : "Перераспознать", systemImage: "arrow.triangle.2.circlepath")
                         }
-                        .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm))
-                        .disabled(state.rerecognizing.contains(entry.id))
+                        .buttonStyle(FLButtonStyle(kind: .plain, size: .small))
+                        .disabled(busy)
                     }
                 }
-            } else if entry.words > 30 {
-                Text("Ещё").monoLabel(hover ? p.accentInk : p.textMuted)
+                .padding(.top, Space.s1)
             }
         }
-        .padding(.horizontal, Space.s4)
-        .padding(.vertical, Space.s3)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(first ? p.surface2 : (hover ? p.surface2 : Color.clear))
-        .overlay(alignment: .leading) {
-            if first { Rectangle().fill(p.accent).frame(width: Space.strong) }
-        }
-        .clipped()
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: Radius.popover, style: .continuous)
+            .fill(open ? p.surface : (hover ? p.fill4 : .clear)))
         .contentShape(Rectangle())
-        .onTapGesture { withAnimation(Motion.base) { open.toggle() } }
+        .onTapGesture { withAnimation(Motion.page) { open.toggle() } }
         .onHover { hover = $0 }
-        .animation(Motion.instant, value: hover)
+        .animation(Motion.hover, value: hover)
+    }
+}
+
+/// Даты для истории: время, день, заголовки групп.
+enum HistoryFormat {
+    static let time: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    static let day: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ru_RU")
+        f.dateFormat = "d MMMM"
+        return f
+    }()
+
+    static let dayYear: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ru_RU")
+        f.dateFormat = "d MMMM yyyy"
+        return f
+    }()
+
+    static let weekday: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ru_RU")
+        f.dateFormat = "EE"
+        return f
+    }()
+
+    static func sectionTitle(_ day: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(day) { return "Сегодня" }
+        if cal.isDateInYesterday(day) { return "Вчера" }
+        if cal.isDate(day, equalTo: Date(), toGranularity: .year) { return Self.day.string(from: day) }
+        return dayYear.string(from: day)
     }
 }

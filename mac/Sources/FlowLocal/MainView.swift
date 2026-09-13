@@ -17,172 +17,49 @@ struct AppActions {
     var selectMic: (String?) -> Void = { _ in }
 }
 
-// Корень окна по макету «Flow Local - главный экран»: шапка на месте
-// заголовка окна, вкладки, содержимое, строка состояния. Окно тянется:
-// уже 880 px панель истории уходит, уже 760 px сжимается шапка.
+// Корень окна - как у приложений Apple на Mac: сайдбар на системном
+// материале во всю высоту, под «светофорами», справа чёрная сцена со строкой
+// заголовка на месте панели инструментов. Узкое окно - сайдбар сжимается до
+// значков; широкое - на «Главной» справа появляются «Недавние».
 struct MainView: View {
     @EnvironmentObject var state: AppState
     let actions: AppActions
 
-    static let wideWidth: CGFloat = 880
-    static let compactWidth: CGFloat = 760
+    static let sidebarWidth: CGFloat = 212
+    static let railWidth: CGFloat = 80          // шире «светофоров» - они стоят над сайдбаром
+    static let railBelow: CGFloat = 820         // уже - сайдбар из значков
+    static let panelFrom: CGFloat = 860         // ширина сцены под «Недавние»
 
     var body: some View {
-        let p = state.palette
         GeometryReader { geo in
-            let w = geo.size.width
-            VStack(spacing: 0) {
-                header(p, width: w)
-                VKDivider(palette: p)
-                content(p, wide: w >= Self.wideWidth)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                VKDivider(palette: p)
-                footer(p, width: w)
-            }
-            .background(p.bg)
-            .overlay(frame(p))
-        }
-        .environment(\.colorScheme, state.theme.colorScheme)
-        .animation(Motion.base, value: state.theme)
-        .animation(Motion.base, value: state.tab)
-    }
-
-    // MARK: - шапка
-
-    // Уже 860 px уходят версия и спокойный статус, уже 700 px - знак. Вкладки
-    // остаются целыми всегда: обрезанное «СТАТИС…» хуже, чем отсутствие знака.
-    private func header(_ p: Palette, width: CGFloat) -> some View {
-        let roomy = width >= 860
-        let brand = width >= 700
-        return HStack(spacing: Space.s4) {
-            if brand {
-                Text("Flow Local")
-                    .textCase(.uppercase)
-                    .displayTitle(p.text, size: FontSize.fs3)
-                    .lineLimit(1)
-                    .fixedSize()
-                if roomy {
-                    Text(AppInfo.version).monoLabel(p.textMuted)
-                }
-                VKDivider(palette: p, vertical: true).frame(height: 20)
-            }
-            VKTabBar(selection: $state.tab, palette: p, compact: !roomy)
-                .fixedSize(horizontal: true, vertical: false)
-            Spacer(minLength: Space.s3)
-            status(p, compact: !roomy)
-        }
-        // Слева - место под системные «светофоры» окна.
-        .padding(.leading, 84)
-        .padding(.trailing, Space.s4)
-        .frame(height: 52)
-        .background(p.surface)
-    }
-
-    @ViewBuilder
-    private func status(_ p: Palette, compact: Bool) -> some View {
-        // В тесной шапке важное (запись, распознавание, ошибка) остаётся
-        // значком, спокойное «ЛОКАЛЬНО» уходит совсем.
-        HStack(spacing: 10) {
-            switch state.phase {
-            case .recording:
-                VKBlink(color: p.danger)
-                if !compact { Text("Запись").monoLabel(p.text) }
-            case .processing:
-                VKPulseBlocks(color: p.accent)
-                if !compact { Text("Распознаю").monoLabel(p.text) }
-            default:
-                if !state.micGranted {
-                    Rectangle().fill(p.danger).frame(width: 8, height: 8)
-                    if !compact { Text("Микрофон недоступен").monoLabel(p.text) }
-                } else if state.backend == .starting {
-                    if compact {
-                        Rectangle().fill(p.warning).frame(width: 8, height: 8)
-                    } else {
-                        VKBadge(text: "Загрузка", tone: .warning, palette: p)
-                    }
-                } else if case .failed = state.backend {
-                    if compact {
-                        Rectangle().fill(p.danger).frame(width: 8, height: 8)
-                    } else {
-                        VKBadge(text: "Ошибка", tone: .danger, palette: p)
-                    }
-                } else if !compact {
-                    VKBadge(text: "Локально", tone: .outline, palette: p)
-                }
-            }
-        }
-        .fixedSize()
-    }
-
-    // MARK: - содержимое
-
-    @ViewBuilder
-    private func content(_ p: Palette, wide: Bool) -> some View {
-        switch state.tab {
-        case .home:
+            let rail = geo.size.width < Self.railBelow
+            let side = rail ? Self.railWidth : Self.sidebarWidth
             HStack(spacing: 0) {
-                HomeView(actions: actions)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if wide {
-                    VKDivider(palette: p, vertical: true)
-                    HistoryPanel(actions: actions)
-                        .frame(width: 320)
+                Sidebar(rail: rail)
+                    .frame(width: side)
+                VStack(spacing: 0) {
+                    PageHeader()
+                        .zIndex(1)
+                    // clipped: прокрутка не должна заезжать под строку заголовка.
+                    page(wide: geo.size.width - side >= Self.panelFrom)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
                 }
+                .background(state.palette.bg)
             }
-        case .history:
-            HistoryView(actions: actions)
-        case .stats:
-            StatsView()
-        case .settings:
-            SettingsView(actions: actions)
         }
-    }
-
-    // MARK: - строка состояния
-
-    private func footer(_ p: Palette, width: CGFloat) -> some View {
-        HStack(spacing: Space.s5) {
-            footerLeft(p, compact: width < Self.compactWidth)
-            Spacer(minLength: Space.s3)
-            Text("Без сети · без аккаунта").monoLabel(p.textMuted).lineLimit(1)
-        }
-        .padding(.horizontal, Space.s4)
-        .frame(height: 36)
-        .background(p.surface)
+        .ignoresSafeArea()
+        .environment(\.colorScheme, .dark)
+        .animation(Motion.page, value: state.tab)
     }
 
     @ViewBuilder
-    private func footerLeft(_ p: Palette, compact: Bool) -> some View {
-        switch state.phase {
-        case let .recording(since, locked):
-            TimelineView(.periodic(from: since, by: 0.5)) { ctx in
-                Text("Запись \(Self.clock(ctx.date.timeIntervalSince(since)))").monoLabel(p.text)
-            }
-            if !compact {
-                Text(locked ? "/ \(state.toggleHotkey.label) ещё раз — вставить · Esc — отменить" : "/ Esc — отменить")
-                    .monoLabel(p.textMuted).lineLimit(1)
-            }
-        case .processing:
-            Text("Распознавание").monoLabel(p.textMuted)
-        default:
-            if !state.micGranted {
-                Text("Диктовка недоступна").monoLabel(p.textMuted)
-            } else if state.backend == .starting {
-                Text("Загрузка моделей").monoLabel(p.textMuted)
-            } else {
-                Text("Зажать \(state.hotkey.label)").monoLabel(p.textMuted).lineLimit(1)
-                if !compact {
-                    Text("/ Нажать \(state.toggleHotkey.label)").monoLabel(p.textMuted).lineLimit(1)
-                }
-            }
-        }
-    }
-
-    // Во время записи всё окно обведено акцентом - как на макете 1b.
-    @ViewBuilder
-    private func frame(_ p: Palette) -> some View {
-        if case .recording = state.phase {
-            Rectangle().strokeBorder(p.accent, lineWidth: Space.strong).allowsHitTesting(false)
+    private func page(wide: Bool) -> some View {
+        switch state.tab {
+        case .home: HomeView(actions: actions, wide: wide)
+        case .history: HistoryView(actions: actions)
+        case .stats: StatsView()
+        case .settings: SettingsView(actions: actions)
         }
     }
 
@@ -195,5 +72,214 @@ struct MainView: View {
 enum AppInfo {
     static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+    }
+}
+
+// MARK: - сайдбар
+
+struct Sidebar: View {
+    @EnvironmentObject var state: AppState
+    let rail: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            // Место под «светофоры» окна.
+            Color.clear.frame(height: Metric.toolbar)
+            ForEach(Array(Tab.allCases.enumerated()), id: \.element) { i, tab in
+                SidebarRow(tab: tab, index: i + 1, rail: rail)
+            }
+            Spacer(minLength: Space.s4)
+            SidebarStatus(rail: rail)
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, Space.s3)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background {
+            // Материал сам по себе пропускает цвет обоев (зелень, небо) - рядом с
+            // чёрной сценой это читалось чужим цветом. Спецификация сайдбара:
+            // «blur 40 · black 60 %» - затемняем поверх материала.
+            ZStack {
+                VisualEffect(material: .sidebar)
+                Color.black.opacity(0.6)
+            }
+        }
+        .overlay(alignment: .trailing) { FLSeparator(vertical: true, color: .black.opacity(0.6)) }
+    }
+}
+
+/// Ряд сайдбара 28 pt: глиф в покое secondaryLabel, при наведении label,
+/// у выбранного - systemBlue на подложке fill/2. ⌘1…⌘4 - переход.
+struct SidebarRow: View {
+    @EnvironmentObject var state: AppState
+    let tab: Tab
+    let index: Int
+    let rail: Bool
+    @State private var hover = false
+
+    var body: some View {
+        let p = state.palette
+        let on = state.tab == tab
+        Button { state.tab = tab } label: {
+            HStack(spacing: Space.s2) {
+                Image(systemName: tab.symbol)
+                    .font(.system(size: 14))
+                    .foregroundStyle(on ? p.accent : (hover ? p.text : p.textMuted))
+                    .frame(width: 20)
+                if !rail {
+                    Text(tab.title).textStyle(.body, p.text).lineLimit(1)
+                    Spacer(minLength: 0)
+                    if tab == .history && !state.history.isEmpty {
+                        Text("\(state.history.count)")
+                            .textStyle(.subheadline, p.textMuted)
+                            .monospacedDigit()
+                    }
+                }
+            }
+            .padding(.horizontal, rail ? 0 : Space.s2)
+            .frame(maxWidth: .infinity, alignment: rail ? .center : .leading)
+            .frame(height: rail ? 36 : Metric.row)
+            .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+                .fill(on ? p.fill2 : (hover ? p.fill4 : .clear)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(KeyEquivalent(Character(String(index))), modifiers: .command)
+        .help("\(tab.title) · ⌘\(index)")
+        .onHover { hover = $0 }
+        .animation(Motion.hover, value: hover)
+    }
+}
+
+/// Спокойное состояние внизу сайдбара. Важное (нет микрофона, ошибка) ещё и
+/// на самой «Главной» - низ сайдбара HIG не считает местом для критичного.
+struct SidebarStatus: View {
+    @EnvironmentObject var state: AppState
+    let rail: Bool
+
+    var body: some View {
+        let p = state.palette
+        let s = status(p)
+        HStack(spacing: Space.s2) {
+            StatusDot(color: s.color, pulse: s.pulse)
+                .frame(width: 20)
+            if !rail {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(s.title).textStyle(.headline, p.text).lineLimit(1)
+                    Text(s.detail).textStyle(.subheadline, p.textMuted).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, rail ? 0 : Space.s2)
+        .padding(.vertical, Space.s2)
+        .frame(maxWidth: .infinity, alignment: rail ? .center : .leading)
+        .help("\(s.title) · \(s.detail)")
+        .animation(Motion.page, value: s.title)
+    }
+
+    private func status(_ p: Palette) -> (color: Color, title: String, detail: String, pulse: Bool) {
+        switch state.phase {
+        case .recording: return (p.danger, "Идёт запись", "Esc — отменить", true)
+        case .processing: return (p.accent, "Распознаю", "Меньше секунды", false)
+        default: break
+        }
+        if !state.micGranted { return (p.danger, "Нет микрофона", "Нужен доступ в macOS", false) }
+        switch state.backend {
+        case .starting: return (p.warning, "Загрузка", "Модели распознавания", false)
+        case .failed: return (p.danger, "Ошибка", "Распознавание не запустилось", false)
+        case .ready: return (p.success, "Готов", state.englishReady ? "GigaAM v3 · Parakeet" : "GigaAM v3", false)
+        }
+    }
+}
+
+// MARK: - строка заголовка
+
+/// Полоса 52 pt на месте панели инструментов: заголовок страницы 15/600
+/// слева, её инструменты справа.
+struct PageHeader: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        HStack(spacing: Space.s3) {
+            Text(state.tab.title)
+                .textStyle(.title3, state.palette.text, weight: .semibold)
+                .id(state.tab)
+                .transition(.opacity)
+            Spacer(minLength: Space.s3)
+            switch state.tab {
+            case .home: HomeStatus()
+            case .history: HistoryTools()
+            default: EmptyView()
+            }
+        }
+        .padding(.horizontal, Space.s5)
+        .frame(height: Metric.toolbar)
+        .background(state.palette.bg)
+    }
+}
+
+/// Справа в заголовке «Главной»: идёт запись, распознавание или покой.
+struct HomeStatus: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        let p = state.palette
+        switch state.phase {
+        case let .recording(since, _):
+            TimelineView(.periodic(from: since, by: 1)) { ctx in
+                HStack(spacing: Space.s2) {
+                    StatusDot(color: p.danger, pulse: true)
+                    Text("Запись · \(MainView.clock(ctx.date.timeIntervalSince(since)))")
+                        .font(.system(size: 12, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(p.text)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 24)
+                .background(Capsule().fill(p.wash(p.danger)))
+            }
+        case .processing:
+            HStack(spacing: Space.s2) {
+                ProgressView().controlSize(.small)
+                Text("Распознаю").font(.system(size: 12, weight: .semibold)).foregroundStyle(p.text)
+            }
+        default:
+            HStack(spacing: 6) {
+                Image(systemName: "lock.fill").font(.system(size: 10, weight: .semibold))
+                Text("Всё остаётся на этом Mac").font(TextStyle.subheadline.font())
+            }
+            .foregroundStyle(p.textMuted)
+        }
+    }
+}
+
+/// Справа в заголовке «Истории»: поиск и очистка с подтверждением.
+struct HistoryTools: View {
+    @EnvironmentObject var state: AppState
+    @State private var confirm = false
+
+    var body: some View {
+        HStack(spacing: Space.s2) {
+            FLSearchField(text: $state.historyQuery, placeholder: "Поиск по диктовкам")
+                .frame(width: 220)
+            if !state.history.isEmpty {
+                Button {
+                    if confirm {
+                        withAnimation(Motion.page) { state.clearHistory() }
+                        confirm = false
+                    } else {
+                        withAnimation(Motion.press) { confirm = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            withAnimation(Motion.press) { confirm = false }
+                        }
+                    }
+                } label: {
+                    Label(confirm ? "Удалить все?" : "Очистить",
+                          systemImage: confirm ? "exclamationmark.triangle.fill" : "trash")
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .buttonStyle(FLButtonStyle(kind: confirm ? .destructive : .plain))
+            }
+        }
     }
 }

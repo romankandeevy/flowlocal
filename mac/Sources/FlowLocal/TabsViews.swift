@@ -1,144 +1,194 @@
 import AppKit
 import SwiftUI
 
-// Вкладки «История», «Статистика», «Настройки». В макете их не было, собраны
-// из его набора элементов (1g): строки настроек, числа, пустота, история.
+// «История», «Статистика», «Настройки» - из тех же примитивов, что и
+// «Главная»: карточки elevated/1 на чёрном, группы с заголовком над ними.
 
 // MARK: - История
 
+/// Список по дням: заголовок дня и карточка его диктовок. Строки ленивые -
+/// карточка собрана из скруглённых первой и последней строк, а не обёрткой,
+/// иначе день на сотню диктовок строился бы целиком.
 struct HistoryView: View {
     @EnvironmentObject var state: AppState
     let actions: AppActions
-    @State private var query = ""
-    @State private var confirmClear = false
 
     var body: some View {
-        let p = state.palette
         let items = filtered
-        VStack(spacing: 0) {
-            HStack(spacing: Space.s3) {
-                VKSearchField(text: $query, palette: p)
-                Text("\(items.count) из \(state.history.count)").monoLabel(p.textMuted).fixedSize()
-                if !state.history.isEmpty {
-                    Button(confirmClear ? "Удалить все?" : "Очистить") {
-                        if confirmClear {
-                            state.clearHistory()
-                            confirmClear = false
-                        } else {
-                            confirmClear = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { confirmClear = false }
-                        }
-                    }
-                    .buttonStyle(VKButtonStyle(palette: p, kind: .danger, size: .sm))
-                }
-            }
-            .padding(Space.s4)
-            VKDivider(palette: p)
+        Group {
             if state.history.isEmpty {
-                VKEmpty(title: "Диктовок ещё нет",
-                        text: "Зажмите \(state.hotkey.label) и скажите первую фразу.", palette: p)
-                    .padding(Space.s5)
-                Spacer()
+                EmptyState(symbol: "clock", title: "Диктовок ещё нет",
+                           text: "Зажмите \(state.hotkey.label) и скажите первую фразу — она появится здесь.")
             } else if items.isEmpty {
-                VKEmpty(code: "Поиск", title: "Ничего не найдено", text: "Измените запрос.", palette: p)
-                    .padding(Space.s5)
-                Spacer()
+                EmptyState(symbol: "magnifyingglass", title: "Ничего не найдено",
+                           text: "Нет диктовок со словами «\(query)».")
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(items) { e in
-                            HistoryRow(entry: e, actions: actions)
-                            VKDivider(palette: p)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Self.rows(items)) { row in
+                            rowView(row)
                         }
                     }
+                    .frame(maxWidth: 820, alignment: .leading)
+                    .padding(.horizontal, Space.s5)
+                    .padding(.top, Space.s1)
+                    .padding(.bottom, Space.s6)
+                    .frame(maxWidth: .infinity)
                 }
             }
         }
+        .animation(Motion.page, value: items.map(\.id))
+        // Ушли со вкладки - поиск сбрасывается, как в Finder: вернулись к полному списку.
+        .onDisappear { state.historyQuery = "" }
     }
 
+    private var query: String { state.historyQuery.trimmingCharacters(in: .whitespaces) }
+
     private var filtered: [Entry] {
-        let q = query.trimmingCharacters(in: .whitespaces)
+        let q = query
         return q.isEmpty ? state.history : state.history.filter { $0.text.localizedCaseInsensitiveContains(q) }
+    }
+
+    @ViewBuilder
+    private func rowView(_ row: HistoryListRow) -> some View {
+        switch row.kind {
+        case let .header(day, first):
+            SectionTitle(HistoryFormat.sectionTitle(day))
+                .padding(.top, first ? 0 : Space.s5)
+                .padding(.bottom, Space.s2)
+        case let .entry(entry, first, last):
+            let r = Radius.card
+            let shape = UnevenRoundedRectangle(topLeadingRadius: first ? r : 0, bottomLeadingRadius: last ? r : 0,
+                                               bottomTrailingRadius: last ? r : 0, topTrailingRadius: first ? r : 0,
+                                               style: .continuous)
+            HistoryRow(entry: entry, actions: actions, divider: !first)
+                .background(shape.fill(state.palette.surface))
+                .clipShape(shape)
+        }
+    }
+
+    static func rows(_ items: [Entry]) -> [HistoryListRow] {
+        let cal = Calendar.current
+        var out: [HistoryListRow] = []
+        var i = 0
+        while i < items.count {
+            let day = cal.startOfDay(for: items[i].date)
+            var j = i
+            while j < items.count && cal.isDate(items[j].date, inSameDayAs: day) { j += 1 }
+            out.append(HistoryListRow(id: "day-\(Int(day.timeIntervalSince1970))", kind: .header(day, first: out.isEmpty)))
+            for k in i..<j {
+                out.append(HistoryListRow(id: items[k].id.uuidString,
+                                          kind: .entry(items[k], first: k == i, last: k == j - 1)))
+            }
+            i = j
+        }
+        return out
     }
 }
 
+struct HistoryListRow: Identifiable {
+    enum Kind {
+        case header(Date, first: Bool)
+        case entry(Entry, first: Bool, last: Bool)
+    }
+
+    let id: String
+    let kind: Kind
+}
+
+/// Строка диктовки: время и сведения, текст в три строки. Действия - глифы
+/// справа, видны при наведении и в раскрытой строке: в покое список чистый.
 struct HistoryRow: View {
     @EnvironmentObject var state: AppState
     let entry: Entry
     let actions: AppActions
+    var divider = false
     @State private var open = false
+    @State private var hover = false
     @State private var copied = false
-
-    private static let stamp: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "dd.MM.yyyy · HH:mm"
-        return f
-    }()
 
     var body: some View {
         let p = state.palette
-        let long = entry.words > 60
-        VStack(alignment: .leading, spacing: Space.s3) {
-            HStack(spacing: Space.s3) {
-                Text(Self.stamp.string(from: entry.date)).monoLabel(p.textMuted)
-                Text(wordsLabel(entry.words)).monoLabel(p.textMuted)
-                Text(MainView.clock(entry.seconds)).monoLabel(p.textMuted)
-                VKBadge(text: entry.lang, tone: .outline, palette: p)
-                if entry.failed { VKBadge(text: "Не распознано", tone: .warning, palette: p) }
+        let long = entry.words > 50
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: Space.s2) {
+                Text(meta).textStyle(.subheadline, p.textMuted).monospacedDigit().lineLimit(1)
+                if entry.lang.lowercased() == "en" { FLTag(text: "English") }
+                if entry.failed { FLTag(text: "Не распознано", tone: .warning) }
+                Spacer(minLength: Space.s2)
+                rowActions
+                    .opacity(hover || open ? 1 : 0)
+                    .allowsHitTesting(hover || open)
             }
             if entry.failed {
-                Text("Речь не распознана. Запись сохранена — попробуйте перераспознать, например другим языком.")
-                    .font(Fonts.text(FontSize.fs2))
-                    .foregroundStyle(p.textMuted)
+                Text("Речь не распознана. Запись сохранена — перераспознайте её, например другим языком.")
+                    .textStyle(.body, p.textMuted)
             } else if open || !long {
+                // Выделяемый текст на macOS игнорирует lineLimit - поэтому
+                // выделение только у показанного целиком.
                 Text(entry.text)
-                    .font(Fonts.text(FontSize.fs3))
-                    .foregroundStyle(p.text)
+                    .textStyle(.body, p.text)
                     .lineSpacing(4)
                     .textSelection(.enabled)
-                    .frame(maxWidth: 760, alignment: .leading)
+                    .frame(maxWidth: 720, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text(entry.text)
-                    .font(Fonts.text(FontSize.fs3))
-                    .foregroundStyle(p.text)
+                    .textStyle(.body, p.text)
                     .lineSpacing(4)
-                    .lineLimit(4)
-                    .frame(maxWidth: 760, alignment: .leading)
+                    .lineLimit(3)
+                    .frame(maxWidth: 720, alignment: .leading)
             }
-            HStack(spacing: Space.s2) {
-                Button(copied ? "Скопировано" : "Копировать") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(entry.text, forType: .string)
-                    copied = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+            if long && !entry.failed {
+                Button { withAnimation(Motion.page) { open.toggle() } } label: {
+                    Label(open ? "Свернуть" : "Показать полностью", systemImage: open ? "chevron.up" : "chevron.down")
                 }
-                .buttonStyle(VKButtonStyle(palette: p, kind: .secondary, size: .sm))
-                .disabled(entry.failed)
-                Button("Вставить") { actions.paste(entry) }
-                    .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm))
-                    .disabled(entry.failed)
-                if long {
-                    Button(open ? "Свернуть" : "Показать всё") { withAnimation(Motion.base) { open.toggle() } }
-                        .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm))
-                }
-                if AudioStore.exists(entry.audio) {
-                    Button(state.playing == entry.id ? "Стоп" : "Прослушать") { actions.play(entry) }
-                        .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm))
-                    Button(state.rerecognizing.contains(entry.id) ? "Распознаю…" : "Перераспознать") {
-                        actions.rerecognize(entry)
-                    }
-                    .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm))
-                    .disabled(state.rerecognizing.contains(entry.id))
-                }
-                Spacer()
-                Button("Удалить") { state.remove(entry) }
-                    .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm))
+                .buttonStyle(FLButtonStyle(kind: .plain, size: .small))
+                // Подпись кнопки - на одной линии с текстом записи.
+                .padding(.leading, -10)
             }
         }
-        .padding(.horizontal, Space.s5)
-        .padding(.vertical, Space.s4)
+        .padding(.horizontal, Space.s4)
+        .padding(.vertical, Space.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(hover ? p.fill4.opacity(0.5) : Color.clear)
+        .overlay(alignment: .top) { if divider { FLSeparator(inset: Space.s4) } }
+        .onHover { hover = $0 }
+        .animation(Motion.hover, value: hover)
+    }
+
+    private var meta: String {
+        "\(HistoryFormat.time.string(from: entry.date)) · \(wordsLabel(entry.words)) · \(MainView.clock(entry.seconds))"
+    }
+
+    private var rowActions: some View {
+        HStack(spacing: 2) {
+            FLIconButton(symbol: copied ? "checkmark" : "doc.on.doc", help: copied ? "Скопировано" : "Копировать") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(entry.text, forType: .string)
+                withAnimation(Motion.press) { copied = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+            }
+            .disabled(entry.failed)
+            FLIconButton(symbol: "arrow.turn.down.left", help: "Вставить в активное окно") { actions.paste(entry) }
+                .disabled(entry.failed)
+            if AudioStore.exists(entry.audio) {
+                let playing = state.playing == entry.id
+                FLIconButton(symbol: playing ? "stop.fill" : "play.fill", help: playing ? "Остановить" : "Прослушать") {
+                    actions.play(entry)
+                }
+                if state.rerecognizing.contains(entry.id) {
+                    ProgressView().controlSize(.mini).frame(width: 26, height: 24)
+                } else {
+                    FLIconButton(symbol: "arrow.triangle.2.circlepath", help: "Перераспознать") {
+                        actions.rerecognize(entry)
+                    }
+                }
+            }
+            FLIconButton(symbol: "trash", help: "Удалить", destructive: true) {
+                withAnimation(Motion.page) { state.remove(entry) }
+            }
+        }
     }
 }
 
@@ -149,36 +199,18 @@ struct StatsView: View {
 
     var body: some View {
         let p = state.palette
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.s5) {
-                VStack(alignment: .leading, spacing: Space.s2) {
-                    Text("Статистика").displayTitle(p.text, size: FontSize.fs5, weight: .bold)
-                    Text("Считается по истории на этом компьютере. Печать для сравнения — \(Int(AppState.typingWPM)) слов в минуту.")
-                        .font(Fonts.text(FontSize.fs2))
-                        .foregroundStyle(p.textMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.hairline), count: 3),
-                          spacing: Space.hairline) {
-                    VKStatTile(label: "Слов сегодня", value: grouped(state.wordsToday), palette: p, size: FontSize.fs5)
-                    VKStatTile(label: "Слов за неделю", value: grouped(state.wordsWeek), palette: p, size: FontSize.fs5)
-                    VKStatTile(label: "Скорость", value: "\(state.speedWPM)", unit: "сл/мин", palette: p, size: FontSize.fs5)
-                    VKStatTile(label: "Сэкономлено", value: "\(state.savedMinutes)", unit: "мин", palette: p, size: FontSize.fs5)
-                    VKStatTile(label: "Голос / клавиатура", value: ratio, palette: p, size: FontSize.fs5)
-                    VKStatTile(label: "Диктовок сегодня", value: "\(state.dictationsToday)", palette: p, size: FontSize.fs5)
-                }
-                .background(p.border)
-                .overlay(Rectangle().strokeBorder(p.border, lineWidth: Space.hairline))
-                VKDivider(palette: p)
-                VStack(alignment: .leading, spacing: Space.s4) {
-                    Text("Последние 7 дней").monoLabel(p.textMuted)
-                    WeekBars()
-                }
+        PageScroll(maxWidth: 820) {
+            Text("Считается по истории на этом Mac. Печать для сравнения — \(Int(AppState.typingWPM)) слов в минуту.")
+                .textStyle(.body, p.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            TodayCard()
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: Space.s2)], spacing: Space.s2) {
+                StatTile(symbol: "speedometer", label: "Скорость речи", value: "\(state.speedWPM)", unit: "сл/мин")
+                StatTile(symbol: "hourglass", label: "Сэкономлено", value: "\(state.savedMinutes)", unit: "мин")
+                StatTile(symbol: "keyboard", label: "Голос против клавиатуры", value: ratio)
+                StatTile(symbol: "calendar", label: "Слов за неделю", value: grouped(state.wordsWeek))
             }
-            .padding(Space.s5)
-            .frame(maxWidth: 880, alignment: .leading)
         }
-        .scrollIndicators(.never)
     }
 
     private var ratio: String {
@@ -187,16 +219,46 @@ struct StatsView: View {
     }
 }
 
-/// Столбики по дням. Сегодня - акцентом: один акцент на экране.
-struct WeekBars: View {
+/// Главная карточка статистики: слов сегодня крупно и неделя столбиками.
+struct TodayCard: View {
     @EnvironmentObject var state: AppState
 
-    private static let weekday: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ru_RU")
-        f.dateFormat = "EE"
-        return f
-    }()
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .bottom, spacing: Space.s6) {
+                summary
+                WeekChart().frame(minWidth: 320)
+            }
+            VStack(alignment: .leading, spacing: Space.s5) {
+                summary
+                WeekChart()
+            }
+        }
+        .padding(Space.s5)
+        .card()
+    }
+
+    private var summary: some View {
+        let p = state.palette
+        let n = state.dictationsToday
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("Слов сегодня").textStyle(.subheadline, p.textMuted)
+            Text(grouped(state.wordsToday))
+                .font(.system(size: 44, weight: .light))
+                .monospacedDigit()
+                .foregroundStyle(p.text)
+                .contentTransition(.numericText())
+            Text("\(n) \(plural(n, "диктовка", "диктовки", "диктовок")) · за 7 дней \(grouped(state.wordsWeek))")
+                .textStyle(.subheadline, p.textMuted)
+        }
+        .fixedSize()
+    }
+}
+
+/// Столбики по дням. Сегодня - systemBlue, остальные - fill/1: один акцент.
+struct WeekChart: View {
+    @EnvironmentObject var state: AppState
+    var height: CGFloat = 120
 
     var body: some View {
         let p = state.palette
@@ -205,24 +267,31 @@ struct WeekBars: View {
         HStack(alignment: .bottom, spacing: Space.s2) {
             ForEach(days.indices, id: \.self) { i in
                 let today = i == days.count - 1
-                VStack(spacing: Space.s2) {
-                    Text(grouped(days[i].words)).monoLabel(p.textMuted).lineLimit(1).minimumScaleFactor(0.6)
-                    Rectangle()
-                        .fill(today ? p.accent : p.borderStrong)
-                        .frame(height: max(2, 120 * CGFloat(days[i].words) / CGFloat(top)))
-                    Text(Self.weekday.string(from: days[i].date)).monoLabel(today ? p.text : p.textMuted)
+                let words = days[i].words
+                VStack(spacing: 6) {
+                    Text(words > 0 ? grouped(words) : " ")
+                        .textStyle(.subheadline, today ? p.text : p.textMuted)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    UnevenRoundedRectangle(topLeadingRadius: Radius.menu, bottomLeadingRadius: 2,
+                                           bottomTrailingRadius: 2, topTrailingRadius: Radius.menu, style: .continuous)
+                        .fill(today ? p.accent : p.surface3)
+                        .frame(height: max(4, height * CGFloat(words) / CGFloat(top)))
+                    Text(HistoryFormat.weekday.string(from: days[i].date))
+                        .textStyle(.subheadline, today ? p.text : p.textMuted, weight: today ? .semibold : .regular)
                 }
                 .frame(maxWidth: .infinity)
             }
         }
-        .frame(height: 170, alignment: .bottom)
+        .frame(height: height + 44, alignment: .bottom)
     }
 }
 
 // MARK: - Настройки
 
-// Разделы по шаблону страницы-формы Verkstad: подпись раздела слева, строки
-// справа, разделы через хейрлайн. На узком окне подпись встаёт над строками.
+// Как System Settings: группы с заголовком над карточкой, строки 44 pt с
+// разделителем от текста, контрол справа; колонка 640 по центру сцены.
 struct SettingsView: View {
     @EnvironmentObject var state: AppState
     let actions: AppActions
@@ -230,112 +299,96 @@ struct SettingsView: View {
 
     var body: some View {
         let p = state.palette
-        GeometryReader { geo in
-            let wide = geo.size.width >= 760
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: Space.s2) {
-                        Text("Настройки").displayTitle(p.text, size: FontSize.fs5, weight: .bold)
-                        Text("Всё хранится на этом Mac. Аккаунта и сервера нет.")
-                            .font(Fonts.text(FontSize.fs2))
-                            .foregroundStyle(p.textMuted)
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.s5) {
+                SettingsSection("Сочетания клавиш", footer: "Работают в любом приложении. Esc во время записи — отмена.") {
+                    HotkeyRow(role: .hold, actions: actions)
+                    FLSeparator(inset: Metric.rowTextInset)
+                    HotkeyRow(role: .toggle, actions: actions)
+                }
+                SettingsSection("Диктовка") {
+                    SettingRow(symbol: "arrow.turn.down.left", title: "Вставлять текст сразу",
+                               subtitle: "Иначе текст остаётся только в истории") {
+                        FLSwitch(isOn: $state.insertAutomatically)
                     }
-                    .padding(.bottom, Space.s5)
-
-                    section("Горячие клавиши", "Два способа начать диктовку", wide: wide) {
-                        ForEach(Array(HotkeyRole.allCases.enumerated()), id: \.offset) { i, role in
-                            // Всегда под текстом: три клавиши и «Изменить» справа от
-                            // заголовка не влезают и на широком окне.
-                            SettingRow(title: role.title, subtitle: role.hint, last: i == 1, stacked: true) {
-                                HotkeyRow(role: role, actions: actions, height: Space.controlSm)
-                            }
-                        }
+                    FLSeparator(inset: Metric.rowTextInset)
+                    SettingRow(symbol: "globe", title: "Язык", subtitle: "Авто — русский и английский по кускам речи") {
+                        FLSegmented(options: LangMode.allCases.map { ($0, $0.title) }, selection: $state.langMode)
                     }
-                    section("Диктовка", "Что происходит с текстом", wide: wide) {
-                        SettingRow(title: "Вставлять текст сразу", subtitle: "Иначе текст только в истории") {
-                            VKSwitch(isOn: $state.insertAutomatically, palette: p)
-                        }
-                        SettingRow(title: "Язык", subtitle: "Авто — русский и английский по кускам речи") {
-                            VKSegmented(options: LangMode.allCases.map { ($0, $0.title) },
-                                        selection: $state.langMode, palette: p)
-                        }
-                        SettingRow(title: "Плашка поверх окон", subtitle: "Уровень, таймер и слова у нижнего края экрана") {
-                            VKSwitch(isOn: $state.showPill, palette: p)
-                        }
-                        SettingRow(title: "Звук начала и конца", subtitle: "Короткий щелчок, когда запись началась и закончилась",
-                                   last: true) {
-                            VKSwitch(isOn: $state.sounds, palette: p)
-                        }
+                    FLSeparator(inset: Metric.rowTextInset)
+                    SettingRow(symbol: "capsule", title: "Островок во время записи",
+                               subtitle: "Уровень и время записи у нижнего края экрана") {
+                        FLSwitch(isOn: $state.showPill)
                     }
-                    section("Микрофон", "Слушает только пока идёт запись", wide: wide) {
-                        SettingRow(title: "Устройство", subtitle: state.micName, last: true, stacked: !wide) {
-                            VKSelect(options: micOptions, selection: $state.micUID, palette: p, small: true)
-                                .frame(width: wide ? 260 : nil)
-                        }
+                    FLSeparator(inset: Metric.rowTextInset)
+                    SettingRow(symbol: "speaker.wave.2", title: "Звук начала и конца",
+                               subtitle: "Короткий щелчок, когда запись началась и закончилась") {
+                        FLSwitch(isOn: $state.sounds)
                     }
-                    section("Записи", "Аудио каждой диктовки — чтобы перераспознать", wide: wide) {
-                        SettingRow(title: "Сохранять аудио", subtitle: "WAV 16 кГц, около 2 МБ на минуту") {
-                            VKSwitch(isOn: $state.saveAudio, palette: p)
-                        }
-                        SettingRow(title: "Папка записей",
-                                   subtitle: "\(recordings.count) \(plural(recordings.count, "файл", "файла", "файлов")) · \(megabytes)",
-                                   last: true) {
-                            Button("Открыть", action: actions.openRecordings)
-                                .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm))
-                        }
+                }
+                SettingsSection("Микрофон", footer: "Микрофон слушает только пока идёт запись.") {
+                    SettingRow(symbol: "mic", title: "Устройство", subtitle: state.micName) {
+                        // По ширине названия: имя микрофона не обрезается.
+                        FLPopup(options: micOptions(state), selection: $state.micUID)
+                            .fixedSize()
                     }
-                    section("Система", "Запуск, вид и разрешения", wide: wide) {
-                        SettingRow(title: "Запускать при входе в систему", subtitle: "Flow Local стартует вместе с macOS") {
-                            VKSwitch(isOn: Binding(get: { state.launchAtLogin }, set: { actions.setLaunchAtLogin($0) }),
-                                     palette: p)
-                        }
-                        SettingRow(title: "Тема", subtitle: "Две равноправные темы") {
-                            VKSegmented(options: ThemeKind.allCases.map { ($0, $0.title) }, selection: $state.theme, palette: p)
-                        }
-                        SettingRow(title: "Микрофон", subtitle: state.micGranted ? "Доступ выдан" : "Не выдан — диктовка выключена") {
-                            permission(state.micGranted, p) {
-                                if Recorder.permission == .notDetermined {
-                                    Recorder.requestPermission { _ in state.refreshPermissions() }
-                                } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
-                                    NSWorkspace.shared.open(url)
-                                }
-                            }
-                        }
-                        SettingRow(title: "Универсальный доступ",
-                                   subtitle: state.axTrusted ? "Выдан — вставка в любое окно" : "Не выдан — текст ложится в буфер",
-                                   last: true) {
-                            permission(state.axTrusted, p) {
-                                Inserter.requestTrust()
-                                Inserter.openAccessibilitySettings()
-                            }
-                        }
+                }
+                SettingsSection("Записи", footer: "Аудио каждой диктовки хранится, чтобы её можно было прослушать и перераспознать.") {
+                    SettingRow(symbol: "waveform", title: "Сохранять аудио", subtitle: "WAV 16 кГц, около 2 МБ на минуту") {
+                        FLSwitch(isOn: $state.saveAudio)
                     }
-                    section("Распознавание", "Локальные модели, процессор", wide: wide, last: true) {
-                        SettingRow(title: "Русский", subtitle: "GigaAM v3 e2e · int8") {
-                            VKBadge(text: state.backend == .ready ? "Готов" : "Загрузка",
-                                    tone: state.backend == .ready ? .success : .warning, palette: p)
-                        }
-                        SettingRow(title: "Английский", subtitle: "Parakeet TDT 0.6b v2 · int8") {
-                            VKBadge(text: state.englishReady ? "Готов" : "Загрузка",
-                                    tone: state.englishReady ? .success : .warning, palette: p)
-                        }
-                        SettingRow(title: "Журнал", subtitle: "~/Library/Logs/FlowLocal.log", last: true) {
-                            Button("Открыть", action: actions.openLog)
-                                .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm))
+                    FLSeparator(inset: Metric.rowTextInset)
+                    SettingRow(symbol: "folder", title: "Папка записей",
+                               subtitle: "\(recordings.count) \(plural(recordings.count, "файл", "файла", "файлов")) · \(megabytes)") {
+                        Button(action: actions.openRecordings) { Label("Открыть", systemImage: "arrow.up.forward.app") }
+                            .buttonStyle(FLButtonStyle(kind: .secondary, size: .small))
+                    }
+                }
+                SettingsSection("Разрешения", footer: "macOS спрашивает их один раз. Без микрофона диктовка выключена, без универсального доступа текст ложится в буфер.") {
+                    SettingRow(symbol: "hand.raised", title: "Микрофон",
+                               subtitle: state.micGranted ? "Доступ выдан" : "Не выдан — диктовка выключена") {
+                        permission(state.micGranted) { openMicrophoneAccess(state) }
+                    }
+                    FLSeparator(inset: Metric.rowTextInset)
+                    SettingRow(symbol: "accessibility", title: "Универсальный доступ",
+                               subtitle: state.axTrusted ? "Выдан — вставка в любое окно" : "Не выдан — вставлять ⌘V вручную") {
+                        permission(state.axTrusted) {
+                            Inserter.requestTrust()
+                            Inserter.openAccessibilitySettings()
                         }
                     }
                 }
-                .padding(Space.s5)
-                .frame(maxWidth: 960, alignment: .leading)
+                SettingsSection("Система") {
+                    SettingRow(symbol: "power", title: "Запускать при входе в систему",
+                               subtitle: "Flow Local стартует вместе с macOS") {
+                        FLSwitch(isOn: Binding(get: { state.launchAtLogin }, set: { actions.setLaunchAtLogin($0) }))
+                    }
+                }
+                SettingsSection("Распознавание", footer: "Модели работают на процессоре этого Mac — без сети и аккаунта.") {
+                    SettingRow(symbol: "textformat", title: "Русский", subtitle: "GigaAM v3 e2e · int8") {
+                        model(state.backend == .ready)
+                    }
+                    FLSeparator(inset: Metric.rowTextInset)
+                    SettingRow(symbol: "textformat.abc", title: "Английский", subtitle: "Parakeet TDT 0.6b v2 · int8") {
+                        model(state.englishReady)
+                    }
+                    FLSeparator(inset: Metric.rowTextInset)
+                    SettingRow(symbol: "doc.text", title: "Журнал", subtitle: "~/Library/Logs/FlowLocal.log") {
+                        Button(action: actions.openLog) { Label("Открыть", systemImage: "arrow.up.forward.app") }
+                            .buttonStyle(FLButtonStyle(kind: .secondary, size: .small))
+                    }
+                }
+                Text("Flow Local \(AppInfo.version)")
+                    .textStyle(.subheadline, p.textMuted)
+                    .frame(maxWidth: .infinity)
             }
-            .scrollIndicators(.never)
+            .frame(maxWidth: 640)
+            .padding(.horizontal, Space.s5)
+            .padding(.top, Space.s1)
+            .padding(.bottom, Space.s6)
+            .frame(maxWidth: .infinity)
         }
         .onAppear(perform: countRecordings)
-    }
-
-    private var micOptions: [(String?, String)] {
-        [(nil, "Системный · \(AudioDevices.defaultInput()?.name ?? "по умолчанию")")]
-            + state.micDevices.map { ($0.uid, $0.name) }
     }
 
     private var megabytes: String {
@@ -352,100 +405,82 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
-    private func section<C: View>(_ title: String, _ note: String, wide: Bool, last: Bool = false,
-                                  @ViewBuilder _ rows: () -> C) -> some View {
-        let p = state.palette
-        VStack(spacing: 0) {
-            VKDivider(palette: p)
-            Group {
-                if wide {
-                    HStack(alignment: .top, spacing: Space.s5) {
-                        label(title, note, p).frame(width: 200, alignment: .leading)
-                        box(p, rows)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: Space.s3) {
-                        label(title, note, p)
-                        box(p, rows)
-                    }
-                }
-            }
-            .padding(.vertical, Space.s5)
-            if last { VKDivider(palette: p) }
-        }
-    }
-
-    private func label(_ title: String, _ note: String, _ p: Palette) -> some View {
-        VStack(alignment: .leading, spacing: Space.s1) {
-            Text(title).monoLabel(p.text)
-            Text(note)
-                .font(Fonts.text(FontSize.fs1))
-                .foregroundStyle(p.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func box<C: View>(_ p: Palette, _ rows: () -> C) -> some View {
-        VStack(spacing: 0) { rows() }
-            .frame(maxWidth: .infinity)
-            .background(p.surface)
-            .overlay(Rectangle().strokeBorder(p.border, lineWidth: Space.hairline))
-    }
-
-    private func permission(_ ok: Bool, _ p: Palette, open: @escaping () -> Void) -> some View {
-        HStack(spacing: Space.s3) {
-            VKBadge(text: ok ? "Выдан" : "Нет", tone: ok ? .success : .danger, palette: p)
-            if !ok {
+    private func permission(_ ok: Bool, open: @escaping () -> Void) -> some View {
+        if ok {
+            FLTag(text: "Выдан", tone: .success, symbol: "checkmark")
+        } else {
+            HStack(spacing: Space.s2) {
+                FLTag(text: "Нет", tone: .danger)
                 Button("Открыть", action: open)
-                    .buttonStyle(VKButtonStyle(palette: p, kind: .ghost, size: .sm))
+                    .buttonStyle(FLButtonStyle(kind: .secondary, size: .small))
+            }
+        }
+    }
+
+    private func model(_ ready: Bool) -> some View {
+        FLTag(text: ready ? "Готов" : "Загрузка", tone: ready ? .success : .warning, dot: true)
+    }
+}
+
+/// Группа настроек: заголовок, карточка строк, пояснение под ней.
+struct SettingsSection<Rows: View>: View {
+    let title: String
+    let footer: String?
+    let rows: () -> Rows
+
+    init(_ title: String, footer: String? = nil, @ViewBuilder rows: @escaping () -> Rows) {
+        self.title = title
+        self.footer = footer
+        self.rows = rows
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            SectionTitle(title)
+            VStack(spacing: 0) { rows() }
+                .card()
+            if let footer {
+                Text(footer)
+                    .textStyle(.subheadline, Palette.dark.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 }
 
-/// Строка настроек из набора 1g: заголовок, пояснение, контрол справа.
+/// Строка настроек: глиф в плашке, заголовок body, пояснение subheadline,
+/// контрол справа. Разделитель между строками начинается от текста.
 struct SettingRow<Control: View>: View {
-    @EnvironmentObject var state: AppState
+    let symbol: String?
     let title: String
-    let subtitle: String
-    var last = false
-    /// Контрол под текстом, а не справа: для широких контролов и узкого окна.
-    var stacked = false
-    @ViewBuilder let control: () -> Control
+    let subtitle: String?
+    let control: () -> Control
 
-    var body: some View {
-        let p = state.palette
-        VStack(spacing: 0) {
-            Group {
-                if stacked {
-                    VStack(alignment: .leading, spacing: Space.s3) {
-                        texts(p)
-                        control()
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    HStack(spacing: Space.s4) {
-                        texts(p)
-                        Spacer(minLength: Space.s4)
-                        control()
-                    }
-                }
-            }
-            .padding(.horizontal, Space.s4)
-            .padding(.vertical, Space.s3)
-            if !last {
-                VKDivider(palette: p)
-            }
-        }
+    init(symbol: String? = nil, title: String, subtitle: String? = nil,
+         @ViewBuilder control: @escaping () -> Control) {
+        self.symbol = symbol
+        self.title = title
+        self.subtitle = subtitle
+        self.control = control
     }
 
-    private func texts(_ p: Palette) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(Fonts.text(FontSize.fs2, .medium)).foregroundStyle(p.text)
-            Text(subtitle)
-                .font(Fonts.text(FontSize.fs1))
-                .foregroundStyle(p.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
+    var body: some View {
+        let p = Palette.dark
+        HStack(spacing: Space.s3) {
+            if let symbol { SettingIcon(symbol: symbol) }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).textStyle(.body, p.text)
+                if let subtitle {
+                    Text(subtitle)
+                        .textStyle(.subheadline, p.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: Space.s4)
+            control()
         }
+        .padding(.horizontal, Space.s4)
+        .padding(.vertical, 10)
+        .frame(minHeight: 44)
     }
 }

@@ -1,742 +1,643 @@
 import AppKit
 import SwiftUI
 
-// Примитивы Verkstad (css/actions, data, feedback, forms, navigation,
-// surfaces), перенесённые в SwiftUI: радиус 0, рамки 1/2 px, без теней,
-// движение - одна кривая Motion. Состав - по набору элементов макета
-// «Flow Local - главный экран» (артборд 1g).
+// Примитивы Apple System Dark. Где у macOS есть свой контрол - берём его
+// (переключатель, флажок, всплывающее меню, индикатор): он и выглядит, и
+// ведёт себя как в System Settings. Своё рисуем только там, где системного
+// нет: кнопки нужной высоты, сегменты, клавиши, волна, островок.
 
-// MARK: - кнопка
+private let P = Palette.dark
 
-enum VKButtonKind { case primary, secondary, ghost, danger }
-enum VKButtonSize { case sm, md }
+// MARK: - кнопки
 
-struct VKButtonStyle: ButtonStyle {
-    let palette: Palette
-    var kind: VKButtonKind = .secondary
-    var size: VKButtonSize = .md
+enum FLButtonKind { case primary, secondary, plain, destructive }
+enum FLButtonSize { case small, regular }
+
+/// Кнопка 22 / 28 pt, радиус 6, SF Pro 600. Наведение - ровный шаг
+/// заливки, нажатие - заливка плотнее и кнопка на 3 % меньше.
+struct FLButtonStyle: ButtonStyle {
+    var kind: FLButtonKind = .secondary
+    var size: FLButtonSize = .regular
     var fill = false
 
     func makeBody(configuration: Configuration) -> some View {
-        VKButtonBody(configuration: configuration, p: palette, kind: kind, size: size, fill: fill)
+        FLButtonBody(configuration: configuration, kind: kind, size: size, fill: fill)
     }
 }
 
-private struct VKButtonBody: View {
+private struct FLButtonBody: View {
     let configuration: ButtonStyle.Configuration
-    let p: Palette
-    let kind: VKButtonKind
-    let size: VKButtonSize
+    let kind: FLButtonKind
+    let size: FLButtonSize
     let fill: Bool
     @State private var hover = false
     @Environment(\.isEnabled) private var enabled
 
     var body: some View {
-        let fs = size == .sm ? FontSize.fs1 : FontSize.fs2
+        let shape = RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
         configuration.label
-            .font(Fonts.text(fs, .bold))
-            .tracking(fs * 0.04)
-            .textCase(.uppercase)
+            .labelStyle(FLLabelStyle())
+            .font(.system(size: size == .small ? 12 : 13, weight: .semibold))
             .lineLimit(1)
-            .padding(.horizontal, kind == .ghost || size == .sm ? Space.s3 : Space.s5)
+            .padding(.horizontal, size == .small ? 10 : 14)
             .frame(maxWidth: fill ? .infinity : nil)
-            .frame(height: size == .sm ? Space.controlSm : Space.controlMd)
+            .frame(height: size == .small ? Metric.buttonSmall : Metric.button)
             .foregroundStyle(foreground)
-            .background(
-                // «Шторка»: заливка поднимается снизу вверх, подпись инвертируется.
-                Rectangle().fill(shutter)
-                    .scaleEffect(x: 1, y: hover && enabled ? 1 : 0, anchor: .bottom)
-            )
-            .background(base)
-            .overlay(Rectangle().strokeBorder(edge, lineWidth: size == .sm ? Space.hairline : Space.strong))
-            .contentShape(Rectangle())
-            .scaleEffect(x: 1, y: configuration.isPressed && enabled ? 0.96 : 1)
-            .animation(Motion.instant, value: configuration.isPressed)
-            .animation(Motion.base, value: hover)
+            .background {
+                ZStack {
+                    shape.fill(base)
+                    shape.fill(Color.white.opacity(highlight))
+                }
+                .brightness(pressed && kind == .primary ? -0.08 : 0)
+            }
+            .contentShape(shape)
+            .scaleEffect(pressed ? 0.97 : 1)
+            .animation(Motion.press, value: configuration.isPressed)
+            .animation(Motion.hover, value: hover)
             .onHover { hover = $0 }
     }
 
+    private var pressed: Bool { configuration.isPressed && enabled }
+    private var lit: Bool { hover && enabled }
+
     private var base: Color {
-        guard kind == .primary else { return .clear }
-        return enabled ? p.accent : p.surface2
+        guard enabled else { return kind == .plain ? .clear : P.fill4 }
+        switch kind {
+        case .primary: return P.accent
+        case .secondary: return pressed ? P.fill1 : P.fill2
+        case .plain: return pressed ? P.fill3 : (lit ? P.fill4 : .clear)
+        case .destructive: return P.danger.opacity(pressed ? 0.28 : 0.18)
+        }
     }
 
-    private var shutter: Color {
+    private var highlight: Double {
+        guard lit, !pressed else { return 0 }
         switch kind {
-        case .primary: return p.text
-        case .danger: return p.danger
-        case .secondary, .ghost: return p.accent
+        case .primary: return 0.1
+        case .secondary, .destructive: return 0.05
+        case .plain: return 0
         }
     }
 
     private var foreground: Color {
-        guard enabled else { return p.textMuted }
+        guard enabled else { return P.textTertiary }
         switch kind {
-        case .primary: return hover ? p.textInverse : p.accentText
-        case .secondary, .ghost: return hover ? p.accentText : p.text
-        case .danger: return hover ? p.accentText : p.danger
-        }
-    }
-
-    private var edge: Color {
-        guard enabled else { return kind == .primary ? p.surface2 : (kind == .ghost ? .clear : p.border) }
-        switch kind {
-        case .primary: return hover ? p.text : p.accent
-        case .secondary: return hover ? p.accent : p.borderStrong
-        case .ghost: return .clear
-        case .danger: return p.danger
+        case .primary: return .white
+        case .secondary: return P.text
+        case .plain: return lit ? P.text : P.textMuted
+        case .destructive: return P.danger
         }
     }
 }
 
-// MARK: - вкладки (vk-tab: моно 12, активная - линия 2 px растёт слева)
-
-struct VKTabBar: View {
-    @Binding var selection: Tab
-    let palette: Palette
-    var compact = false
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(Tab.allCases) { tab in
-                VKTabButton(title: tab.title, active: tab == selection, palette: palette, compact: compact) {
-                    selection = tab
-                }
-            }
+/// Глиф и подпись в кнопке: глиф на шаг мельче текста, отступ 6.
+struct FLLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 6) {
+            configuration.icon.font(.system(size: 11, weight: .semibold))
+            configuration.title
         }
     }
 }
 
-private struct VKTabButton: View {
-    let title: String
-    let active: Bool
-    let palette: Palette
-    let compact: Bool
+/// Кнопка-глиф для действий в строке: покой - secondaryLabel, наведение -
+/// label и подложка; у удаления при наведении красный.
+struct FLIconButton: View {
+    let symbol: String
+    let help: String
+    var destructive = false
     let action: () -> Void
     @State private var hover = false
+    @Environment(\.isEnabled) private var enabled
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(Fonts.mono(FontSize.monoLg))
-                .tracking(FontSize.monoLg * 0.12)
-                .textCase(.uppercase)
-                .lineLimit(1)
-                .foregroundStyle(active || hover ? palette.text : palette.textMuted)
-                .padding(.horizontal, compact ? Space.s3 : Space.s4)
-                .frame(maxHeight: .infinity)
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(palette.accent)
-                        .frame(height: Space.strong)
-                        .scaleEffect(x: active ? 1 : 0, y: 1, anchor: .leading)
-                }
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .contentTransition(.symbolEffect(.replace))
+                .foregroundStyle(color)
+                .frame(width: 26, height: Metric.buttonSmall)
+                .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+                    .fill(hover && enabled ? P.fill4 : .clear))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
         .onHover { hover = $0 }
-        .animation(Motion.base, value: active)
-        .animation(Motion.base, value: hover)
+        .animation(Motion.hover, value: hover)
+    }
+
+    private var color: Color {
+        guard enabled else { return P.textQuaternary }
+        guard hover else { return P.textMuted }
+        return destructive ? P.danger : P.text
     }
 }
 
-// MARK: - сегменты (vk-btngroup: общая рамка, без зазоров)
+// MARK: - сегменты
 
-struct VKSegmented<T: Hashable>: View {
+/// Сегменты как у macOS: утопленная дорожка fill/3, выбранный сегмент -
+/// поднятая плашка systemGray2, которая переезжает, а не перекрашивается.
+struct FLSegmented<T: Hashable>: View {
     let options: [(T, String)]
     @Binding var selection: T
-    let palette: Palette
+    @Namespace private var thumb
 
     var body: some View {
-        HStack(spacing: -Space.hairline) {
+        HStack(spacing: 2) {
             ForEach(Array(options.enumerated()), id: \.offset) { _, option in
-                Button(option.1) { selection = option.0 }
-                    .buttonStyle(VKSegmentStyle(p: palette, on: option.0 == selection))
-                    .zIndex(option.0 == selection ? 1 : 0)
+                let on = option.0 == selection
+                Button {
+                    withAnimation(Motion.page) { selection = option.0 }
+                } label: {
+                    Text(option.1)
+                        .font(.system(size: 12, weight: on ? .semibold : .regular))
+                        .foregroundStyle(on ? P.text : P.textMuted)
+                        .padding(.horizontal, 12)
+                        .frame(height: 22)
+                        .background {
+                            if on {
+                                RoundedRectangle(cornerRadius: Radius.menu, style: .continuous)
+                                    .fill(P.gray2)
+                                    .matchedGeometryEffect(id: "thumb", in: thumb)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(P.fill3))
         .fixedSize()
     }
 }
 
-private struct VKSegmentStyle: ButtonStyle {
-    let p: Palette
-    let on: Bool
+// MARK: - системные контролы
 
-    func makeBody(configuration: Configuration) -> some View {
-        VKSegmentBody(configuration: configuration, p: p, on: on)
-    }
-}
-
-private struct VKSegmentBody: View {
-    let configuration: ButtonStyle.Configuration
-    let p: Palette
-    let on: Bool
-    @State private var hover = false
-
-    var body: some View {
-        configuration.label
-            .font(Fonts.mono(FontSize.mono, .medium))
-            .tracking(FontSize.mono * 0.12)
-            .textCase(.uppercase)
-            .lineLimit(1)
-            .padding(.horizontal, Space.s3)
-            .frame(height: Space.controlSm)
-            // Выбранный сегмент - инверсия текста, а не акцент: акцент на
-            // экране один, и он отдан действию.
-            .foregroundStyle(on ? p.textInverse : (hover ? p.text : p.textMuted))
-            .background(on ? p.text : (hover ? p.surface2 : Color.clear))
-            .overlay(Rectangle().strokeBorder(on ? p.text : p.borderStrong, lineWidth: Space.hairline))
-            .contentShape(Rectangle())
-            .scaleEffect(x: 1, y: configuration.isPressed ? 0.96 : 1)
-            .animation(Motion.instant, value: configuration.isPressed)
-            .animation(Motion.base, value: hover)
-            .animation(Motion.base, value: on)
-            .onHover { hover = $0 }
-    }
-}
-
-// MARK: - переключатель (vk-switch: прямоугольная дорожка 44x20, жёсткий щелчок)
-
-struct VKSwitch: View {
+/// Настоящий переключатель macOS, малый размер, акцент systemBlue.
+struct FLSwitch: View {
     @Binding var isOn: Bool
-    let palette: Palette
 
     var body: some View {
-        Button { isOn.toggle() } label: {
-            ZStack(alignment: .leading) {
-                Rectangle()
-                    .fill(isOn ? palette.accent : palette.surface2)
-                    .overlay(Rectangle().strokeBorder(isOn ? palette.accent : palette.borderStrong,
-                                                      lineWidth: Space.hairline))
-                Rectangle()
-                    .fill(isOn ? palette.accentText : palette.textMuted)
-                    .frame(width: 16, height: 14)
-                    .offset(x: isOn ? 25 : 3)
-            }
-            .frame(width: 44, height: 20)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .animation(Motion.instant, value: isOn)
+        Toggle("", isOn: $isOn)
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .controlSize(.small)
+            .tint(P.accent)
     }
 }
 
-// MARK: - флажок (vk-check: квадрат 18 px, заливка акцентом)
-
-struct VKCheck: View {
+/// Настоящий флажок macOS с подписью.
+struct FLCheck: View {
     @Binding var isOn: Bool
     let label: String
-    let palette: Palette
 
     var body: some View {
-        Button { isOn.toggle() } label: {
-            HStack(alignment: .top, spacing: Space.s3) {
-                ZStack {
-                    Rectangle()
-                        .fill(isOn ? palette.accent : palette.surface)
-                        .overlay(Rectangle().strokeBorder(isOn ? palette.accent : palette.borderStrong,
-                                                          lineWidth: Space.hairline))
-                    if isOn {
-                        CheckMark().stroke(palette.accentText, style: StrokeStyle(lineWidth: Space.strong))
-                            .frame(width: 10, height: 8)
-                    }
-                }
-                .frame(width: 18, height: 18)
-                .padding(.top, 1)
-                Text(label)
-                    .font(Fonts.text(FontSize.fs2))
-                    .foregroundStyle(isOn ? palette.text : palette.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .contentShape(Rectangle())
+        Toggle(isOn: $isOn) {
+            Text(label).textStyle(.body, P.text)
         }
-        .buttonStyle(.plain)
-        .animation(Motion.instant, value: isOn)
+        .toggleStyle(.checkbox)
     }
 }
 
-private struct CheckMark: Shape {
-    func path(in r: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: r.minX, y: r.minY + r.height * 0.55))
-        p.addLine(to: CGPoint(x: r.minX + r.width * 0.38, y: r.maxY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
-        return p
-    }
-}
-
-// MARK: - выбор (vk-select). Поле - своё, список - системное меню: у SwiftUI
-// Menu на macOS своя рамка не рисуется, а список - это список.
-
-struct VKSelect<T: Hashable>: View {
+/// Всплывающее меню macOS (NSPopUpButton): список - системный.
+struct FLPopup<T: Hashable>: View {
     let options: [(T, String)]
     @Binding var selection: T
-    let palette: Palette
-    var small = false
-    @State private var hover = false
 
     var body: some View {
-        let current = options.first { $0.0 == selection }?.1 ?? "—"
-        Button {
-            MenuPresenter.show(options.map { ($0.1, $0.0 == selection) }) { i in
-                selection = options[i].0
+        Picker("", selection: $selection) {
+            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                Text(option.1).tag(option.0)
             }
-        } label: {
-            HStack(spacing: Space.s2) {
-                Text(current)
-                    .font(Fonts.text(small ? FontSize.fs1 : FontSize.fs2))
-                    .foregroundStyle(palette.text)
-                    .lineLimit(1)
-                Spacer(minLength: Space.s2)
-                Chevron()
-                    .stroke(palette.text, style: StrokeStyle(lineWidth: Space.strong))
-                    .frame(width: 8, height: 5)
-            }
-            .padding(.horizontal, Space.s3)
-            .frame(height: small ? Space.controlSm : Space.controlMd)
-            .background(palette.surface)
-            .overlay(Rectangle().strokeBorder(hover ? palette.borderStrong : palette.border,
-                                              lineWidth: Space.hairline))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
-        .animation(Motion.base, value: hover)
+        .pickerStyle(.menu)
+        .labelsHidden()
     }
 }
 
-private struct Chevron: Shape {
-    func path(in r: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: r.minX, y: r.minY))
-        p.addLine(to: CGPoint(x: r.midX, y: r.maxY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
-        return p
-    }
-}
+// MARK: - поиск
 
-enum MenuPresenter {
-    static func show(_ items: [(String, Bool)], _ pick: @escaping (Int) -> Void) {
-        let menu = NSMenu()
-        let target = MenuTarget(pick)
-        for (i, item) in items.enumerated() {
-            let mi = NSMenuItem(title: item.0, action: #selector(MenuTarget.picked(_:)), keyEquivalent: "")
-            mi.target = target
-            mi.tag = i
-            mi.state = item.1 ? .on : .off
-            menu.addItem(mi)
-        }
-        // popUp модальный: target живёт на стеке, пока меню открыто.
-        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
-        _ = target
-    }
-}
-
-private final class MenuTarget: NSObject {
-    let pick: (Int) -> Void
-    init(_ pick: @escaping (Int) -> Void) { self.pick = pick }
-    @objc func picked(_ sender: NSMenuItem) { pick(sender.tag) }
-}
-
-// MARK: - поиск (vk-search: моно-метка вместо значка)
-
-struct VKSearchField: View {
+/// Поле поиска: лупа, fill/3, радиус 6; в фокусе - кольцо 3 pt
+/// systemBlue 50 %, как у системного поля.
+struct FLSearchField: View {
     @Binding var text: String
-    let palette: Palette
-    var placeholder = "Текст диктовки"
+    var placeholder = "Поиск"
     @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
-            Text("Поиск")
-                .monoLabel(palette.textMuted)
-                .padding(.horizontal, Space.s3)
-                .frame(maxHeight: .infinity)
-                .overlay(alignment: .trailing) { Rectangle().fill(palette.border).frame(width: Space.hairline) }
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(P.textMuted)
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
-                .font(Fonts.text(FontSize.fs2))
-                .foregroundStyle(palette.text)
+                .font(TextStyle.body.font())
+                .foregroundStyle(P.text)
                 .focused($focused)
-                .padding(.horizontal, Space.s3)
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 12))
+                        .foregroundStyle(P.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Очистить")
+            }
         }
-        .frame(height: Space.controlMd)
-        .background(palette.surface)
-        .overlay(Rectangle().strokeBorder(focused ? palette.accent : palette.border,
-                                          lineWidth: focused ? Space.strong : Space.hairline))
+        .padding(.horizontal, 8)
+        .frame(height: Metric.button)
+        .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(P.fill3))
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.control + 3, style: .continuous)
+                .strokeBorder(P.accent.opacity(focused ? 0.5 : 0), lineWidth: 3)
+                .padding(-3)
+        )
+        .animation(Motion.hover, value: focused)
     }
 }
 
-// MARK: - бейдж (vk-badge)
+// MARK: - тег, точка, линия
 
-enum VKTone { case neutral, accent, outline, success, warning, danger }
+enum FLTone { case neutral, accent, success, warning, danger }
 
-struct VKBadge: View {
+/// Тег-капсула 11/600: цвет состояния текстом и прозрачной подложкой.
+struct FLTag: View {
     let text: String
-    var tone: VKTone = .neutral
+    var tone: FLTone = .neutral
     var dot = false
-    let palette: Palette
+    var symbol: String?
 
     var body: some View {
-        HStack(spacing: Space.s2) {
-            if dot {
-                Rectangle().fill(colors.fg).frame(width: 6, height: 6)
-            }
-            Text(text).monoLabel(colors.fg)
+        HStack(spacing: 5) {
+            if dot { Circle().fill(color).frame(width: 6, height: 6) }
+            if let symbol { Image(systemName: symbol).font(.system(size: 9, weight: .semibold)) }
+            Text(text).font(.system(size: 11, weight: .semibold))
         }
-        .padding(.horizontal, Space.s2)
+        .foregroundStyle(color)
+        .padding(.horizontal, 8)
         .frame(height: 20)
-        .background(colors.bg)
-        .overlay(Rectangle().strokeBorder(colors.edge, lineWidth: Space.hairline))
+        .background(Capsule().fill(background))
         .fixedSize()
     }
 
-    private var colors: (bg: Color, fg: Color, edge: Color) {
-        let p = palette
+    private var color: Color {
         switch tone {
-        case .neutral: return (p.surface2, p.text, p.border)
-        case .accent: return (p.accent, p.accentText, p.accent)
-        case .outline: return (.clear, p.text, p.borderStrong)
-        case .success: return (p.successBg, p.success, p.success)
-        case .warning: return (p.warningBg, p.warning, p.warning)
-        case .danger: return (p.dangerBg, p.danger, p.danger)
+        case .neutral: return P.textMuted
+        case .accent: return P.accent
+        case .success: return P.success
+        case .warning: return P.warning
+        case .danger: return P.danger
+        }
+    }
+
+    private var background: Color { tone == .neutral ? P.fill3 : P.wash(color) }
+}
+
+/// Точка состояния. pulse - тихое расходящееся кольцо (идёт запись).
+struct StatusDot: View {
+    let color: Color
+    var pulse = false
+    @State private var on = false
+
+    var body: some View {
+        Circle().fill(color).frame(width: 8, height: 8)
+            .background {
+                if pulse {
+                    Circle().fill(color.opacity(0.4))
+                        .scaleEffect(on ? 2.4 : 1)
+                        .opacity(on ? 0 : 1)
+                        .animation(.easeOut(duration: 1.2).repeatForever(autoreverses: false), value: on)
+                }
+            }
+            .onAppear { on = pulse }
+            .onChange(of: pulse) { _, value in on = value }
+    }
+}
+
+/// Глиф строки настроек в плашке 24 pt - как в System Settings, но
+/// монохромный: цвет на экране один, и он отдан действию.
+struct SettingIcon: View {
+    let symbol: String
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(P.text)
+            .frame(width: 24, height: 24)
+            .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(P.surface3))
+    }
+}
+
+/// Разделитель толщиной в один физический пиксель, как у системных списков.
+struct FLSeparator: View {
+    var vertical = false
+    var inset: CGFloat = 0
+    var color: Color = Palette.dark.separator
+    @Environment(\.displayScale) private var scale
+
+    var body: some View {
+        let w = 1 / max(scale, 1)
+        Rectangle()
+            .fill(color)
+            .frame(width: vertical ? w : nil, height: vertical ? nil : w)
+            .frame(maxWidth: vertical ? nil : .infinity, maxHeight: vertical ? .infinity : nil)
+            .padding(vertical ? .top : .leading, inset)
+    }
+}
+
+extension View {
+    /// Карточка: уровень elevated/1 на чёрном, радиус 12, без рамки и тени.
+    func card() -> some View {
+        background(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).fill(P.surface))
+    }
+}
+
+/// Заголовок группы над карточкой - headline 13/600, как в System Settings.
+struct SectionTitle: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text).textStyle(.headline, P.text)
+    }
+}
+
+/// Прокручиваемая страница: колонка ограниченной ширины по центру сцены,
+/// поля по сетке - на широком окне справа не остаётся пустого хвоста.
+struct PageScroll<Content: View>: View {
+    var maxWidth: CGFloat = 720
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.s5) { content() }
+                .frame(maxWidth: maxWidth, alignment: .leading)
+                .padding(.horizontal, Space.s5)
+                .padding(.top, Space.s1)
+                .padding(.bottom, Space.s6)
+                .frame(maxWidth: .infinity)
         }
     }
 }
 
-// MARK: - линия
+// MARK: - сообщение
 
-/// Хейрлайн на всю ширину: секции делятся линией, а не пустотой.
-struct VKDivider: View {
-    let palette: Palette
-    var strong = false
-    var vertical = false
-
-    var body: some View {
-        let w = strong ? Space.strong : Space.hairline
-        Rectangle()
-            .fill(strong ? palette.borderStrong : palette.border)
-            .frame(width: vertical ? w : nil, height: vertical ? nil : w)
-            .frame(maxWidth: vertical ? nil : .infinity, maxHeight: vertical ? .infinity : nil)
-    }
-}
-
-// MARK: - алерт (vk-alert: кромка 2 px цветом состояния)
-
-struct VKAlert<Actions: View>: View {
-    let mark: String
+/// Сообщение в потоке страницы: цветной глиф и белый текст на карточке -
+/// без полосы у края и без жёлтой заливки.
+struct FLNotice<Actions: View>: View {
+    let symbol: String
     let title: String
     let text: String
-    var tone: VKTone = .warning
-    let palette: Palette
+    var tone: FLTone = .warning
     @ViewBuilder let actions: () -> Actions
 
     var body: some View {
-        let p = palette
-        HStack(alignment: .top, spacing: Space.s4) {
-            Text(mark).monoLabel(edge).padding(.top, 2)
-            VStack(alignment: .leading, spacing: Space.s2) {
-                Text(title).font(Fonts.text(FontSize.fs2, .bold)).foregroundStyle(p.text)
+        HStack(alignment: .top, spacing: Space.s3) {
+            Image(systemName: symbol)
+                .font(.system(size: 18))
+                .foregroundStyle(color)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: Space.s1) {
+                Text(title).textStyle(.headline, P.text)
                 Text(text)
-                    .font(Fonts.text(FontSize.fs2))
-                    .foregroundStyle(p.textMuted)
-                    .lineSpacing(3)
+                    .textStyle(.body, P.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
-                actions().padding(.top, Space.s1)
+                actions().padding(.top, Space.s2)
             }
             Spacer(minLength: 0)
         }
         .padding(Space.s4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(background)
-        .overlay(Rectangle().strokeBorder(p.border, lineWidth: Space.hairline))
-        .overlay(alignment: .leading) { Rectangle().fill(edge).frame(width: Space.strong) }
+        .card()
     }
 
-    private var edge: Color {
+    private var color: Color {
         switch tone {
-        case .success: return palette.success
-        case .danger: return palette.danger
-        case .warning: return palette.warning
-        default: return palette.accentInk
-        }
-    }
-
-    private var background: Color {
-        switch tone {
-        case .success: return palette.successBg
-        case .danger: return palette.dangerBg
-        case .warning: return palette.warningBg
-        default: return palette.surface
+        case .success: return P.success
+        case .danger: return P.danger
+        case .warning: return P.warning
+        case .neutral, .accent: return P.accent
         }
     }
 }
 
-// MARK: - ожидание: блоки, мигание, прогресс, скелетон
+// MARK: - пусто, ожидание
 
-/// Три прямоугольных блока шагами (vk-spinner), никогда не круг.
-struct VKSpinner: View {
-    let color: Color
-    var height: CGFloat = 16
+/// Пустое состояние: глиф 32 pt, заголовок и одна строка пояснения по центру.
+struct EmptyState: View {
+    let symbol: String
+    let title: String
+    let text: String
 
     var body: some View {
-        TimelineView(.animation) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
-            HStack(alignment: .bottom, spacing: 3) {
-                ForEach(0..<3, id: \.self) { i in
-                    let phase = (t - Double(i) * 0.12).truncatingRemainder(dividingBy: 0.72)
-                    Rectangle()
-                        .fill(color)
-                        .frame(width: height / 4, height: height)
-                        .scaleEffect(x: 1, y: phase < 0.36 ? 0.35 : 1, anchor: .bottom)
-                }
+        VStack(spacing: Space.s2) {
+            Image(systemName: symbol)
+                .font(.system(size: 32, weight: .light))
+                .foregroundStyle(P.textTertiary)
+                .padding(.bottom, Space.s1)
+            Text(title).textStyle(.title3, P.text, weight: .semibold)
+            Text(text)
+                .textStyle(.body, P.textMuted)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 300)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Space.s5)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Строка-заглушка, пока текст готовится: мягко дышит, не бегает.
+struct FLSkeleton: View {
+    var width: CGFloat?
+    @State private var dim = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: Radius.menu, style: .continuous)
+            .fill(P.fill3)
+            .frame(width: width, height: 12)
+            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+            .opacity(dim ? 0.45 : 1)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
             }
-            .frame(height: height)
-        }
     }
 }
 
-/// «РАСПОЗНАЮ» из макета: три блока мигают по очереди, шагами.
-struct VKPulseBlocks: View {
-    let color: Color
-    var width: CGFloat = 6
-    var height: CGFloat = 12
+// MARK: - волна
 
-    var body: some View {
-        TimelineView(.animation) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
-            HStack(spacing: 3) {
-                ForEach(0..<3, id: \.self) { i in
-                    let phase = (t - Double(i) * 0.2).truncatingRemainder(dividingBy: 0.6)
-                    Rectangle()
-                        .fill(color)
-                        .frame(width: width, height: height)
-                        .opacity(phase < 0.3 ? 1 : 0.35)
-                }
-            }
-        }
-    }
-}
-
-/// Мигающий квадрат (идёт запись) и курсор расшифровки - шагами, без плавности.
-struct VKBlink: View {
-    let color: Color
-    var width: CGFloat = 8
-    var height: CGFloat = 8
-    var period: Double = 1.2
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: period / 2)) { ctx in
-            let on = Int(ctx.date.timeIntervalSinceReferenceDate / (period / 2)) % 2 == 0
-            Rectangle().fill(color).frame(width: width, height: height).opacity(on ? 1 : 0.35)
-        }
-    }
-}
-
-struct VKProgress: View {
-    var value: Double?          // nil - неизвестно сколько: бегущая полоса
-    let palette: Palette
-    var height: CGFloat = 8
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Rectangle().fill(palette.surface2)
-                if let v = value {
-                    Rectangle().fill(palette.accent).frame(width: geo.size.width * max(0, min(1, v)))
-                } else {
-                    TimelineView(.animation) { ctx in
-                        let w = geo.size.width * 0.32
-                        let x = -w + (geo.size.width + w) * Self.eased(ctx.date, period: 1.2)
-                        Rectangle().fill(palette.accent).frame(width: w).offset(x: x)
-                    }
-                }
-            }
-            .clipped()
-        }
-        .frame(height: height)
-        .overlay(Rectangle().strokeBorder(palette.border, lineWidth: Space.hairline))
-    }
-
-    /// Та же кривая, что у всей системы: механически разгоняется и тормозит.
-    static func eased(_ date: Date, period: Double) -> Double {
-        let t = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period
-        return t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2
-    }
-}
-
-/// Скелетон: плоский блок и жёсткая протирка панелью, не мягкая пульсация.
-struct VKSkeleton: View {
-    let palette: Palette
-    var height: CGFloat = 16
-    var delay: Double = 0
-
-    var body: some View {
-        GeometryReader { geo in
-            TimelineView(.animation) { ctx in
-                let w = geo.size.width * 0.25
-                let phase = VKProgress.eased(ctx.date.addingTimeInterval(-delay), period: 1.1)
-                Rectangle().fill(palette.borderStrong).frame(width: w).offset(x: -w + (geo.size.width + w * 4) * phase)
-            }
-        }
-        .frame(height: height)
-        .background(palette.surface)
-        .clipped()
-        .overlay(Rectangle().strokeBorder(palette.border, lineWidth: Space.hairline))
-    }
-}
-
-// MARK: - уровень микрофона
-
-/// Столбики уровня, прижаты книзу. Берём последние count значений.
-struct VKLevelBars: View {
+/// Волна уровня, как в «Диктофоне»: капсулы от центра вверх и вниз, свежий
+/// звук справа, старый гаснет к левому краю.
+struct Waveform: View {
     let levels: [Float]
-    let color: Color
-    var count = 20
-    var spacing: CGFloat = 4
-    var barWidth: CGFloat?
-    var height: CGFloat = 80
-    var floor: CGFloat = 0.12
+    var color: Color = Palette.dark.accent
+    var count = 48
+    var barWidth: CGFloat = 3
+    var spacing: CGFloat = 3
+    var height: CGFloat = 64
+    var floor: CGFloat = 0.06
+    var fade = true
 
     var body: some View {
         let tail = Array(levels.suffix(count))
         let values = Array(repeating: Float(0), count: max(0, count - tail.count)) + tail
-        HStack(alignment: .bottom, spacing: spacing) {
+        HStack(alignment: .center, spacing: spacing) {
             ForEach(values.indices, id: \.self) { i in
-                Rectangle()
+                Capsule()
                     .fill(color)
-                    .frame(width: barWidth)
-                    .frame(maxWidth: barWidth == nil ? .infinity : nil)
-                    .frame(height: height * max(floor, CGFloat(values[i])))
+                    .frame(width: barWidth, height: max(barWidth, height * max(floor, CGFloat(values[i]))))
             }
         }
-        .frame(height: height, alignment: .bottom)
-        .animation(.linear(duration: 0.08), value: values)
+        .frame(height: height)
+        .mask {
+            if fade {
+                LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.25)],
+                               startPoint: .leading, endPoint: .trailing)
+            } else {
+                Color.black
+            }
+        }
+        .animation(.linear(duration: 0.1), value: values)
+        .accessibilityHidden(true)
     }
 }
 
-// MARK: - числа, пустота, клавиши
+/// Волна, которая сама слушает уровень микрофона: перерисовывается только
+/// она, а не всё окно.
+struct LiveWaveform: View {
+    @ObservedObject private var meter = LevelStore.shared
+    var color: Color = Palette.dark.accent
+    var count = 48
+    var barWidth: CGFloat = 3
+    var spacing: CGFloat = 3
+    var height: CGFloat = 64
 
-/// Плитка числа: моно-подпись, крупная цифра Unbounded, единица моно.
-struct VKStatTile: View {
+    var body: some View {
+        Waveform(levels: meter.levels, color: color, count: count, barWidth: barWidth,
+                 spacing: spacing, height: height)
+    }
+}
+
+// MARK: - числа
+
+/// Плитка числа: глиф и подпись 11 pt secondaryLabel, число 26/400
+/// табличными цифрами, единица - body secondaryLabel.
+struct StatTile: View {
+    var symbol: String?
     let label: String
     let value: String
     var unit: String?
-    let palette: Palette
-    var size: CGFloat = 34
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
-            Text(label).monoLabel(palette.textMuted).lineLimit(1)
-            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+            HStack(spacing: 6) {
+                if let symbol {
+                    Image(systemName: symbol).font(.system(size: 11, weight: .medium))
+                }
+                Text(label).font(TextStyle.subheadline.font()).lineLimit(1)
+            }
+            .foregroundStyle(P.textMuted)
+            HStack(alignment: .firstTextBaseline, spacing: Space.s1) {
                 Text(value)
-                    .displayTitle(palette.text, size: size, weight: .bold)
+                    .font(TextStyle.largeTitle.font())
                     .monospacedDigit()
+                    .foregroundStyle(P.text)
+                    .contentTransition(.numericText())
                     .lineLimit(1)
-                    .minimumScaleFactor(0.6)
                 if let unit {
-                    Text(unit).monoLabel(palette.textMuted, size: FontSize.monoLg)
+                    Text(unit).textStyle(.body, P.textMuted)
                 }
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, Space.s4)
-        // Одна высота на всех: иначе плитка с единицей выше соседей, и сетка
-        // центрует их по-разному - подписи в ряду разъезжаются.
-        .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
-        .background(palette.surface)
-    }
-}
-
-/// Пустое состояние: пунктирная рамка, моно-код, факт, потом действие.
-struct VKEmpty: View {
-    var code = "Пусто"
-    let title: String
-    let text: String
-    let palette: Palette
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.s3) {
-            Text(code).monoLabel(palette.textMuted)
-            Text(title).font(Fonts.text(FontSize.fs4, .bold)).foregroundStyle(palette.text)
-            Text(text)
-                .font(Fonts.text(FontSize.fs2))
-                .foregroundStyle(palette.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(Space.s5)
+        .padding(Space.s4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.surface)
-        .overlay(Rectangle().strokeBorder(palette.borderStrong,
-                                          style: StrokeStyle(lineWidth: Space.hairline, dash: [4, 3])))
+        .card()
     }
 }
 
-/// Клавиша: 44 px, моно 12, трекинг 0.12em. SPACE - шире, как в макете.
-struct VKKeycap: View {
-    let text: String
-    let palette: Palette
-    var height: CGFloat = 44
-    var accent = false
+// MARK: - клавиши
+
+enum KeyCapSize { case large, small }
+
+/// Клавиша, как на клавиатуре MacBook: у модификатора знак сверху справа и
+/// слово снизу слева, у остальных - слово по центру. small - маленькая
+/// клавиша со знаком для строк настроек.
+struct KeyCap: View {
+    let key: String
+    var size: KeyCapSize = .large
+    var active = false
 
     var body: some View {
-        let wide = text == "SPACE"
-        Text(text)
-            .font(Fonts.mono(height > 36 ? FontSize.monoLg : FontSize.mono))
-            .tracking(FontSize.monoLg * 0.12)
-            .textCase(.uppercase)
-            .lineLimit(1)
-            .foregroundStyle(accent ? palette.accentText : palette.text)
-            .padding(.horizontal, wide ? (height > 36 ? Space.s6 : 20) : (height > 36 ? Space.s4 : Space.s3))
-            .frame(height: height)
-            .background(accent ? palette.accent : palette.surface2)
-            .overlay(Rectangle().strokeBorder(accent ? palette.accent : palette.borderStrong,
-                                              lineWidth: accent ? Space.strong : Space.hairline))
+        face
+            .foregroundStyle(active ? Color.white : P.text)
+            .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+                .fill(active ? P.accent : P.surface2))
             .fixedSize()
     }
+
+    @ViewBuilder
+    private var face: some View {
+        if size == .small {
+            Text(KeyGlyph.short(key))
+                .font(.system(size: 12, weight: .medium))
+                .padding(.horizontal, 6)
+                .frame(minWidth: 22, minHeight: 22)
+        } else if let glyph = KeyGlyph.symbol(key) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(glyph)
+                    .font(.system(size: 12))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                Spacer(minLength: 0)
+                Text(KeyGlyph.word(key)).font(.system(size: 10, weight: .medium))
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 5)
+            .frame(width: KeyGlyph.width(key), height: 40)
+        } else {
+            Text(KeyGlyph.word(key))
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: KeyGlyph.width(key), height: 40)
+        }
+    }
 }
 
-/// Сочетание целиком: клавиши через «+». Плюс - полноценный элемент строки
-/// цветом текста: без него три клавиши читаются как три отдельные кнопки.
-struct VKCombo: View {
+/// Сочетание целиком - клавиши вплотную, без «+», как в меню macOS.
+struct KeyCapRow: View {
     let keys: [String]
-    let palette: Palette
-    var height: CGFloat = 40
+    var size: KeyCapSize = .large
+    var active = false
 
     var body: some View {
-        HStack(spacing: Space.s2) {
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                if item == "+" {
-                    Text("+")
-                        .font(Fonts.mono(FontSize.fs3, .medium))
-                        .foregroundStyle(palette.text)
-                } else {
-                    VKKeycap(text: item, palette: palette, height: height)
-                }
+        HStack(spacing: size == .large ? 6 : 3) {
+            ForEach(Array(keys.enumerated()), id: \.offset) { _, key in
+                KeyCap(key: key, size: size, active: active)
             }
         }
         .fixedSize()
-    }
-
-    private var items: [String] {
-        keys.enumerated().flatMap { i, key in i == 0 ? [key] : ["+", key] }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(keys.map(KeyGlyph.word).joined(separator: " "))
     }
 }
 
-/// Столбики, которые сами слушают уровень микрофона: перерисовываются только
-/// они, а не всё окно.
-struct LiveLevels: View {
-    @ObservedObject private var meter = LevelStore.shared
-    let color: Color
-    var count = 20
-    var spacing: CGFloat = 4
-    var barWidth: CGFloat?
-    var height: CGFloat = 80
-    var floor: CGFloat = 0.12
+// MARK: - материал
 
-    var body: some View {
-        VKLevelBars(levels: meter.levels, color: color, count: count, spacing: spacing,
-                    barWidth: barWidth, height: height, floor: floor)
+/// Системный материал AppKit: .sidebar размывает то, что за окном, - так же,
+/// как сайдбар Finder и System Settings.
+struct VisualEffect: NSViewRepresentable {
+    var material: NSVisualEffectView.Material = .sidebar
+    var blending: NSVisualEffectView.BlendingMode = .behindWindow
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blending
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.material = material
+        view.blendingMode = blending
     }
 }

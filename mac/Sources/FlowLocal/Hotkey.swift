@@ -6,11 +6,12 @@ enum HotkeyRole: String, CaseIterable, Identifiable {
     case hold, toggle
 
     var id: String { rawValue }
-    var title: String { self == .hold ? "Зажать" : "Нажать" }
+    var title: String { self == .hold ? "Удерживая клавиши" : "По нажатию" }
     var hint: String {
-        self == .hold ? "Держите и говорите, отпустили — текст на месте"
-                      : "Нажали — говорите, нажали ещё раз — текст на месте"
+        self == .hold ? "Держите и говорите — отпустите, и текст встанет туда, где курсор"
+                      : "Нажмите, чтобы начать, и ещё раз, чтобы вставить текст"
     }
+    var symbol: String { self == .hold ? "hand.point.up.left.fill" : "switch.2" }
 }
 
 // Глобальные хоткеи через Carbon RegisterEventHotKey. Не требует ни
@@ -22,9 +23,10 @@ struct HotkeyPreset: Identifiable, Equatable, Codable {
     let id: String
     let keyCode: UInt32
     let modifiers: UInt32
-    let keys: [String]      // подписи клавиш словами, как в макете: CTRL, SHIFT, SPACE
+    let keys: [String]      // имена клавиш: CTRL, SHIFT, SPACE - подписи строит KeyGlyph
 
-    var label: String { keys.joined(separator: " + ") }
+    /// Как macOS пишет сочетание в тексте и меню: ⌃⇧Space.
+    var label: String { keys.map(KeyGlyph.short).joined() }
 
     // Первый - как в old/config.example.json (ctrl+shift+space).
     static let all: [HotkeyPreset] = [
@@ -94,6 +96,62 @@ struct HotkeyPreset: Identifiable, Equatable, Codable {
         if let name = named[code] { return name }
         guard let c = chars?.trimmingCharacters(in: .whitespaces), !c.isEmpty else { return nil }
         return c.uppercased()
+    }
+}
+
+/// Подписи клавиш так, как их рисует macOS: модификаторы - знаками ⌃ ⌥ ⇧ ⌘
+/// в строке и словом, как на самой клавише MacBook; остальные - словом.
+enum KeyGlyph {
+    static func symbol(_ key: String) -> String? {
+        switch key {
+        case "CTRL": return "⌃"
+        case "OPTION": return "⌥"
+        case "SHIFT": return "⇧"
+        case "CMD": return "⌘"
+        default: return nil
+        }
+    }
+
+    /// Слово на клавише: control, option, space, return.
+    static func word(_ key: String) -> String {
+        switch key {
+        case "CTRL": return "control"
+        case "OPTION": return "option"
+        case "SHIFT": return "shift"
+        case "CMD": return "command"
+        case "SPACE", "RETURN", "TAB", "DELETE", "HOME", "END": return key.lowercased()
+        case "DEL": return "⌦"
+        case "PGUP": return "page up"
+        case "PGDN": return "page down"
+        default: return key
+        }
+    }
+
+    /// Короткая подпись в строке текста: ⌃, ⇧, Space, ↩, A.
+    static func short(_ key: String) -> String {
+        if let glyph = symbol(key) { return glyph }
+        switch key {
+        case "SPACE": return "Space"
+        case "RETURN": return "↩"
+        case "TAB": return "⇥"
+        case "DELETE": return "⌫"
+        case "DEL": return "⌦"
+        case "HOME": return "↖"
+        case "END": return "↘"
+        case "PGUP": return "⇞"
+        case "PGDN": return "⇟"
+        default: return key
+        }
+    }
+
+    /// Ширина большой клавиши - в пропорциях клавиатуры MacBook.
+    static func width(_ key: String) -> CGFloat {
+        switch key {
+        case "SPACE": return 132
+        case "SHIFT", "RETURN": return 68
+        case "CTRL", "OPTION", "CMD", "TAB", "DELETE": return 56
+        default: return 40
+        }
     }
 }
 

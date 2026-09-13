@@ -1,80 +1,73 @@
 import AppKit
-import CoreText
 import SwiftUI
 
-// Дизайн-система Verkstad (prog/_materials): швейцарский индустриальный
-// брутализм. Правила, которые здесь закреплены токенами:
-//   - радиус 0 везде, теней нет - глубина рамкой и шагом фона bg -> surface -> surface-2;
-//   - рамки только 1 и 2 px;
-//   - один акцентный элемент в зоне видимости; акцент-текст - accentInk, заливка - accent;
-//   - приглушённый текст - токен, не opacity;
-//   - верхний регистр только в моно-лейблах, бейджах и кнопках.
-enum ThemeKind: String, CaseIterable, Identifiable {
-    case dark, light
-
-    var id: String { rawValue }
-    var title: String { self == .light ? "Светлая" : "Тёмная" }
-    var appearance: NSAppearance? { NSAppearance(named: self == .light ? .aqua : .darkAqua) }
-    var toggled: ThemeKind { self == .light ? .dark : .light }
-    var colorScheme: ColorScheme { self == .light ? .light : .dark }
-
-    static var system: ThemeKind {
-        NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .dark : .light
-    }
-}
-
-// tokens/colors.css
+// Дизайн-система Apple System Dark (prog/_materials/Apple Design system,
+// «macOS utility hub · dark only»). Apple документирует цвета ролями, а не
+// hex, но приложение всегда тёмное - поэтому роли тёмной темы измерены и
+// зафиксированы здесь один раз. Правила, которые держат токены:
+//   - глубина - уровнем фона (#000 -> #1C1C1E -> #2C2C2E -> #3A3A3C), а не
+//     рамкой и не тенью: карточке на чёрном граница не нужна;
+//   - один акцент на экран - systemBlue для интерактива; состояние -
+//     green / orange / red; yellow и mint текстом не бывают;
+//   - смысл несут label и secondaryLabel; tertiary - плейсхолдеры,
+//     quaternary - выключенное; серого текста ниже 60 % нет;
+//   - SF Pro: 400 для текста, 600 для заголовков и кнопок; без Bold, капса
+//     и трекинга вразрядку; SF Mono - только таймеры, цифры табличные;
+//   - радиусы по роли: 4 пункт меню, 6 кнопка и поле, 10 поповер, 12 карточка.
 struct Palette {
-    let bg: Color
-    let surface: Color
-    let surface2: Color
-    let border: Color
-    let borderStrong: Color
-    let text: Color
-    let textMuted: Color
-    let textInverse: Color
-    let accent: Color
-    let accentHover: Color
-    let accentText: Color
-    let accentInk: Color
-    let accentTextMuted: Color
-    let success: Color
-    let warning: Color
-    let danger: Color
-    let successBg: Color
-    let warningBg: Color
-    let dangerBg: Color
-    let gridLine: Color
+    // Фоны и уровни
+    let bg = Color(rgb: 0x000000)           // systemBackground
+    let surface = Color(rgb: 0x1C1C1E)      // elevated/1 - карточка
+    let surface2 = Color(rgb: 0x2C2C2E)     // elevated/2 - клавиша, поле
+    let surface3 = Color(rgb: 0x3A3A3C)     // elevated/3 - наведение
+    let gray2 = Color(rgb: 0x636366)        // systemGray2 - выбранный сегмент
 
-    static let dark = Palette(
-        bg: hex(0x0A0A0A), surface: hex(0x141414), surface2: hex(0x1C1C1C),
-        border: hex(0x2E2E2E), borderStrong: hex(0x4A4A4A),
-        text: hex(0xF2F2F2), textMuted: hex(0x8C8C8C), textInverse: hex(0x0A0A0A),
-        accent: hex(0x3A3AFF), accentHover: hex(0x2B2BE6), accentText: hex(0xFFFFFF),
-        accentInk: hex(0x7070FF), accentTextMuted: hex(0xC9C9FF),
-        success: hex(0x62A280), warning: hex(0xA89F52), danger: hex(0xCC6E6E),
-        successBg: hex(0x12201A), warningBg: hex(0x1E1C10), dangerBg: hex(0x231313),
-        gridLine: hex(0x1F1F1F))
+    // Fills - подложки контролов поверх любого уровня
+    let fill1 = Color(rgb: 0x787880, 0.36)
+    let fill2 = Color(rgb: 0x787880, 0.32)
+    let fill3 = Color(rgb: 0x787880, 0.24)
+    let fill4 = Color(rgb: 0x787880, 0.18)
 
-    static let light = Palette(
-        bg: hex(0xFAFAF8), surface: hex(0xFFFFFF), surface2: hex(0xF0F0EE),
-        border: hex(0xBFBFB8), borderStrong: hex(0x0A0A0A),
-        text: hex(0x0A0A0A), textMuted: hex(0x6B6B6B), textInverse: hex(0xFAFAF8),
-        accent: hex(0x1B1BFF), accentHover: hex(0x1414CC), accentText: hex(0xFFFFFF),
-        accentInk: hex(0x1B1BFF), accentTextMuted: hex(0xD6D6FF),
-        success: hex(0x2F6B4E), warning: hex(0x6E6420), danger: hex(0x9B3B3B),
-        successBg: hex(0xEDF2EF), warningBg: hex(0xF2F1E8), dangerBg: hex(0xF4EDED),
-        gridLine: hex(0xE4E4E0))
+    // Разделители
+    let separator = Color(rgb: 0x545458, 0.65)
+    let separatorOpaque = Color(rgb: 0x38383A)   // на #2C2C2E и выше
+    let islandEdge = Color(rgb: 0x545458, 0.4)
 
-    static func of(_ kind: ThemeKind) -> Palette { kind == .light ? .light : .dark }
+    // Текст
+    let text = Color(rgb: 0xFFFFFF)
+    let textMuted = Color(rgb: 0xEBEBF5, 0.6)
+    let textTertiary = Color(rgb: 0xEBEBF5, 0.3)
+    let textQuaternary = Color(rgb: 0xEBEBF5, 0.18)
 
-    private static func hex(_ v: UInt32) -> Color {
-        Color(.sRGB, red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255,
-              blue: Double(v & 0xFF) / 255, opacity: 1)
+    // Системные цвета, тёмные варианты
+    let accent = Color(rgb: 0x0A84FF)
+    let success = Color(rgb: 0x30D158)
+    let warning = Color(rgb: 0xFF9F0A)
+    let danger = Color(rgb: 0xFF453A)
+
+    static let dark = Palette()
+
+    /// Подложка под цвет состояния - для тегов и значков.
+    func wash(_ color: Color) -> Color { color.opacity(0.18) }
+}
+
+private extension Color {
+    init(rgb: UInt32, _ alpha: Double = 1) {
+        self.init(.sRGB, red: Double((rgb >> 16) & 0xFF) / 255, green: Double((rgb >> 8) & 0xFF) / 255,
+                  blue: Double(rgb & 0xFF) / 255, opacity: alpha)
     }
 }
 
-// tokens/spacing.css + borders.css: база 8, две толщины рамки.
+// «05 · Радиусы»: 4 - пункт меню, 6 - кнопка и поле, 10 - поповер и окно,
+// 12 - лист и карточка; островок и тег - капсула.
+enum Radius {
+    static let menu: CGFloat = 4
+    static let control: CGFloat = 6
+    static let popover: CGFloat = 10
+    static let card: CGFloat = 12
+}
+
+// Сетка 8 pt с шагом 4.
 enum Space {
     static let s1: CGFloat = 4
     static let s2: CGFloat = 8
@@ -83,86 +76,68 @@ enum Space {
     static let s5: CGFloat = 24
     static let s6: CGFloat = 32
     static let s7: CGFloat = 48
-
-    static let controlSm: CGFloat = 32
-    static let controlMd: CGFloat = 40
-
-    static let hairline: CGFloat = 1
-    static let strong: CGFloat = 2
 }
 
-// tokens/typography.css: шкала 1.333 от 14.
-enum FontSize {
-    static let fs1: CGFloat = 12
-    static let fs2: CGFloat = 14
-    static let fs3: CGFloat = 16
-    static let fs4: CGFloat = 21
-    static let fs5: CGFloat = 28
-    static let fs6: CGFloat = 37
-    static let mono: CGFloat = 11
-    static let monoLg: CGFloat = 12
+// «05 · Метрика»: ряд списка 28, кнопка 22 / 28. Строка заголовка - 52,
+// как у окна с унифицированной панелью инструментов.
+enum Metric {
+    static let toolbar: CGFloat = 52
+    static let row: CGFloat = 28
+    static let button: CGFloat = 28
+    static let buttonSmall: CGFloat = 22
+    /// Разделитель строк настроек начинается от текста: поле 16 + плашка 24 + зазор 12.
+    static let rowTextInset: CGFloat = 52
 }
 
-// tokens/motion.css: одна кривая, механическая и резкая.
-enum Motion {
-    static let instant = Animation.timingCurve(0.7, 0, 0.2, 1, duration: 0.09)
-    static let base = Animation.timingCurve(0.7, 0, 0.2, 1, duration: 0.18)
-    static let shutter = Animation.timingCurve(0.7, 0, 0.2, 1, duration: 0.4)
-}
+// «03 · Типографика · SF Pro»: кегль/строка и вес. 13 pt - базовый размер
+// интерфейса macOS, 10 pt - нижняя граница и только для служебных меток.
+enum TextStyle {
+    case largeTitle, title1, title2, title3, headline, body, subheadline, footnote, mono
 
-// Unbounded - только H1/H2 и крупные цифры; Inter - весь текст и кнопки;
-// JetBrains Mono - лейблы, метки, числа. Имя семейства берём из самого файла:
-// угаданное имя SwiftUI молча подменил бы системным шрифтом. Файла нет -
-// останется запасное имя и системный шрифт, приложение от этого не падает.
-enum Fonts {
-    // nil - файла нет, берём системный шрифт того же веса (SF близок к Inter).
-    private(set) static var displayFamily: String?
-    private(set) static var textFamily: String?
-    private(set) static var monoFamily: String?
-
-    static func register() {
-        displayFamily = register("Unbounded-Variable")
-        textFamily = register("Inter-Variable")
-        monoFamily = register("JetBrainsMono-Variable")
-    }
-
-    private static func register(_ file: String) -> String? {
-        guard let url = Bundle.main.url(forResource: file, withExtension: "ttf", subdirectory: "Fonts") else {
-            return nil
+    var size: CGFloat {
+        switch self {
+        case .largeTitle: return 26
+        case .title1: return 22
+        case .title2: return 17
+        case .title3: return 15
+        case .headline, .body: return 13
+        case .subheadline: return 11
+        case .footnote: return 10
+        case .mono: return 12
         }
-        CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
-        guard let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
-              let first = descriptors.first else { return nil }
-        return CTFontDescriptorCopyAttribute(first, kCTFontFamilyNameAttribute) as? String
     }
 
-    static func display(_ size: CGFloat, _ weight: Font.Weight = .black) -> Font {
-        displayFamily.map { .custom($0, size: size).weight(weight) } ?? .system(size: size, weight: weight)
+    var weight: Font.Weight { self == .headline ? .semibold : .regular }
+
+    /// Межстрочное из таблицы: 26/32, 22/26, 17/22, 15/20, 13/16, 11/14, 10/13.
+    var leading: CGFloat {
+        switch self {
+        case .largeTitle: return 6
+        case .title1: return 4
+        case .title2, .title3: return 5
+        case .headline, .body, .subheadline, .footnote, .mono: return 3
+        }
     }
 
-    static func text(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        textFamily.map { .custom($0, size: size).weight(weight) } ?? .system(size: size, weight: weight)
-    }
-
-    static func mono(_ size: CGFloat, _ weight: Font.Weight = .medium) -> Font {
-        monoFamily.map { .custom($0, size: size).weight(weight) }
-            ?? .system(size: size, weight: weight, design: .monospaced)
+    func font(_ weight: Font.Weight? = nil) -> Font {
+        .system(size: size, weight: weight ?? self.weight, design: self == .mono ? .monospaced : .default)
     }
 }
 
 extension View {
-    /// Моно-лейбл Verkstad: 11 px, верхний регистр, трекинг 0.12em.
-    func monoLabel(_ color: Color, size: CGFloat = FontSize.mono) -> some View {
-        font(Fonts.mono(size))
-            .tracking(size * 0.12)
-            .textCase(.uppercase)
+    /// Текст по шкале: кегль, вес, межстрочное и цвет роли одним вызовом.
+    func textStyle(_ style: TextStyle, _ color: Color, weight: Font.Weight? = nil) -> some View {
+        font(style.font(weight))
             .foregroundStyle(color)
+            .lineSpacing(style.leading)
     }
+}
 
-    /// Заголовок display: Unbounded, трекинг -0.03em.
-    func displayTitle(_ color: Color, size: CGFloat, weight: Font.Weight = .black) -> some View {
-        font(Fonts.display(size, weight))
-            .tracking(size * -0.03)
-            .foregroundStyle(color)
-    }
+// «05 · Движение»: hover 120 мс ease-out, поповер 250 мс (0.32, 0.72, 0, 1),
+// островок - пружина 400 мс с затуханием 0.85.
+enum Motion {
+    static let hover = Animation.easeOut(duration: 0.12)
+    static let press = Animation.spring(response: 0.2, dampingFraction: 0.9)
+    static let page = Animation.timingCurve(0.32, 0.72, 0, 1, duration: 0.25)
+    static let island = Animation.spring(response: 0.4, dampingFraction: 0.85)
 }

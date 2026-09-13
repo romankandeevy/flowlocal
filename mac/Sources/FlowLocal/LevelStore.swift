@@ -6,7 +6,7 @@ import SwiftUI
 // его видят только столбики, и публикуем не чаще 20 раз в секунду.
 final class LevelStore: ObservableObject {
     static let shared = LevelStore()
-    static let count = 36
+    static let count = 64       // волна на «Главной» - 64 столбика
 
     @Published private(set) var levels: [Float] = Array(repeating: 0, count: LevelStore.count)
     private var pending: [Float] = []

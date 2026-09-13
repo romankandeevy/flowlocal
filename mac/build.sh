@@ -55,15 +55,17 @@ swiftc ${SWIFT_OPT:--O} -swift-version 5 -target "$(uname -m)-apple-macos14.0" \
 
 echo "==> $APP"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/Fonts"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$HERE/build/FlowLocal" "$APP/Contents/MacOS/FlowLocal"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :FLBackendDir string $BACKEND" "$APP/Contents/Info.plist"
-# JetBrains Mono - из old/; Inter и Unbounded (Verkstad) - из Resources/Fonts,
-# если скачаны. Нет файла - Theme.swift возьмёт системный шрифт.
-cp ../old/assets/fonts/JetBrainsMono-Variable.ttf "$APP/Contents/Resources/Fonts/"
-cp Resources/Fonts/*.ttf "$APP/Contents/Resources/Fonts/" 2>/dev/null || true
-if sips -s format icns ../old/assets/FlowLocal.ico --out "$APP/Contents/Resources/AppIcon.icns" >/dev/null 2>&1; then
+# Шрифты - системные SF Pro и SF Mono, своих файлов в сборке нет.
+# Иконка - Resources/AppIcon.icns (рисует tools/make_icon.py); нет её -
+# старый значок из old/.
+if [ -f Resources/AppIcon.icns ]; then
+    cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+    /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$APP/Contents/Info.plist"
+elif sips -s format icns ../old/assets/FlowLocal.ico --out "$APP/Contents/Resources/AppIcon.icns" >/dev/null 2>&1; then
     /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$APP/Contents/Info.plist"
 fi
 

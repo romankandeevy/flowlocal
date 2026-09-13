@@ -8,13 +8,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var controller = Controller(state: state)
     private var window: NSWindow?
     private var statusItem: NSStatusItem?
-    private var themeItem: NSMenuItem?
     private var bag = Set<AnyCancellable>()
     private var permissionTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        Fonts.register()
-        NSApp.appearance = state.theme.appearance
+        NSApp.appearance = NSAppearance(named: .darkAqua)
         NSApp.mainMenu = buildMainMenu()
         state.launchAtLogin = SMAppService.mainApp.status == .enabled
         setupStatusItem()
@@ -32,7 +30,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.state.refreshDevices()
         }
 
-        state.$theme.sink { [weak self] t in self?.applyTheme(t) }.store(in: &bag)
         state.$phase.sink { [weak self] p in self?.updateStatusIcon(p) }.store(in: &bag)
         Log.write("FlowLocal запущен, «Универсальный доступ»: \(Inserter.trusted ? "есть" : "нет")")
     }
@@ -50,13 +47,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - окно
 
-    // Окно по макету: 1000x680, тянется. Заголовок прозрачный, а пустая
-    // унифицированная панель инструментов делает его высотой 52 - ровно под
-    // нашу шапку, и системные «светофоры» встают по её центру.
+    // Окно 1100x720, тянется. Заголовок прозрачный, а пустая унифицированная
+    // панель инструментов делает его высотой 52 - ровно под строку заголовка
+    // сцены; «светофоры» встают над сайдбаром, как в Finder и System Settings.
     @objc func showWindow() {
         if window == nil {
             let view = MainView(actions: makeActions()).environmentObject(state)
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 680),
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                              backing: .buffered, defer: false)
             w.title = "Flow Local"
@@ -68,15 +65,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.toolbarStyle = .unified
             w.isMovableByWindowBackground = true
             w.isReleasedWhenClosed = false
-            w.minSize = NSSize(width: 640, height: 520)
+            w.minSize = NSSize(width: 680, height: 540)
             w.contentView = NSHostingView(rootView: view)
             w.center()
-            w.setFrameAutosaveName("FlowLocalMain.v2")
+            // v3: раскладка с сайдбаром шире прежней - старый размер окна не берём.
+            w.setFrameAutosaveName("FlowLocalMain.v3")
             window = w
-            applyTheme(state.theme)
+            applyDarkAppearance()
         }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func openSettings() {
+        state.tab = .settings
+        showWindow()
     }
 
     private func makeActions() -> AppActions {
@@ -107,15 +110,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 
-    private func applyTheme(_ t: ThemeKind) {
-        NSApp.appearance = t.appearance
-        window?.appearance = t.appearance
-        window?.backgroundColor = NSColor(Palette.of(t).bg)
-        themeItem?.title = "Тема: \(t.toggled.title.lowercased())"
-    }
-
-    @objc private func toggleTheme() {
-        state.theme = state.theme.toggled
+    // Только тёмная тема (Apple System Dark) - переключателя нет. Фон окна -
+    // #000000, как systemBackground в дизайн-системе.
+    private func applyDarkAppearance() {
+        let dark = NSAppearance(named: .darkAqua)
+        NSApp.appearance = dark
+        window?.appearance = dark
+        window?.backgroundColor = .black
     }
 
     // MARK: - строка меню
@@ -124,16 +125,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let menu = NSMenu()
         menu.addItem(withTitle: "Открыть Flow Local", action: #selector(showWindow), keyEquivalent: "").target = self
-        let theme = NSMenuItem(title: "", action: #selector(toggleTheme), keyEquivalent: "")
-        theme.target = self
-        menu.addItem(theme)
-        themeItem = theme
+        menu.addItem(withTitle: "Настройки…", action: #selector(openSettings), keyEquivalent: ",").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Выйти", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = menu
         statusItem = item
         updateStatusIcon(.idle)
-        applyTheme(state.theme)
+        applyDarkAppearance()
     }
 
     private func updateStatusIcon(_ phase: Phase) {
@@ -148,13 +146,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.button?.image = img
     }
 
-    // MARK: - главное меню (Cmd+Q, Cmd+W, Cmd+C/V в полях)
+    // MARK: - главное меню (⌘, ⌘Q, ⌘W, ⌘C/V в полях)
 
     private func buildMainMenu() -> NSMenu {
         let main = NSMenu()
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "О программе Flow Local",
+                        action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Настройки…", action: #selector(openSettings), keyEquivalent: ",").target = self
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Скрыть Flow Local", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Выйти из Flow Local", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")

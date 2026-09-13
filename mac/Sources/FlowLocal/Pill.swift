@@ -1,18 +1,23 @@
 import AppKit
 import SwiftUI
 
-// Плашка поверх окон: у нижнего края экрана. Компактная - 280 px и одна
-// строка: прошлая, на 360, выглядела громоздко. Не забирает фокус
-// (nonactivatingPanel + canBecomeKey=false) и не ловит мышь: ⌘V после неё
-// должен уйти в то окно, где человек печатал.
+// Островок поверх окон у нижнего края экрана. Не забирает фокус
+// (nonactivatingPanel + canBecomeKey=false) и не ловит мышь: ⌘V после него
+// должен уйти в то окно, где человек печатал. Панель шире самого островка -
+// он сам по ширине содержимого и плавно меняет её между состояниями.
 final class PillPanel: NSPanel {
-    static let width: CGFloat = 280
+    static let width: CGFloat = 400
+    static let height: CGFloat = 48
+
+    /// Каждое present/dismiss - новое поколение: гашение, начатое раньше,
+    /// не уберёт островок, который успели показать снова.
+    private var generation = 0
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
     init(state: AppState) {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: PillPanel.width, height: 40),
+        super.init(contentRect: NSRect(x: 0, y: 0, width: PillPanel.width, height: PillPanel.height),
                    styleMask: [.borderless, .nonactivatingPanel],
                    backing: .buffered, defer: false)
         isFloatingPanel = true
@@ -28,110 +33,128 @@ final class PillPanel: NSPanel {
     }
 
     func present() {
+        generation += 1
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
         if let vf = screen?.visibleFrame {
-            setFrameOrigin(NSPoint(x: vf.midX - frame.width / 2, y: vf.minY + Space.s3))
+            setFrameOrigin(NSPoint(x: vf.midX - frame.width / 2, y: vf.minY + Space.s2))
         }
-        orderFrontRegardless()
+        if !isVisible {
+            alphaValue = 0
+            orderFrontRegardless()
+        }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.18
+            animator().alphaValue = 1
+        }
     }
 
     func dismiss() {
-        orderOut(nil)
+        generation += 1
+        let current = generation
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.22
+            animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            guard let self, self.generation == current else { return }
+            self.orderOut(nil)
+        })
     }
 }
 
-// Строка плашки: моно-метка состояния и моно-текст. Акцент - только у записи:
-// кромка и дорожка уровня.
+// «01 · Островок» из дизайн-системы: сплошной #000000 без материала и блюра -
+// у края экрана он должен читаться как рамка дисплея, а не как окно. Высота
+// 32, радиус - половина высоты; рамка rgba(84,84,88,0.4) только по нижней
+// половине. Глиф в плашке 18 pt, одна строка 13/600, один индикатор.
 struct PillView: View {
     @EnvironmentObject var state: AppState
     @ObservedObject private var meter = LevelStore.shared
+    /// Последнее видимое состояние: пока островок гаснет, он показывает его,
+    /// а не схлопывается в пустую капсулу.
+    @State private var shown: Phase = .idle
 
     var body: some View {
         let p = state.palette
+        let visible = state.phase != .idle
         HStack(spacing: 10) {
             content(p)
         }
-        .padding(.horizontal, Space.s3)
-        .frame(width: PillPanel.width, height: 34, alignment: .leading)
-        // Стеклянная НUD-подложка вместо сплошной заливки - та же техника,
-        // что у системных плашек громкости/Now Playing: размывает то, что
-        // под ней, вместо непрозрачного прямоугольника. Убирает ощущение
-        // "тяжёлого окна" поверх рабочего стола.
-        .background(HUDMaterial())
-        .overlay(Rectangle().strokeBorder(edge(p), lineWidth: Space.hairline))
-        .overlay(alignment: .bottom) {
-            // Во время записи - тонкая акцентная дорожка по низу, а не толстая рамка.
-            if isRecording { Rectangle().fill(p.accent).frame(height: Space.strong) }
-        }
+        .padding(.leading, 7)
+        .padding(.trailing, 16)
+        .frame(height: 32)
+        .fixedSize()
+        .background(Capsule().fill(Color.black))
+        .overlay(
+            Capsule()
+                .strokeBorder(p.islandEdge, lineWidth: 1)
+                .mask(VStack(spacing: 0) { Color.clear; Color.black })
+        )
+        .scaleEffect(visible ? 1 : 0.92)
+        .opacity(visible ? 1 : 0)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .environment(\.colorScheme, state.theme.colorScheme)
-        .animation(Motion.base, value: state.phase)
-    }
-
-    private var isRecording: Bool {
-        if case .recording = state.phase { return true }
-        return false
-    }
-
-    private struct HUDMaterial: NSViewRepresentable {
-        func makeNSView(context: Context) -> NSVisualEffectView {
-            let v = NSVisualEffectView()
-            v.material = .hudWindow
-            v.blendingMode = .behindWindow
-            v.state = .active
-            return v
-        }
-        func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
-    }
-
-    private func edge(_ p: Palette) -> Color {
-        switch state.phase {
-        case .recording: return p.accent
-        case .failed: return p.danger
-        default: return p.borderStrong
+        .environment(\.colorScheme, .dark)
+        .animation(Motion.island, value: state.phase)
+        .onAppear { if state.phase != .idle { shown = state.phase } }
+        .onChange(of: state.phase) { _, phase in
+            if phase != .idle { shown = phase }
         }
     }
 
     @ViewBuilder
     private func content(_ p: Palette) -> some View {
-        switch state.phase {
+        switch shown {
         case .idle:
             EmptyView()
         case .loading:
-            Text("Внимание").monoLabel(p.warning)
-            Text("Загружаю модель").monoLabel(p.text).lineLimit(1)
-        case let .recording(since, locked):
-            VKBlink(color: p.danger, width: 6, height: 6)
-            VKLevelBars(levels: meter.levels, color: p.accent, count: 14, spacing: 2, height: 14, floor: 0.16)
+            glyph("hourglass", p.warning)
+            line("Загружаю модель", p)
+        case let .recording(since, _):
             TimelineView(.periodic(from: since, by: 0.25)) { ctx in
                 let t = ctx.date.timeIntervalSince(since)
-                HStack(spacing: Space.s2) {
+                let silent = t > 1.5 && meter.peak < 0.05
+                HStack(spacing: 10) {
+                    glyph(silent ? "mic.slash.fill" : "mic.fill", silent ? p.warning : p.accent)
+                    line(silent ? "Нет сигнала" : "Слушаю", p)
+                    Waveform(levels: meter.levels, color: p.accent, count: 6, barWidth: 2, spacing: 2,
+                             height: 14, floor: 0.15, fade: false)
+                    Rectangle().fill(p.separator).frame(width: 1, height: 14)
                     Text(MainView.clock(t))
-                        .font(Fonts.mono(FontSize.mono))
-                        .tracking(FontSize.mono * 0.12)
+                        .font(TextStyle.mono.font())
                         .monospacedDigit()
-                        .foregroundStyle(p.text)
-                    if t > 1.5 && meter.peak < 0.05 {
-                        Text("Нет сигнала").monoLabel(p.warning)
-                    } else {
-                        Text(locked ? "Нажать" : wordsLabel(state.liveWords)).monoLabel(p.textMuted)
-                    }
+                        .foregroundStyle(p.textMuted)
                 }
-                .fixedSize()
             }
         case .processing:
-            VKPulseBlocks(color: p.accent, width: 5, height: 10)
-            Text("Распознаю").monoLabel(p.text)
+            ProgressView()
+                .controlSize(.mini)
+                .frame(width: 18, height: 18)
+                .background(RoundedRectangle(cornerRadius: Radius.menu, style: .continuous).fill(p.fill3))
+            line("Распознаю", p)
         case let .done(msg):
-            Text("Ок").monoLabel(p.success)
-            Text(msg).monoLabel(p.text).lineLimit(1)
+            glyph("checkmark", p.success)
+            line(msg, p)
         case let .copied(msg):
-            Text("Буфер").monoLabel(p.warning)
-            Text(msg).monoLabel(p.text).lineLimit(1)
+            glyph("doc.on.clipboard", p.warning)
+            line(msg, p)
         case let .failed(msg):
-            Text("Ошибка").monoLabel(p.danger)
-            Text(msg).monoLabel(p.text).lineLimit(1)
+            glyph("xmark", p.danger)
+            line(msg, p)
         }
+    }
+
+    private func glyph(_ symbol: String, _ color: Color) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(color)
+            .contentTransition(.symbolEffect(.replace))
+            .frame(width: 18, height: 18)
+            .background(RoundedRectangle(cornerRadius: Radius.menu, style: .continuous).fill(Palette.dark.fill3))
+    }
+
+    private func line(_ text: String, _ p: Palette) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(p.text)
+            .lineLimit(1)
     }
 }

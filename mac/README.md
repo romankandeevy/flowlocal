@@ -13,11 +13,14 @@
 (`old/streaming.py`), пороги определителя языка, резка по паузам, ожидание
 перед возвратом буфера обмена по длине текста, настройки onnxruntime.
 
-Интерфейс — дизайн-система Verkstad (`prog/_materials`): радиус 0, без теней,
-рамки 1/2 px, один акцент в зоне видимости, моно-метки вместо значков, две
-равноправные темы. Шрифты системы — Unbounded (заголовки) и Inter (текст) из
-Google Fonts, лежат в `Resources/Fonts/` вместе с лицензиями OFL; JetBrains
-Mono (метки, клавиши) берётся из `old/assets/fonts/`.
+Интерфейс — дизайн-система Apple System Dark (`prog/_materials/Apple Design
+system`): только тёмная тема, фон #000000, глубина уровнями фона (#1C1C1E,
+#2C2C2E), а не рамками и тенями; один акцент — systemBlue; SF Pro 400/600 и
+SF Mono только для таймеров; SF Symbols; радиусы 6 (кнопка, поле) и 12
+(карточка). Окно — сайдбар на системном материале, как у Finder и System
+Settings; где у macOS есть свой контрол (переключатель, флажок, всплывающее
+меню, индикатор), берётся он. Островок у края экрана — сплошной чёрный, без
+блюра. Своих шрифтов в сборке нет.
 
 ## Сборка и запуск
 
@@ -133,12 +136,12 @@ backend/.venv/bin/python backend/server.py --stream-file запись.wav
 | `Sources/FlowLocal/AudioDevices.swift` | Список микрофонов (CoreAudio) для выбора входа |
 | `Sources/FlowLocal/Backend.swift` | Процесс `backend/server.py` и протокол с ним; живой текст (`partial`) |
 | `Sources/FlowLocal/Inserter.swift` | Буфер обмена + ⌘V через CGEvent, возврат прежнего буфера |
-| `Sources/FlowLocal/Pill.swift` | Плашка поверх окон: не забирает фокус и мышь |
-| `Sources/FlowLocal/MainView.swift` | Корень окна: шапка со вкладками, строка состояния, адаптивность |
-| `Sources/FlowLocal/HomeView.swift` | «Главная»: состояния 1a–1e, панель истории, микрофон, плитки |
-| `Sources/FlowLocal/TabsViews.swift` | «История» (поиск, вставить, удалить), «Статистика», «Настройки» |
-| `Sources/FlowLocal/Components.swift` | Примитивы Verkstad: кнопка, вкладки, переключатель, флажок, выбор, прогресс, скелетон |
-| `Sources/FlowLocal/Theme.swift` | Токены Verkstad: палитры, шкалы, движение, шрифты |
+| `Sources/FlowLocal/Pill.swift` | Островок поверх окон: не забирает фокус и мышь, гаснет плавно |
+| `Sources/FlowLocal/MainView.swift` | Корень окна: сайдбар (сжимается до значков), строка заголовка, ⌘1…⌘4 |
+| `Sources/FlowLocal/HomeView.swift` | «Главная»: покой, запись, распознавание, нет микрофона, загрузка; «Недавние» |
+| `Sources/FlowLocal/TabsViews.swift` | «История» по дням, «Статистика» с неделей, «Настройки» как в System Settings |
+| `Sources/FlowLocal/Components.swift` | Примитивы: кнопки, сегменты, клавиши MacBook, волна, тег, карточка, пустое состояние |
+| `Sources/FlowLocal/Theme.swift` | Токены Apple System Dark: уровни, цвета, шкала SF Pro, радиусы, движение |
 | `Sources/FlowLocal/AppState.swift` | Состояние окон, настройки, статистика из истории |
 | `Sources/FlowLocal/Log.swift` | Журнал `~/Library/Logs/FlowLocal.log` с ротацией |
 | `backend/server.py` | Модели, разбор на ходу, живой текст, переспрос на английский |
