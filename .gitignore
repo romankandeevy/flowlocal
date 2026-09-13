@@ -84,3 +84,8 @@ web/tsconfig.tsbuildinfo
 
 # Кеш зависимостей Vite - пересобирается сам при запуске dev-сервера.
 web/.vite/
+
+# SwiftPM (mac/)
+.build/
+
+.DS_Store
