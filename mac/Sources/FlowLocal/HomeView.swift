@@ -2,11 +2,11 @@ import AppKit
 import SwiftUI
 
 // «Главная» - пять состояний: покой, запись, распознавание, нет микрофона,
-// загрузка моделей. Справа, если хватает ширины, - «Недавние».
+// загрузка моделей. Одна колонка: «Недавние» - группой в покое, а не второй
+// боковой панелью рядом с сайдбаром.
 struct HomeView: View {
     @EnvironmentObject var state: AppState
     let actions: AppActions
-    let wide: Bool
 
     private enum Mode { case idle, recording, processing, micError, loading }
 
@@ -20,23 +20,16 @@ struct HomeView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            stage
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .transition(.opacity)
-            if wide {
-                FLSeparator(vertical: true)
-                RecentPanel(actions: actions)
-                    .frame(width: 300)
-            }
-        }
-        .animation(Motion.page, value: mode)
+        stage
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .transition(.opacity)
+            .animation(Motion.page, value: mode)
     }
 
     @ViewBuilder
     private var stage: some View {
         switch mode {
-        case .idle: IdleStage()
+        case .idle: IdleStage(actions: actions)
         case .recording: RecordingStage()
         case .processing: ProcessingStage(actions: actions)
         case .micError: MicErrorStage()
@@ -64,6 +57,7 @@ func openMicrophoneAccess(_ state: AppState) {
 
 private struct IdleStage: View {
     @EnvironmentObject var state: AppState
+    let actions: AppActions
 
     var body: some View {
         PageScroll(maxWidth: 640) {
@@ -85,6 +79,7 @@ private struct IdleStage: View {
                 SectionTitle("Сегодня")
                 StatTiles()
             }
+            RecentSection(actions: actions)
         }
     }
 }
@@ -515,150 +510,58 @@ struct LiveTranscript: View {
     }
 }
 
-// MARK: - «Недавние» справа
+// MARK: - «Недавние»
 
-struct RecentPanel: View {
+/// Последние диктовки группой на «Главной»: те же строки и действия при
+/// наведении, что в «Истории», в одной карточке. Остальное - по ссылке.
+struct RecentSection: View {
     @EnvironmentObject var state: AppState
     let actions: AppActions
-    @State private var copied = false
+    static let limit = 5
 
     var body: some View {
         let p = state.palette
-        VStack(spacing: 0) {
+        let items = Array(state.history.prefix(Self.limit))
+        VStack(alignment: .leading, spacing: Space.s2) {
             HStack {
-                Text("Недавние").textStyle(.headline, p.text)
+                SectionTitle("Недавние")
                 Spacer()
-                if !state.history.isEmpty {
-                    Text("\(state.history.count)").textStyle(.subheadline, p.textMuted).monospacedDigit()
+                if !items.isEmpty {
+                    Button { state.tab = .history } label: {
+                        HStack(spacing: 4) {
+                            Text("Вся история")
+                            Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                        }
+                    }
+                    .buttonStyle(FLButtonStyle(kind: .plain, size: .small))
+                    .help("История · ⌘2")
+                    // Подпись - вровень с правым краем карточки, ряд - высотой заголовка.
+                    .padding(.trailing, -10)
+                    .padding(.vertical, -3)
                 }
             }
-            .padding(.horizontal, Space.s4)
-            .frame(height: 36)
-            live(p)
-            if state.history.isEmpty {
-                EmptyState(symbol: "waveform", title: "Диктовок ещё нет",
-                           text: "Зажмите \(state.hotkey.label) и скажите первую фразу.")
+            if items.isEmpty {
+                HStack(spacing: Space.s3) {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 14))
+                        .foregroundStyle(p.textTertiary)
+                    Text("Диктовок ещё нет — первая появится здесь.").textStyle(.body, p.textMuted)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, Space.s4)
+                .frame(minHeight: 44)
+                .card()
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(state.history.prefix(60)) { entry in
-                            RecentRow(entry: entry, actions: actions)
-                        }
-                    }
-                    .padding(.horizontal, Space.s2)
-                    .padding(.bottom, Space.s2)
-                }
-            }
-            FLSeparator()
-            footer
-        }
-    }
-
-    @ViewBuilder
-    private func live(_ p: Palette) -> some View {
-        switch state.phase {
-        case .recording:
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    StatusDot(color: p.danger, pulse: true)
-                    Text("Сейчас").textStyle(.subheadline, p.text, weight: .semibold)
-                }
-                Text(state.liveText.isEmpty ? "Слушаю…" : state.liveText)
-                    .textStyle(.body, state.liveText.isEmpty ? p.textMuted : p.text)
-                    .lineLimit(4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: Radius.popover, style: .continuous).fill(p.surface))
-            .padding(.horizontal, Space.s2)
-            .padding(.bottom, Space.s2)
-        case .processing:
-            VStack(alignment: .leading, spacing: Space.s2) {
-                Text("Готовится").textStyle(.subheadline, p.textMuted, weight: .semibold)
-                FLSkeleton()
-                FLSkeleton(width: 160)
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: Radius.popover, style: .continuous).fill(p.surface))
-            .padding(.horizontal, Space.s2)
-            .padding(.bottom, Space.s2)
-        default:
-            EmptyView()
-        }
-    }
-
-    private var footer: some View {
-        HStack(spacing: Space.s2) {
-            Button {
-                guard let last = state.history.first(where: { !$0.failed }) else { return }
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(last.text, forType: .string)
-                withAnimation(Motion.press) { copied = true }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
-            } label: {
-                Label(copied ? "Скопировано" : "Скопировать последнюю", systemImage: copied ? "checkmark" : "doc.on.doc")
-                    .contentTransition(.symbolEffect(.replace))
-            }
-            .buttonStyle(FLButtonStyle(kind: .secondary, fill: true))
-            .disabled(state.history.isEmpty)
-            FLIconButton(symbol: "list.bullet", help: "Вся история") { state.tab = .history }
-        }
-        .padding(Space.s3)
-    }
-}
-
-/// Запись в «Недавних»: три строки, клик - раскрыть с действиями. Текст не
-/// выделяемый намеренно: выделяемый текст на macOS игнорирует lineLimit.
-struct RecentRow: View {
-    @EnvironmentObject var state: AppState
-    let entry: Entry
-    let actions: AppActions
-    @State private var open = false
-    @State private var hover = false
-
-    var body: some View {
-        let p = state.palette
-        let busy = state.rerecognizing.contains(entry.id)
-        VStack(alignment: .leading, spacing: Space.s1) {
-            HStack(spacing: Space.s2) {
-                Text(HistoryFormat.time.string(from: entry.date)).textStyle(.subheadline, p.textMuted).monospacedDigit()
-                if entry.failed { FLTag(text: "Не распознано", tone: .warning) }
-                Spacer()
-                Text(wordsLabel(entry.words)).textStyle(.subheadline, p.textMuted)
-            }
-            Text(entry.failed ? "Речь не распознана. Запись сохранена — её можно перераспознать." : entry.text)
-                .textStyle(.body, entry.failed ? p.textMuted : p.text)
-                .lineLimit(open ? nil : 3)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-            if open {
-                HStack(spacing: Space.s1) {
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(entry.text, forType: .string)
-                    } label: {
-                        Label("Копировать", systemImage: "doc.on.doc")
-                    }
-                    .buttonStyle(FLButtonStyle(kind: .secondary, size: .small))
-                    .disabled(entry.failed)
-                    if entry.audio != nil {
-                        Button { actions.rerecognize(entry) } label: {
-                            Label(busy ? "Распознаю…" : "Перераспознать", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                        .buttonStyle(FLButtonStyle(kind: .plain, size: .small))
-                        .disabled(busy)
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { i, entry in
+                        HistoryRow(entry: entry, actions: actions, divider: i > 0, showDay: true)
                     }
                 }
-                .padding(.top, Space.s1)
+                .card()
+                .clipShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
             }
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: Radius.popover, style: .continuous)
-            .fill(open ? p.surface : (hover ? p.fill4 : .clear)))
-        .contentShape(Rectangle())
-        .onTapGesture { withAnimation(Motion.page) { open.toggle() } }
-        .onHover { hover = $0 }
-        .animation(Motion.hover, value: hover)
+        .animation(Motion.page, value: items.map(\.id))
     }
 }
 

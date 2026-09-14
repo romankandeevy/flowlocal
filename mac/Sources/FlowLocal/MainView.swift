@@ -20,7 +20,7 @@ struct AppActions {
 // Корень окна - как у приложений Apple на Mac: сайдбар на системном
 // материале во всю высоту, под «светофорами», справа чёрная сцена со строкой
 // заголовка на месте панели инструментов. Узкое окно - сайдбар сжимается до
-// значков; широкое - на «Главной» справа появляются «Недавние».
+// значков. Боковая панель одна: вторая колонка справа читалась вторым сайдбаром.
 struct MainView: View {
     @EnvironmentObject var state: AppState
     let actions: AppActions
@@ -28,7 +28,6 @@ struct MainView: View {
     static let sidebarWidth: CGFloat = 212
     static let railWidth: CGFloat = 80          // шире «светофоров» - они стоят над сайдбаром
     static let railBelow: CGFloat = 820         // уже - сайдбар из значков
-    static let panelFrom: CGFloat = 860         // ширина сцены под «Недавние»
 
     var body: some View {
         GeometryReader { geo in
@@ -41,7 +40,7 @@ struct MainView: View {
                     PageHeader()
                         .zIndex(1)
                     // clipped: прокрутка не должна заезжать под строку заголовка.
-                    page(wide: geo.size.width - side >= Self.panelFrom)
+                    page
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipped()
                 }
@@ -54,9 +53,9 @@ struct MainView: View {
     }
 
     @ViewBuilder
-    private func page(wide: Bool) -> some View {
+    private var page: some View {
         switch state.tab {
-        case .home: HomeView(actions: actions, wide: wide)
+        case .home: HomeView(actions: actions)
         case .history: HistoryView(actions: actions)
         case .stats: StatsView()
         case .settings: SettingsView(actions: actions)

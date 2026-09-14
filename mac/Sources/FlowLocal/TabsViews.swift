@@ -103,6 +103,7 @@ struct HistoryRow: View {
     let entry: Entry
     let actions: AppActions
     var divider = false
+    var showDay = false          // вне «Истории» дня-заголовка нет - день в строке
     @State private var open = false
     @State private var hover = false
     @State private var copied = false
@@ -158,7 +159,11 @@ struct HistoryRow: View {
     }
 
     private var meta: String {
-        "\(HistoryFormat.time.string(from: entry.date)) · \(wordsLabel(entry.words)) · \(MainView.clock(entry.seconds))"
+        var when = HistoryFormat.time.string(from: entry.date)
+        if showDay && !Calendar.current.isDateInToday(entry.date) {
+            when = "\(HistoryFormat.sectionTitle(entry.date)), \(when)"
+        }
+        return "\(when) · \(wordsLabel(entry.words)) · \(MainView.clock(entry.seconds))"
     }
 
     private var rowActions: some View {
