@@ -456,11 +456,8 @@ private struct LivePanel: View {
         VStack(alignment: .leading, spacing: Space.s3) {
             header
             if state.isRecording {
-                GeometryReader { geo in
-                    LiveWaveform(count: max(8, Int(geo.size.width / 5)), barWidth: 2.5, spacing: 2.5, height: 32)
-                        .frame(width: geo.size.width, alignment: .leading)
-                }
-                .frame(height: 32)
+                LiveWaveform(color: NL.textPrimary, count: 7, barWidth: 5, spacing: 5, height: 36, floor: 0.12)
+                    .frame(maxWidth: .infinity)
                 .transition(.opacity)
             } else {
                 IndeterminateBar()
