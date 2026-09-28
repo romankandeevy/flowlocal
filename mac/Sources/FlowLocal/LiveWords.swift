@@ -223,7 +223,7 @@ struct LiveWordsTicker: View {
         HStack(spacing: 4) {
             ForEach(tail) { w in
                 Text(w.text)
-                    .foregroundStyle(w.final ? NL.textPrimary : NL.textSecondary)
+                    .foregroundStyle(w.final ? Pill.text : Pill.secondary)
                     .fixedSize()
                     .transition(.wordIn)
             }
@@ -234,7 +234,7 @@ struct LiveWordsTicker: View {
             LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.18)],
                            startPoint: .leading, endPoint: .trailing)
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: tail)
+        .animation(reduceMotion ? nil : Motion.base, value: tail)
         .accessibilityElement(children: .combine)
     }
 }

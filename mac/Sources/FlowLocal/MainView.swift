@@ -27,7 +27,7 @@ enum AppInfo {
 
 // Главное окно - одно на всё. В тулбаре: состояние слева, разделы
 // переключателем по центру. Под ним раздел; смена раздела -
-// короткое растворение со сдвигом на 4pt.
+// новый раздел проступает со сдвигом на 6pt, прежний уходит сразу.
 struct MainView: View {
     @EnvironmentObject var state: AppState
     let actions: AppActions
@@ -95,8 +95,10 @@ extension ToolbarContent {
 extension AnyTransition {
     /// Смена раздела: растворение и сдвиг на 4pt, без масштаба.
     static var sectionSwap: AnyTransition {
-        .asymmetric(insertion: .opacity.combined(with: .offset(y: 4)),
-                    removal: .opacity)
+        // Уходящий раздел исчезает сразу: при растворении обоих они на миг
+        // просвечивали друг сквозь друга.
+        .asymmetric(insertion: .opacity.combined(with: .offset(y: 6)).combined(with: .scale(scale: 0.99)),
+                    removal: .identity)
     }
 }
 

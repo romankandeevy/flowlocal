@@ -94,24 +94,29 @@ final class PillPanel: NSPanel {
     }
 }
 
-// Индикатор - тост Northline: surface + граница 1pt + shadow-lg, radius-lg,
-// одна строка label. Запись - красная точка, нейтральная волна и время
-// моноширинными цифрами; что из этого видно - секция «Капсула записи» в Hub Settings.
-// Ничего не пружинит: смена - ease-out 200 мс.
+// Капсула - тёмное стекло в форме таблетки, как «остров» у чёлки: одинаково
+// читается на светлом и тёмном фоне. Появляется пружиной из чуть меньшего
+// размера с размытием, гаснет обратно; ширина под содержимое меняется
+// той же пружиной.
 struct PillView: View {
     @EnvironmentObject var state: AppState
     @ObservedObject private var meter = LevelStore.shared
     @ObservedObject private var live = LiveWords.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Последнее видимое состояние: пока индикатор гаснет, он показывает
     /// его, а не схлопывается в пустую капсулу.
     @State private var shown: Phase = .idle
 
     var body: some View {
         PillCapsule { content }
+            .environment(\.colorScheme, .dark)
             .opacity(visible ? 1 : 0)
+            .scaleEffect(visible || reduceMotion ? 1 : 0.86, anchor: state.pillPosition == .top ? .top : .bottom)
+            .blur(radius: visible || reduceMotion ? 0 : 6)
             .scaleEffect(state.pillSize.scale)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .motion(Motion.moderate, value: state.phase)
+            .animation(reduceMotion ? nil : Motion.pop, value: visible)
+            .animation(reduceMotion ? nil : Motion.moderate, value: shown)
             .onAppear { if state.phase != .idle { shown = state.phase } }
             .onChange(of: state.phase) { _, phase in
                 if phase != .idle { shown = phase }
@@ -134,7 +139,7 @@ struct PillView: View {
         case .idle:
             EmptyView()
         case .loading:
-            ProgressView().controlSize(.mini)
+            PillSpinner()
             Text("Загрузка моделей…")
         case let .recording(since, _):
             TimelineView(.periodic(from: since, by: 0.25)) { context in
@@ -145,38 +150,122 @@ struct PillView: View {
                     LiveWordsTicker(width: state.pillTextWidth.points)
                 }
             }
+            .transition(.opacity)
         case .processing:
-            ProgressView().controlSize(.mini)
+            PillSpinner()
             Text("Распознаю…")
+                .transition(.opacity)
         case let .done(message):
-            Image(systemName: "checkmark").foregroundStyle(NL.textSuccess)
+            PillIcon(symbol: "checkmark", tint: Pill.green)
             Text(message)
         case let .copied(message):
-            Image(systemName: "doc.on.clipboard")
-                .foregroundStyle(NL.iconSecondary)
+            PillIcon(symbol: "doc.on.clipboard.fill", tint: Pill.blue)
             Text(message)
         case let .failed(message):
-            Image(systemName: "exclamationmark.octagon").foregroundStyle(NL.textDanger)
+            PillIcon(symbol: "exclamationmark", tint: Pill.red)
             Text(message)
         }
     }
 }
 
-/// Сама капсула: фон, граница, тень.
+/// Цвета капсулы - свои: она всегда тёмная, независимо от темы окна.
+enum Pill {
+    static let red = Color(red: 1.0, green: 0.27, blue: 0.23)
+    static let green = Color(red: 0.2, green: 0.84, blue: 0.42)
+    static let blue = Color(red: 0.25, green: 0.6, blue: 1.0)
+    static let text = Color.white.opacity(0.95)
+    static let secondary = Color.white.opacity(0.55)
+}
+
+/// Значок статуса - в цветном кружке, появляется пружиной.
+private struct PillIcon: View {
+    let symbol: String
+    let tint: Color
+    @State private var shown = false
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 20, height: 20)
+            .background(tint, in: Circle())
+            .scaleEffect(shown ? 1 : 0.4)
+            .opacity(shown ? 1 : 0)
+            .onAppear { withMotion(Motion.pop) { shown = true } }
+    }
+}
+
+/// Крутилка «Распознаю» - дуга, а не системный ProgressView: тот на тёмном
+/// стекле серый и мелкий.
+private struct PillSpinner: View {
+    @State private var spin = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Circle()
+            .trim(from: 0.15, to: 0.85)
+            .stroke(Pill.text, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .frame(width: 14, height: 14)
+            .rotationEffect(.degrees(spin ? 360 : 0))
+            .padding(3)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) { spin = true }
+            }
+    }
+}
+
+/// Сама капсула: тёмное стекло, тонкая светлая кромка, мягкая тень.
 struct PillCapsule<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        HStack(spacing: Space.s2) {
+        HStack(spacing: 10) {
             content()
         }
-        .nlType(.label)
-        .foregroundStyle(NL.textPrimary)
+        .font(.system(size: 13, weight: .medium))
+        .foregroundStyle(Pill.text)
         .lineLimit(1)
-        .padding(.horizontal, Space.s3)
-        .frame(height: 36)
+        .padding(.leading, 12)
+        .padding(.trailing, 16)
+        .frame(height: 40)
         .fixedSize()
-        .nlRaised(.lg)
+        .background {
+            Capsule(style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(Capsule(style: .continuous).fill(Color.black.opacity(0.62)))
+        }
+        .overlay {
+            Capsule(style: .continuous)
+                .strokeBorder(LinearGradient(colors: [.white.opacity(0.18), .white.opacity(0.05)],
+                                             startPoint: .top, endPoint: .bottom), lineWidth: 1)
+        }
+        .clipShape(Capsule(style: .continuous))
+        .shadow(color: .black.opacity(0.28), radius: 14, y: 6)
+    }
+}
+
+/// Красная точка записи - мягко дышит, пока идёт запись.
+private struct RecordingDot: View {
+    var silent = false
+    @State private var breathe = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Pill.red.opacity(0.35))
+                .frame(width: 16, height: 16)
+                .scaleEffect(breathe ? 1 : 0.5)
+                .opacity(breathe ? 0 : 1)
+            Circle().fill(Pill.red)
+                .frame(width: 8, height: 8)
+        }
+        .frame(width: 16, height: 16)
+        .opacity(silent ? 0.5 : 1)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) { breathe = true }
+        }
     }
 }
 
@@ -194,24 +283,25 @@ struct PillRecordingRow<Words: View>: View {
         let showWords = state.pillLiveText && hasWords
         let showDot = state.pillShowDot
             || !(state.pillShowTimer || state.pillShowWave || showWords)
-        HStack(spacing: Space.s2) {
+        HStack(spacing: 10) {
             if showDot {
-                Circle().fill(NL.danger).frame(width: 8, height: 8)
+                RecordingDot(silent: silent)
             }
             if state.pillShowTimer {
                 Text(MainView.clock(elapsed))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(NL.textPrimary)
+                    .font(.system(size: 13, weight: .medium).monospacedDigit())
+                    .foregroundStyle(Pill.text)
+                    .contentTransition(.numericText())
             }
             if state.pillShowWave {
-                Waveform(levels: levels, color: NL.iconSecondary, count: 12, barWidth: 2,
-                         spacing: 2, height: 14, floor: 0.15, fade: false)
-                    .opacity(silent ? 0.4 : 1.0)
+                Waveform(levels: levels, color: Pill.text, count: 14, barWidth: 2.5,
+                         spacing: 2, height: 18, floor: 0.12, fade: false)
+                    .opacity(silent ? 0.35 : 0.9)
             }
             // Бегущая строка расшифровки: видно каждое слово, не глядя в окно.
             if showWords {
                 if showDot || state.pillShowTimer || state.pillShowWave {
-                    NL.border.frame(width: 1, height: 14)
+                    Color.white.opacity(0.14).frame(width: 1, height: 16)
                 }
                 words()
                     .transition(.opacity)

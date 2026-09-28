@@ -265,15 +265,18 @@ extension View {
 
 // MARK: - движение
 
-/// 100 мс - наведение и нажатие, 150 - фокус и подсказки, 200 - меню,
-/// 300 - окна. Всегда ease-out на вход; ничего не пружинит и не растёт больше 1.
+/// Движение - пружины без отскока: быстро стартуют и мягко садятся, а
+/// прерванная на середине анимация продолжается от текущей скорости, без рывка.
+/// Наведение и нажатие - самые короткие, окна и разделы - длиннее.
 enum Motion {
-    static let fast = Animation.easeOut(duration: 0.10)
-    static let base = Animation.easeOut(duration: 0.15)
-    static let moderate = Animation.easeOut(duration: 0.20)
-    static let slow = Animation.easeOut(duration: 0.30)
-    /// Чистая смена положения (индикатор вкладки).
-    static let position = Animation.easeInOut(duration: 0.20)
+    static let fast = Animation.spring(response: 0.18, dampingFraction: 1)
+    static let base = Animation.spring(response: 0.26, dampingFraction: 0.95)
+    static let moderate = Animation.spring(response: 0.32, dampingFraction: 0.9)
+    static let slow = Animation.spring(response: 0.45, dampingFraction: 0.9)
+    /// Смена положения (индикатор вкладки) - с лёгкой живостью.
+    static let position = Animation.spring(response: 0.3, dampingFraction: 0.82)
+    /// Появление всплывающего (капсула записи).
+    static let pop = Animation.spring(response: 0.34, dampingFraction: 0.72)
 }
 
 extension View {
