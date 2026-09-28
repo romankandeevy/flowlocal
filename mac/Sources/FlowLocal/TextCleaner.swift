@@ -174,7 +174,7 @@ enum TextCleaner {
     static func clean(_ text: String, _ o: CleanupOptions) -> String {
         var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return s }
-        s = applyReplacements(s, o.replacements)
+        s = applyReplacements(s, builtInReplacements + o.replacements)
         guard o.level != .off || o.removeRepeats || !o.customFillers.isEmpty
               || o.capitalize || !o.trailingPeriod else { return s }
 
@@ -330,6 +330,23 @@ enum TextCleaner {
         }
         return result
     }
+
+    /// Английские названия, которые GigaAM пишет на слух по-своему. Собраны
+    /// по истории диктовок; свои замены из настроек идут после и могут их
+    /// перебить.
+    static let builtInReplacements: [(from: String, to: String)] = [
+        ("Flow Locol", "Flow Local"), ("Flo Local", "Flow Local"), ("Flow local", "Flow Local"),
+        ("Hub Satings", "Hub Settings"), ("Habsetings", "Hub Settings"), ("Hub Setings", "Hub Settings"),
+        ("клудкод", "Claude Code"), ("клод код", "Claude Code"), ("клоткод", "Claude Code"),
+        ("Snaphat", "Snapchat"), ("Снапчат", "Snapchat"),
+        ("гит-хап", "GitHub"), ("гитхаб", "GitHub"), ("гит хаб", "GitHub"),
+        ("Ритми", "README"), ("ридми", "README"),
+        ("вейп-кодер", "вайб-кодер"), ("вейп-кодинг", "вайб-кодинг"),
+        ("motion disiна", "motion design"), ("Моушн дизайн", "motion design"),
+        ("Sipl-плюс", "C++"), ("си плюс плюс", "C++"),
+        ("Visual Studio код", "Visual Studio Code"),
+        ("свифт", "Swift"), ("питон", "Python"), ("айосик", "iOS"),
+    ]
 
     private static func applyReplacements(_ text: String, _ pairs: [(from: String, to: String)]) -> String {
         var s = text

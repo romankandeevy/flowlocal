@@ -136,6 +136,35 @@ def claim_stdout() -> None:
     _proto = os.fdopen(fd, "w", buffering=1, encoding="utf-8")
 
 
+# --- стыки кусков -------------------------------------------------------------
+
+_SENT_END = ("." , "!", "?", "…", ":", ";")
+_CAP_WORD = re.compile(r"^([А-ЯЁ])([а-яё])")
+
+
+def join_parts(texts) -> str:
+    """Склейка кусков разбора на ходу.
+
+    Каждый кусок модель пишет как отдельную фразу - с заглавной. Кусок режется
+    и по короткой паузе посреди предложения, и тогда на стыке выходило «я
+    Хочу» (89 таких на 80 диктовок владельца). Если предыдущий кусок не
+    закончил предложение, у обычного русского слова заглавную убираем. «Я»,
+    аббревиатуры (второй символ заглавный) и латиницу не трогаем: там
+    заглавная чаще к месту.
+    """
+    out: list[str] = []
+    for t in texts:
+        t = (t or "").strip()
+        if not t:
+            continue
+        if out and not out[-1].endswith(_SENT_END):
+            m = _CAP_WORD.match(t)
+            if m and not t.startswith("Я "):
+                t = m.group(1).lower() + t[1:]
+        out.append(t)
+    return " ".join(out).strip()
+
+
 # --- язык --------------------------------------------------------------------
 
 _LATIN = re.compile(r"[A-Za-z]+")
@@ -249,7 +278,7 @@ def recognize(model, audio: np.ndarray) -> str:
         got = str(model.recognize(audio[a:b], sample_rate=SR) or "").strip()
         if got:
             parts.append(got)
-    return " ".join(parts).strip()
+    return join_parts(parts)
 
 
 # --- паузы -------------------------------------------------------------------
@@ -467,7 +496,7 @@ class Engine:
         text, got = self.rec_piece(audio[pos:], lang)
         if text:
             parts.append((text, got))
-        return " ".join(t for t, _ in parts).strip(), majority(parts)
+        return join_parts(t for t, _ in parts), majority(parts)
 
     def _has_work(self) -> bool:
         s = self.session
@@ -536,7 +565,7 @@ class Engine:
                     s.interim_at = 0
                     if text:
                         s.parts.append((text, lang))
-                    joined = " ".join(t for t, _ in s.parts).strip()
+                    joined = join_parts(t for t, _ in s.parts)
                 log(f"на ходу: {cut / SR:.1f} с (пауза {pause:.1f} с, {lang}), "
                     f"осталось {(total - start - cut) / SR:.1f} с")
                 # Уже разобранное - окну: расшифровка в ходе речи и счёт слов.
@@ -557,7 +586,7 @@ class Engine:
                     s.spec = (total, text, lang, loud)
                     s.interim = text
                     s.interim_at = total
-                    joined = " ".join(t for t, _ in s.parts).strip()
+                    joined = join_parts(t for t, _ in s.parts)
                 else:
                     return
             self._emit_partial(s, joined, text)
@@ -577,7 +606,7 @@ class Engine:
                 s.interim = text
                 s.interim_at = total
                 s.interim_next = time.time() + cost * INTERIM_COST_RATIO
-                joined = " ".join(t for t, _ in s.parts).strip()
+                joined = join_parts(t for t, _ in s.parts)
             self._emit_partial(s, joined, text)
 
     def _emit_partial(self, s: Session, final: str, interim: str) -> None:
@@ -611,7 +640,7 @@ class Engine:
                     text, lang = en_text, "en"
             if text:
                 parts.append((text, lang))
-        emit({"id": s.id, "text": " ".join(t for t, _ in parts).strip(),
+        emit({"id": s.id, "text": join_parts(t for t, _ in parts),
               "lang": majority(parts), "sec": round(time.time() - s.finish_t0, 3),
               "audio_sec": round(total / SR, 2), "streamed_sec": round(s.streamed / SR, 2),
               "tail_sec": 0.0 if spec_hit else round((total - start) / SR, 2),
