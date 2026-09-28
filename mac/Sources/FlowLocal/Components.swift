@@ -453,11 +453,10 @@ struct Waveform: View {
     }
 }
 
-/// Живая волна записи. Рисуется покадрово: каждый столбик сам плавно тянется
-/// к своей громкости - быстро вверх, мягко вниз, - поэтому ничего не
-/// прыгает и не появляется рывком. Центр берёт свежую громкость, края -
-/// чуть более старую: голос расходится от середины волной. В тишине
-/// столбики опадают до низкой ровной линии.
+/// Живая волна записи - бегущая полоса: новые столбики появляются справа и
+/// уезжают влево. Плавная: полоса едет непрерывно, на доли пикселя за кадр,
+/// а самый свежий столбик справа растёт вместе с голосом (быстро вверх, мягко
+/// вниз) и только потом уезжает. Левый край растворяется.
 struct LiveWaveform: View {
     var color: Color = NL.iconSecondary
     var count = 48
@@ -465,48 +464,59 @@ struct LiveWaveform: View {
     var spacing: CGFloat = 3
     var height: CGFloat = 64
     var floor: CGFloat = 0.1
+    /// Сколько секунд столбик проходит один шаг влево.
+    var step: Double = 0.075
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var bars = SmoothBars()
+    @State private var strip = SmoothStrip()
 
     var body: some View {
         TimelineView(.animation(minimumInterval: reduceMotion ? 0.2 : 1.0 / 60)) { context in
             Canvas { ctx, size in
                 let t = context.date.timeIntervalSinceReferenceDate
-                let values = bars.step(count: count, levels: LevelStore.shared.levels, at: t)
+                let (values, phase) = strip.step(count: count, level: Double(LevelStore.shared.levels.last ?? 0),
+                                                 at: t, step: step)
+                let pitch = barWidth + spacing
                 for (i, v) in values.enumerated() {
                     let h = max(barWidth, size.height * max(floor, CGFloat(v)))
-                    let rect = CGRect(x: CGFloat(i) * (barWidth + spacing), y: (size.height - h) / 2,
-                                      width: barWidth, height: h)
+                    let x = (CGFloat(i) - CGFloat(phase)) * pitch
+                    let rect = CGRect(x: x, y: (size.height - h) / 2, width: barWidth, height: h)
                     ctx.fill(Path(roundedRect: rect, cornerRadius: barWidth / 2), with: .color(color))
                 }
             }
         }
         .frame(width: CGFloat(count) * barWidth + CGFloat(max(0, count - 1)) * spacing, height: height)
+        .clipped()
+        .mask {
+            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.3)],
+                           startPoint: .leading, endPoint: .trailing)
+        }
         .accessibilityHidden(true)
     }
 }
 
-/// Сглаживание столбиков между кадрами. Живёт в @State: на перерисовку не влияет.
-final class SmoothBars {
+/// Состояние полосы между кадрами. Живёт в @State: на перерисовку не влияет.
+final class SmoothStrip {
     private var values: [Double] = []
+    private var live: Double = 0
+    private var phase: Double = 0
     private var last: Double?
 
-    func step(count: Int, levels: [Float], at time: Double) -> [Double] {
-        if values.count != count { values = Array(repeating: 0, count: count) }
+    /// Столбики слева направо и сдвиг полосы влево в долях шага.
+    func step(count: Int, level: Double, at time: Double, step: Double) -> ([Double], Double) {
+        if values.count != count + 1 { values = Array(repeating: 0, count: count + 1) }
         let dt = min(max(time - (last ?? time), 0), 0.1)
         last = time
-        let center = Double(count - 1) / 2
-        for i in 0..<count {
-            let d = abs(Double(i) - center) / max(center, 1)
-            // Край берёт громкость на ~0,25 с старше центра.
-            let back = Int((d * 5).rounded())
-            let idx = max(0, levels.count - 1 - back)
-            let level = levels.isEmpty ? 0 : Double(levels[idx])
-            let target = level * (1 - d * 0.45)
-            let speed = target > values[i] ? 14.0 : 6.0
-            values[i] += (target - values[i]) * (1 - exp(-speed * dt))
+        let speed = level > live ? 18.0 : 7.0
+        live += (level - live) * (1 - exp(-speed * dt))
+        phase += dt / step
+        while phase >= 1 {
+            values.removeFirst()
+            values.append(live)
+            phase -= 1
         }
-        return values
+        // Самый правый столбик ещё растёт вместе с голосом.
+        values[values.count - 1] = live
+        return (values, phase)
     }
 }
 
