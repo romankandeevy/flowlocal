@@ -165,12 +165,9 @@ cp backend/server.py backend/langdetect.py backend/requirements.txt "$APP/Conten
 # «Отменить удаление…» macOS подписывает по-русски, в тон нашим строкам.
 mkdir -p "$APP/Contents/Resources/ru.lproj"
 # Шрифты - системные SF Pro и SF Mono, своих файлов в сборке нет.
-# Иконка - Resources/AppIcon.icns (рисует tools/make_icon.py); нет её -
-# старый значок из old/.
+# Иконка - Resources/AppIcon.icns (рисует tools/make_icon.py).
 if [ -f Resources/AppIcon.icns ]; then
     cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-    /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$APP/Contents/Info.plist"
-elif sips -s format icns ../old/assets/FlowLocal.ico --out "$APP/Contents/Resources/AppIcon.icns" >/dev/null 2>&1; then
     /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$APP/Contents/Info.plist"
 fi
 

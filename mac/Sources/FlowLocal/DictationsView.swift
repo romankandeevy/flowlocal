@@ -83,7 +83,10 @@ private struct FeedColumn: View {
                     }
                     .padding(.horizontal, Space.s2)
                     .padding(.bottom, Space.s4)
-                    .motion(Motion.moderate, value: items.map(\.id))
+                    // Анимируем только появление и удаление диктовок. При поиске
+                    // список меняется на каждую букву, и анимация сотен строк
+                    // заметно тормозит ввод.
+                    .motion(Motion.moderate, value: query.isEmpty ? items.map(\.id) : [])
                 }
                 .focusable()
                 .focusEffectDisabled()

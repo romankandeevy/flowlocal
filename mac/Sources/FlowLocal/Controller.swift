@@ -222,7 +222,7 @@ final class Controller {
         }
         let ms = Int(Date().timeIntervalSince(t0) * 1000)
         if ms > 150 { Log.write("микрофон открывался \(ms) мс") }
-        if state.sounds { NSSound(named: "Tink")?.play() }
+        if state.sounds { Sounds.start?.play() }
         backend.begin(id, lang: state.langMode.rawValue)
     }
 
@@ -303,7 +303,7 @@ final class Controller {
     private func finish() {
         guard case .recording = state.phase else { return }
         let (all, rest) = stopRecording()
-        if state.sounds { NSSound(named: "Pop")?.play() }
+        if state.sounds { Sounds.stop?.play() }
         let id = session
         backend.audio(id, rest)
         let seconds = Double(all.count) / Recorder.sampleRate
@@ -525,6 +525,12 @@ final class Controller {
         hideWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + hideAfter, execute: work)
     }
+}
+
+/// Звуки начала и конца записи: загружаются один раз, а не на каждой диктовке.
+private enum Sounds {
+    static let start = NSSound(named: "Tink")
+    static let stop = NSSound(named: "Pop")
 }
 
 /// Прослушать запись из истории. NSSound хватает: WAV свой, короткий путь.

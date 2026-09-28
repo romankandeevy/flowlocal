@@ -51,11 +51,26 @@ MODELS_DIR = os.environ.get("FLOWLOCAL_MODELS") or os.path.expanduser(
 RU_MODEL = "gigaam-v3-e2e-rnnt"
 EN_MODEL = "nemo-parakeet-tdt-0.6b-v2"
 QUANT = "int8"
-# Два потока по умолчанию (замер на i5-8210Y, 2 ядра / 4 потока):
-# 28.8 с речи - 4.0 с на двух потоках против 5.9 с на четырёх.
-# Переопределение: FLOWLOCAL_THREADS (на Apple Silicon замерьте своё).
+# Потоки - по производительным ядрам, но не больше четырёх. Замеры:
+# i5-8210Y (2 ядра): 28.8 с речи - 4.0 с на двух потоках против 5.9 с на четырёх;
+# M4 (4P+6E): 91 с речи - 2.08 с на двух, 1.46 с на четырёх, 2.04 с на шести
+# (энергоэффективные ядра тормозят общий прогон).
+# Переопределение: FLOWLOCAL_THREADS.
+def _default_threads() -> int:
+    import subprocess
+    for key in ("hw.perflevel0.physicalcpu", "hw.physicalcpu"):
+        try:
+            n = int(subprocess.run(["sysctl", "-n", key], capture_output=True,
+                                   text=True, timeout=2).stdout.strip())
+            if n > 0:
+                return max(2, min(4, n))
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+    return 2
+
+
 try:
-    THREADS = max(1, int(os.environ.get("FLOWLOCAL_THREADS", "2")))
+    THREADS = max(1, int(os.environ.get("FLOWLOCAL_THREADS") or _default_threads()))
 except ValueError:
     THREADS = 2
 
