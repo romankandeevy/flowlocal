@@ -453,19 +453,60 @@ struct Waveform: View {
     }
 }
 
-/// Волна, которая сама слушает уровень микрофона: перерисовывается только
-/// она, а не всё окно.
+/// Живая волна записи. Рисуется покадрово: каждый столбик сам плавно тянется
+/// к своей громкости - быстро вверх, мягко вниз, - поэтому ничего не
+/// прыгает и не появляется рывком. Центр берёт свежую громкость, края -
+/// чуть более старую: голос расходится от середины волной. В тишине
+/// столбики опадают до низкой ровной линии.
 struct LiveWaveform: View {
-    @ObservedObject private var meter = LevelStore.shared
     var color: Color = NL.iconSecondary
     var count = 48
     var barWidth: CGFloat = 3
     var spacing: CGFloat = 3
     var height: CGFloat = 64
+    var floor: CGFloat = 0.1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var bars = SmoothBars()
 
     var body: some View {
-        Waveform(levels: meter.levels, color: color, count: count, barWidth: barWidth,
-                 spacing: spacing, height: height)
+        TimelineView(.animation(minimumInterval: reduceMotion ? 0.2 : 1.0 / 60)) { context in
+            Canvas { ctx, size in
+                let t = context.date.timeIntervalSinceReferenceDate
+                let values = bars.step(count: count, levels: LevelStore.shared.levels, at: t)
+                for (i, v) in values.enumerated() {
+                    let h = max(barWidth, size.height * max(floor, CGFloat(v)))
+                    let rect = CGRect(x: CGFloat(i) * (barWidth + spacing), y: (size.height - h) / 2,
+                                      width: barWidth, height: h)
+                    ctx.fill(Path(roundedRect: rect, cornerRadius: barWidth / 2), with: .color(color))
+                }
+            }
+        }
+        .frame(width: CGFloat(count) * barWidth + CGFloat(max(0, count - 1)) * spacing, height: height)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Сглаживание столбиков между кадрами. Живёт в @State: на перерисовку не влияет.
+final class SmoothBars {
+    private var values: [Double] = []
+    private var last: Double?
+
+    func step(count: Int, levels: [Float], at time: Double) -> [Double] {
+        if values.count != count { values = Array(repeating: 0, count: count) }
+        let dt = min(max(time - (last ?? time), 0), 0.1)
+        last = time
+        let center = Double(count - 1) / 2
+        for i in 0..<count {
+            let d = abs(Double(i) - center) / max(center, 1)
+            // Край берёт громкость на ~0,25 с старше центра.
+            let back = Int((d * 5).rounded())
+            let idx = max(0, levels.count - 1 - back)
+            let level = levels.isEmpty ? 0 : Double(levels[idx])
+            let target = level * (1 - d * 0.45)
+            let speed = target > values[i] ? 14.0 : 6.0
+            values[i] += (target - values[i]) * (1 - exp(-speed * dt))
+        }
+        return values
     }
 }
 

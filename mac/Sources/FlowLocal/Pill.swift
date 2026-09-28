@@ -294,8 +294,8 @@ struct PillRecordingRow<Words: View>: View {
                     .contentTransition(.numericText())
             }
             if state.pillShowWave {
-                Waveform(levels: levels, color: Pill.text, count: 14, barWidth: 2.5,
-                         spacing: 2, height: 18, floor: 0.12, fade: false)
+                LiveWaveform(color: Pill.text, count: 13, barWidth: 2.5,
+                             spacing: 2.5, height: 18, floor: 0.12)
                     .opacity(silent ? 0.35 : 0.9)
             }
             // Бегущая строка расшифровки: видно каждое слово, не глядя в окно.
