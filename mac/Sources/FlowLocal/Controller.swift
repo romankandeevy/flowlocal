@@ -189,6 +189,8 @@ final class Controller {
         LevelStore.shared.reset()
         state.phase = .recording(since: Date(), locked: locked)
         if state.showPill { pill.present() }
+        // Выключается: defaults write com.flowlocal.mac pauseMedia -bool false
+        if UserDefaults.standard.object(forKey: "pauseMedia") as? Bool ?? true { MediaPause.begin() }
         HotkeyCenter.shared.register(id: escapeID, keyCode: UInt32(kVK_Escape), modifiers: 0,
                                      pressed: { [weak self] in self?.cancel() })
         // Микрофон - следующим оборотом цикла, чтобы капсула успела
@@ -273,6 +275,7 @@ final class Controller {
         state.phase = .idle
         LiveWords.shared.reset()
         pill.dismiss()
+        MediaPause.end()
     }
 
     /// «Отменить» на экране распознавания: ответ, если придёт, уже чужой.
@@ -283,6 +286,7 @@ final class Controller {
         state.phase = .idle
         LiveWords.shared.reset()
         pill.dismiss()
+        MediaPause.end()
         Log.write("распознавание отменено")
     }
 
@@ -513,6 +517,8 @@ final class Controller {
     private func flash(_ phase: Phase, hideAfter: Double = 2) {
         // Идёт запись - её плашка важнее любого сообщения.
         if case .recording = state.phase { return }
+        // Каждая диктовка кончается сообщением - тут и возвращаем звук.
+        MediaPause.end()
         hideWork?.cancel()
         state.phase = phase
         if state.showPill { pill.present() }

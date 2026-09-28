@@ -13,7 +13,7 @@ struct DictationsView: View {
     var body: some View {
         HStack(spacing: 0) {
             FeedColumn(actions: actions)
-                .frame(width: 360)
+                .frame(width: 330)
             NL.border.frame(width: 1)
             ReaderPane(actions: actions)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -261,9 +261,11 @@ private struct FeedRow: View {
             }
         }
         .padding(.horizontal, Space.s3)
-        .padding(.vertical, Space.s2 + 2)
-        .background(selected ? NL.selected : hover ? NL.hover : .clear,
-                    in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .padding(.vertical, Space.s2 + 1)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(selected ? NL.accent.opacity(0.16) : hover ? NL.hover.opacity(0.6) : .clear)
+        }
         .contentShape(Rectangle())
         .onTapGesture(perform: tap)
         .onHover { hover = $0 }
@@ -324,13 +326,10 @@ private struct DictationDock: View {
                 .transition(.opacity)
             }
         }
-        .padding(Space.s3)
+        .padding(mode == .idle ? Space.s1 : Space.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(NL.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                .strokeBorder(mode == .live ? NL.borderStrong : NL.border, lineWidth: 1)
-        }
+        .background(mode == .idle ? Color.clear : NL.surface,
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .motion(Motion.slow, value: mode)
     }
 
@@ -345,26 +344,33 @@ private struct IdleDock: View {
     let actions: AppActions
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.s3) {
-            HStack(spacing: Space.s3) {
-                Button(action: actions.toggleDictation) {
-                    Label("Диктовать", systemImage: "mic")
-                }
-                .nlButton(.primary)
-                .disabled(!state.canDictate)
-                VStack(alignment: .leading, spacing: Space.s0_5) {
-                    Text("или удерживайте")
-                        .nlType(.caption)
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Button(action: actions.toggleDictation) {
+                HStack(spacing: Space.s3) {
+                    MicOrb()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Диктовать")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(NL.textPrimary)
+                        HStack(spacing: 4) {
+                            Text("или удерживайте")
+                            Text(state.hotkey.label)
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                        }
+                        .font(.system(size: 11))
                         .foregroundStyle(NL.textTertiary)
-                    ShortcutValue(preset: state.hotkey)
+                    }
+                    Spacer(minLength: 0)
                 }
-                .accessibilityElement(children: .combine)
-                Spacer(minLength: 0)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .disabled(!state.canDictate)
+            .accessibilityLabel("Диктовать")
             if !state.axTrusted {
                 HStack(spacing: Space.s1_5) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 11))
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
                         .foregroundStyle(NL.textWarning)
                     Text("Текст не вставится сам — только в буфер.")
                         .nlType(.caption)
@@ -373,10 +379,30 @@ private struct IdleDock: View {
                     Button("Разрешить", action: openAccessibilityAccess)
                         .buttonStyle(NLLinkButtonStyle())
                 }
-                .padding(.top, Space.s3)
-                .overlay(alignment: .top) { NL.borderSubtle.frame(height: 1) }
             }
         }
+    }
+}
+
+/// Круглая кнопка микрофона: акцентный круг с мягким свечением; при
+/// наведении чуть подрастает, при нажатии - проседает.
+private struct MicOrb: View {
+    @State private var hover = false
+
+    var body: some View {
+        Image(systemName: "mic.fill")
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 40, height: 40)
+            .background {
+                Circle().fill(LinearGradient(colors: [NL.accentHover, NL.accent],
+                                             startPoint: .top, endPoint: .bottom))
+            }
+            .overlay { Circle().strokeBorder(.white.opacity(0.18), lineWidth: 1) }
+            .shadow(color: NL.accent.opacity(hover ? 0.55 : 0.3), radius: hover ? 10 : 6, y: 2)
+            .scaleEffect(hover ? 1.06 : 1)
+            .onHover { hover = $0 }
+            .animation(Motion.base, value: hover)
     }
 }
 
@@ -641,7 +667,8 @@ private struct EntryReader: View {
                                 action: canRetry ? { actions.rerecognize(entry) } : nil)
                     } else {
                         Text(showRaw ? (entry.raw ?? entry.text) : entry.text)
-                            .nlType(.bodyLg)
+                            .font(.system(size: 18))
+                            .lineSpacing(7)
                             .foregroundStyle(showRaw ? NL.textSecondary : NL.textPrimary)
                             .contentTransition(.opacity)
                             .textSelection(.enabled)
@@ -650,61 +677,82 @@ private struct EntryReader: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Space.s8)
+                .padding(.horizontal, Space.s8 + Space.s2)
                 .padding(.top, Space.s8)
-                .padding(.bottom, Space.s6)
+                .padding(.bottom, 88)
             }
-            actionBar
+        }
+        .overlay(alignment: .bottom) {
+            actionBar.padding(.bottom, Space.s5)
         }
     }
 
+    /// Действия - плавающей стеклянной панелью значков внизу по центру;
+    /// подписи - во всплывающих подсказках.
     private var actionBar: some View {
-        HStack(spacing: Space.s2) {
-            Button { actions.paste(entry) } label: {
-                Label("Вставить", systemImage: "arrow.turn.down.left")
+        HStack(spacing: 2) {
+            BarButton(symbol: "arrow.turn.down.left", help: "Вставить туда, где курсор (↩)") {
+                actions.paste(entry)
             }
-            .nlButton(.secondary, .sm)
-            .help("Вставить в окно, где был курсор (↩)")
             .disabled(entry.failed)
-            Button {
+            BarButton(symbol: copied ? "checkmark" : "doc.on.doc", help: "Скопировать") {
                 Clipboard.copy([entry])
                 withMotion(Motion.base) { copied = true }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
                     withMotion(Motion.base) { copied = false }
                 }
-            } label: {
-                Label(copied ? "Скопировано" : "Скопировать", systemImage: copied ? "checkmark" : "doc.on.doc")
-                    .contentTransition(.opacity)
             }
-            .nlButton(.secondary, .sm)
             .disabled(entry.failed)
             if AudioStore.exists(entry.audio) {
-                NL.borderSubtle.frame(width: 1, height: 16).padding(.horizontal, Space.s1)
-                Button { actions.play(entry) } label: {
-                    Label(state.playing == entry.id ? "Остановить" : "Прослушать",
-                          systemImage: state.playing == entry.id ? "stop.fill" : "play.fill")
+                Divider().frame(height: 18).padding(.horizontal, 4)
+                BarButton(symbol: state.playing == entry.id ? "stop.fill" : "play.fill",
+                          help: state.playing == entry.id ? "Остановить" : "Прослушать (пробел)") {
+                    actions.play(entry)
                 }
-                .nlButton(.ghost, .sm)
-                .help("Прослушать запись (пробел)")
                 if state.rerecognizing.contains(entry.id) {
-                    StatusLabel(title: "Распознаю…", kind: .busy)
+                    ProgressView().controlSize(.small).frame(width: 34, height: 34)
                 } else {
-                    Button { actions.rerecognize(entry) } label: {
-                        Label("Распознать заново", systemImage: "arrow.clockwise")
+                    BarButton(symbol: "arrow.clockwise", help: "Распознать заново") {
+                        actions.rerecognize(entry)
                     }
-                    .nlButton(.ghost, .sm)
                 }
             }
-            Spacer(minLength: Space.s2)
-            Button { state.delete([entry.id], undo: undo) } label: {
-                Label("Удалить", systemImage: "trash")
+            Divider().frame(height: 18).padding(.horizontal, 4)
+            BarButton(symbol: "trash", help: "Удалить (⌘Z — вернуть)", tint: NL.textDanger) {
+                state.delete([entry.id], undo: undo)
             }
-            .nlIconButton(.sm)
-            .help("Удалить диктовку (⌘Z — вернуть)")
         }
-        .padding(.horizontal, Space.s6)
-        .padding(.vertical, Space.s3)
-        .overlay(alignment: .top) { NL.border.frame(height: 1) }
+        .padding(5)
+        .background(.regularMaterial, in: Capsule(style: .continuous))
+        .overlay { Capsule(style: .continuous).strokeBorder(NL.border, lineWidth: 1) }
+        .shadow(color: .black.opacity(0.18), radius: 16, y: 6)
+    }
+}
+
+/// Кнопка-значок плавающей панели: круг подсветки при наведении.
+private struct BarButton: View {
+    let symbol: String
+    let help: String
+    var tint: Color = NL.textPrimary
+    let action: () -> Void
+    @State private var hover = false
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(tint.opacity(enabled ? 1 : 0.35))
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(hover && enabled ? NL.hover : .clear))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
+        .onHover { hover = $0 }
+        .animation(Motion.fast, value: hover)
     }
 }
 
