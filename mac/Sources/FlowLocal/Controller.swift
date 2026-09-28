@@ -189,8 +189,6 @@ final class Controller {
         LevelStore.shared.reset()
         state.phase = .recording(since: Date(), locked: locked)
         if state.showPill { pill.present() }
-        // Выключается: defaults write com.flowlocal.mac pauseMedia -bool false
-        if UserDefaults.standard.object(forKey: "pauseMedia") as? Bool ?? true { MediaPause.begin() }
         HotkeyCenter.shared.register(id: escapeID, keyCode: UInt32(kVK_Escape), modifiers: 0,
                                      pressed: { [weak self] in self?.cancel() })
         // Микрофон - следующим оборотом цикла, чтобы капсула успела
@@ -224,12 +222,18 @@ final class Controller {
         }
         let ms = Int(Date().timeIntervalSince(t0) * 1000)
         if ms > 150 { Log.write("микрофон открывался \(ms) мс") }
+        // Медиа - на паузу до своего «динь»: MediaPause судит об игре по
+        // занятому звуковому выходу, и наш звук сбил бы проверку.
+        // Выключается: defaults write com.flowlocal.mac pauseMedia -bool false
+        if UserDefaults.standard.object(forKey: "pauseMedia") as? Bool ?? true { MediaPause.begin() }
         if state.sounds { Sounds.start?.play() }
         backend.begin(id, lang: state.langMode.rawValue)
+
     }
 
     private func onTick() {
         guard case let .recording(since, locked) = state.phase else { return }
+        recorder.checkAlive()
         backend.audio(session, recorder.drain())
         if Date().timeIntervalSince(since) > maxRecordSec {
             Log.write("запись упёрлась в предел \(Int(maxRecordSec)) с")

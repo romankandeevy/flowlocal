@@ -16,6 +16,8 @@ final class Recorder {
     private var converter: AVAudioConverter?
     private var samples: [Float] = []
     private var sent = 0
+    /// Когда пришёл последний кусок звука - для сторожа мёртвого микрофона.
+    private var lastBuffer = Date()
     // Только главный поток.
     private var engine: AVAudioEngine?
     private var observer: NSObjectProtocol?
@@ -46,9 +48,24 @@ final class Recorder {
         lock.lock()
         samples.removeAll(keepingCapacity: true)
         sent = 0
+        lastBuffer = Date()
         lock.unlock()
         restarts = 0
-        try startEngine()
+        do {
+            try startEngine()
+        } catch where deviceUID != nil {
+            // Выбранный микрофон не запускается (встроенный при подключённых
+            // наушниках даёт -10868) - запись важнее выбора: берём системный.
+            Log.write("выбранный микрофон не открылся (\(error.localizedDescription)) - беру системный")
+            teardown()
+            deviceUID = nil
+            try startEngine()
+        }
+        // Отсчёт сторожа - от поднятого движка: на Bluetooth открытие идёт
+        // до нескольких секунд, и это не тишина.
+        lock.lock()
+        lastBuffer = Date()
+        lock.unlock()
         running = true
     }
 
@@ -76,7 +93,12 @@ final class Recorder {
         lock.lock()
         converter = conv
         lock.unlock()
-        input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buf, _ in
+        // Формат отвода - nil, то есть «какой есть у узла сейчас». Явный
+        // формат после смены устройства бывает устаревшим, и installTap
+        // бросает исключение Objective-C - падение всего приложения (так и
+        // было со встроенным микрофоном при подключённых наушниках).
+        // Конвертер подстраивается под формат пришедшего куска в consume().
+        input.installTap(onBus: 0, bufferSize: 2048, format: nil) { [weak self] buf, _ in
             self?.consume(buf)
         }
         engine.prepare()
@@ -154,9 +176,17 @@ final class Recorder {
     // teardown(), - иначе остановка посреди куска читала бы освобождённый объект.
     private func consume(_ buf: AVAudioPCMBuffer) {
         lock.lock()
-        guard let converter else {
+        guard var converter else {
             lock.unlock()
             return
+        }
+        if converter.inputFormat != buf.format {
+            guard let fresh = AVAudioConverter(from: buf.format, to: target) else {
+                lock.unlock()
+                return
+            }
+            self.converter = fresh
+            converter = fresh
         }
         let ratio = target.sampleRate / buf.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buf.frameLength) * ratio + 64)
@@ -184,11 +214,49 @@ final class Recorder {
         }
         let chunk = UnsafeBufferPointer(start: ch, count: Int(out.frameLength))
         samples.append(contentsOf: chunk)
+        lastBuffer = Date()
         var sum: Float = 0
         for v in chunk { sum += v * v }
         let rms = sqrt(sum / Float(chunk.count))
         lock.unlock()
         onLevel?(rms)
+    }
+
+    /// Сторож: движок «работает», а звук не идёт. Так бывает, когда
+    /// Bluetooth-наушники переключают профиль (пауза музыки, звонок):
+    /// уведомления о смене конфигурации нет, формат прежний, а отвод молчит.
+    /// Звали раз в 0,25 с; тишина дольше секунды - поднимаем движок заново.
+    func checkAlive() {
+        guard running, !restartPending else { return }
+        lock.lock()
+        let silent = Date().timeIntervalSince(lastBuffer)
+        lock.unlock()
+        guard silent > 1.0 else { return }
+        guard restarts < 3 else {
+            Log.write("микрофон молчит и не поднимается - останавливаю запись")
+            running = false
+            onFailure?(Recorder.error("Микрофон не отдаёт звук"))
+            return
+        }
+        restarts += 1
+        // Выбранный микрофон молчит - обычно он не системный вход (скажем,
+        // встроенный при подключённых наушниках), и такой движок звука не
+        // отдаёт. До конца записи берём системный.
+        if deviceUID != nil {
+            Log.write("выбранный микрофон молчит - переключаюсь на системный")
+            deviceUID = nil
+        }
+        Log.write(String(format: "микрофон молчит %.1f с - перезапускаю движок", silent))
+        teardown()
+        lock.lock()
+        lastBuffer = Date()
+        lock.unlock()
+        do {
+            try startEngine()
+        } catch {
+            Log.write("микрофон не перезапустился: \(error.localizedDescription)")
+            onFailure?(error)
+        }
     }
 
     /// Новое с прошлого вызова - для разбора на ходу.
