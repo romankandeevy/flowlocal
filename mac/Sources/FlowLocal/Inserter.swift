@@ -39,11 +39,14 @@ enum Inserter {
     private static var ownsClipboard = false
     private static var pendingRestore: DispatchWorkItem?
 
-    static func insert(_ text: String, completion: @escaping (InsertOutcome) -> Void) {
+    /// keep: вставленный текст остаётся в буфере, прежний не возвращаем.
+    static func insert(_ text: String, keep: Bool = false, completion: @escaping (InsertOutcome) -> Void) {
         let pb = NSPasteboard.general
         guard trusted else {
             // Без разрешения CGEventPost молчит. Диктовку не теряем: она в
-            // буфере, пилюля скажет «Cmd+V».
+            // буфере, пилюля скажет «Cmd+V». Прежний буфер не возвращаем:
+            // раньше возврат через 0.3 с затирал диктовку, и ⌘V руками
+            // вставлял старое.
             pendingRestore?.cancel()
             pendingRestore = nil
             ownsClipboard = false
@@ -55,7 +58,12 @@ enum Inserter {
         }
         pendingRestore?.cancel()
         pendingRestore = nil
-        if !ownsClipboard {
+        // Снимок нужен только для возврата; оставляем текст в буфере - не
+        // тратим время на копию чужого буфера (картинки, Office).
+        if keep {
+            saved = nil
+            ownsClipboard = false
+        } else if !ownsClipboard {
             saved = snapshot(pb)
         }
         waitModifiersReleased {
@@ -72,6 +80,11 @@ enum Inserter {
                 let ours = pb.changeCount
                 postCmdV()
                 completion(.pasted)
+                if keep {
+                    ownsClipboard = false
+                    saved = nil
+                    return
+                }
                 let work = DispatchWorkItem {
                     pendingRestore = nil
                     ownsClipboard = false

@@ -6,8 +6,7 @@ import Foundation
 // recordings.py в old/ - там это «нераспознанные записи».
 enum AudioStore {
     static let dir: URL = {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let d = base.appendingPathComponent("FlowLocal/Recordings", isDirectory: true)
+        let d = Paths.recordings
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d
     }()
@@ -67,5 +66,14 @@ enum AudioStore {
     static func delete(_ name: String?) {
         guard let name else { return }
         try? FileManager.default.removeItem(at: url(name))
+    }
+
+    /// Убрать записи, на которые больше не ссылается история. Удалённая
+    /// диктовка держит звук до следующего запуска - ради «Отменить».
+    static func purge(keeping names: Set<String>) {
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.pathExtension == "wav" && !names.contains(file.lastPathComponent) {
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 }

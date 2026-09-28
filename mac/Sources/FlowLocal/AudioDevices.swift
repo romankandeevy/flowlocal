@@ -10,6 +10,18 @@ struct AudioDevice: Identifiable, Hashable {
 // Микрофоны через CoreAudio: у AVAudioEngine нет своего списка устройств, а
 // выбрать вход можно только свойством аудиоюнита по AudioDeviceID.
 enum AudioDevices {
+    /// Список устройств или устройство по умолчанию поменялись. Главный поток.
+    static func onChange(_ handler: @escaping () -> Void) {
+        for selector in [kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultInputDevice] {
+            var addr = AudioObjectPropertyAddress(mSelector: selector,
+                                                  mScope: kAudioObjectPropertyScopeGlobal,
+                                                  mElement: kAudioObjectPropertyElementMain)
+            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &addr, .main) { _, _ in
+                handler()
+            }
+        }
+    }
+
     static func inputs() -> [AudioDevice] {
         var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices,
                                               mScope: kAudioObjectPropertyScopeGlobal,

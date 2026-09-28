@@ -1,143 +1,298 @@
 import AppKit
 import SwiftUI
 
-// Дизайн-система Apple System Dark (prog/_materials/Apple Design system,
-// «macOS utility hub · dark only»). Apple документирует цвета ролями, а не
-// hex, но приложение всегда тёмное - поэтому роли тёмной темы измерены и
-// зафиксированы здесь один раз. Правила, которые держат токены:
-//   - глубина - уровнем фона (#000 -> #1C1C1E -> #2C2C2E -> #3A3A3C), а не
-//     рамкой и не тенью: карточке на чёрном граница не нужна;
-//   - один акцент на экран - systemBlue для интерактива; состояние -
-//     green / orange / red; yellow и mint текстом не бывают;
-//   - смысл несут label и secondaryLabel; tertiary - плейсхолдеры,
-//     quaternary - выключенное; серого текста ниже 60 % нет;
-//   - SF Pro: 400 для текста, 600 для заголовков и кнопок; без Bold, капса
-//     и трекинга вразрядку; SF Mono - только таймеры, цифры табличные;
-//   - радиусы по роли: 4 пункт меню, 6 кнопка и поле, 10 поповер, 12 карточка.
-struct Palette {
-    // Фоны и уровни
-    let bg = Color(rgb: 0x000000)           // systemBackground
-    let surface = Color(rgb: 0x1C1C1E)      // elevated/1 - карточка
-    let surface2 = Color(rgb: 0x2C2C2E)     // elevated/2 - клавиша, поле
-    let surface3 = Color(rgb: 0x3A3A3C)     // elevated/3 - наведение
-    let gray2 = Color(rgb: 0x636366)        // systemGray2 - выбранный сегмент
+// Дизайн-система Northline (v2), перенесённая в SwiftUI. Источник правды -
+// tokens.json из _materials/northline-design-system-v2: цвета, шрифтовая
+// шкала, отступы, радиусы, тени и движение здесь - те же значения, под
+// теми же семантическими именами. В коде экранов - только эти имена,
+// никаких «сырых» цветов и размеров шрифта.
 
-    // Fills - подложки контролов поверх любого уровня
-    let fill1 = Color(rgb: 0x787880, 0.36)
-    let fill2 = Color(rgb: 0x787880, 0.32)
-    let fill3 = Color(rgb: 0x787880, 0.24)
-    let fill4 = Color(rgb: 0x787880, 0.18)
+// MARK: - цвет
 
-    // Разделители
-    let separator = Color(rgb: 0x545458, 0.65)
-    let separatorOpaque = Color(rgb: 0x38383A)   // на #2C2C2E и выше
-    let islandEdge = Color(rgb: 0x545458, 0.4)
+private func dynamic(_ light: NSColor, _ dark: NSColor) -> Color {
+    Color(nsColor: NSColor(name: nil) { appearance in
+        (appearance.bestMatch(from: [.aqua, .darkAqua]) ?? .aqua) == .darkAqua ? dark : light
+    })
+}
+
+private func hex(_ value: UInt32, _ alpha: CGFloat = 1) -> NSColor {
+    NSColor(srgbRed: CGFloat((value >> 16) & 0xFF) / 255,
+            green: CGFloat((value >> 8) & 0xFF) / 255,
+            blue: CGFloat(value & 0xFF) / 255,
+            alpha: alpha)
+}
+
+private func black(_ a: CGFloat) -> NSColor { NSColor(srgbRed: 0, green: 0, blue: 0, alpha: a) }
+private func white(_ a: CGFloat) -> NSColor { NSColor(srgbRed: 1, green: 1, blue: 1, alpha: a) }
+
+/// Семантические цвета Northline. Светлая тема - значения `:root`, тёмная -
+/// `[data-theme="dark"]` из tokens.css.
+enum NL {
+    // Фоны
+    static let canvas = dynamic(hex(0xFDFDFE), hex(0x0D0D0E))
+    static let surface = dynamic(hex(0xF8F8F9), hex(0x131415))
+    static let subtle = dynamic(hex(0xF1F2F3), hex(0x1C1D1E))
+    static let hover = dynamic(black(0.08), white(0.10))
+    static let active = dynamic(black(0.12), white(0.15))
+    static let selected = dynamic(hex(0xEAF2FE), hex(0x161D28))
+    static let disabled = dynamic(hex(0xF1F2F3), hex(0x1C1D1E))
+
+    static let accent = dynamic(hex(0x2D69C0), hex(0x2368C9))
+    static let accentHover = dynamic(hex(0x3268B5), hex(0x4F8CE5))
+    static let accentActive = dynamic(hex(0x1755AA), hex(0x0853B2))
+    static let accentSubtle = dynamic(hex(0xEAF2FE), hex(0x161D28))
+
+    static let success = dynamic(hex(0x007A51), hex(0x007A4D))
+    static let successSubtle = dynamic(hex(0xE9F5EF), hex(0x14201B))
+    static let warning = dynamic(hex(0xCC8700), hex(0xCF8500))
+    static let warningSubtle = dynamic(hex(0xF9F0E5), hex(0x231B11))
+    static let danger = dynamic(hex(0xBF3D27), hex(0xC13A24))
+    static let dangerSubtle = dynamic(hex(0xFFEDE9), hex(0x271916))
+    static let dangerHover = dynamic(hex(0xB03D2A), hex(0xDB614B))
+    static let dangerActive = dynamic(hex(0xA8250E), hex(0xA92008))
+    static let infoSubtle = dynamic(hex(0xE9F4FA), hex(0x141F24))
 
     // Текст
-    let text = Color(rgb: 0xFFFFFF)
-    let textMuted = Color(rgb: 0xEBEBF5, 0.6)
-    let textTertiary = Color(rgb: 0xEBEBF5, 0.3)
-    let textQuaternary = Color(rgb: 0xEBEBF5, 0.18)
+    static let textPrimary = dynamic(hex(0x202224), hex(0xE5E8EC))
+    static let textSecondary = dynamic(hex(0x4A4D52), hex(0xA6ABB2))
+    static let textTertiary = dynamic(hex(0x646970), hex(0x858D97))
+    static let textDisabled = dynamic(hex(0xAAAEB4), hex(0x5E646C))
+    static let textPlaceholder = dynamic(hex(0x757B83), hex(0x737B86))
+    static let textOnAccent = Color.white
+    static let textAccent = dynamic(hex(0x2B4D7F), hex(0x85ADE7))
+    static let textSuccess = dynamic(hex(0x125B42), hex(0x76BC9E))
+    static let textWarning = dynamic(hex(0x6A4400), hex(0xCDA366))
+    static let textDanger = dynamic(hex(0x7C3326), hex(0xE39382))
+    static let textInfo = dynamic(hex(0x15546E), hex(0x78B4D1))
 
-    // Системные цвета, тёмные варианты
-    let accent = Color(rgb: 0x0A84FF)
-    let success = Color(rgb: 0x30D158)
-    let warning = Color(rgb: 0xFF9F0A)
-    let danger = Color(rgb: 0xFF453A)
+    // Иконки - те же ступени, что у текста
+    static let iconPrimary = textPrimary
+    static let iconSecondary = textSecondary
+    static let iconTertiary = textTertiary
+    static let iconAccent = textAccent
 
-    static let dark = Palette()
+    // Границы: всегда 1pt, полупрозрачные - кроме фокуса и ошибки
+    static let border = dynamic(black(0.10), white(0.12))
+    static let borderSubtle = dynamic(black(0.06), white(0.06))
+    static let borderStrong = dynamic(black(0.18), white(0.18))
+    static let borderHover = dynamic(black(0.15), white(0.15))
+    static let borderFocus = dynamic(hex(0x2D69C0), hex(0x4F8CE5))
+    static let borderDanger = dynamic(hex(0xBF3D27), hex(0xC13A24))
+    static let ringFocus = dynamic(hex(0x2D69C0, 0.35), hex(0x4F8CE5, 0.45))
 
-    /// Подложка под цвет состояния - для тегов и значков.
-    func wash(_ color: Color) -> Color { color.opacity(0.18) }
+    /// Тонкий верхний блик поднятых поверхностей - только в тёмной теме.
+    static let raisedHighlight = dynamic(white(0), white(0.04))
 }
 
-private extension Color {
-    init(rgb: UInt32, _ alpha: Double = 1) {
-        self.init(.sRGB, red: Double((rgb >> 16) & 0xFF) / 255, green: Double((rgb >> 8) & 0xFF) / 255,
-                  blue: Double(rgb & 0xFF) / 255, opacity: alpha)
-    }
-}
+// MARK: - шрифт
 
-// «05 · Радиусы»: 4 - пункт меню, 6 - кнопка и поле, 10 - поповер и окно,
-// 12 - лист и карточка; островок и тег - капсула.
-enum Radius {
-    static let menu: CGFloat = 4
-    static let control: CGFloat = 6
-    static let popover: CGFloat = 10
-    static let card: CGFloat = 12
-}
-
-// Сетка 8 pt с шагом 4.
-enum Space {
-    static let s1: CGFloat = 4
-    static let s2: CGFloat = 8
-    static let s3: CGFloat = 12
-    static let s4: CGFloat = 16
-    static let s5: CGFloat = 24
-    static let s6: CGFloat = 32
-    static let s7: CGFloat = 48
-}
-
-// «05 · Метрика»: ряд списка 28, кнопка 22 / 28. Строка заголовка - 52,
-// как у окна с унифицированной панелью инструментов.
-enum Metric {
-    static let toolbar: CGFloat = 52
-    static let row: CGFloat = 28
-    static let button: CGFloat = 28
-    static let buttonSmall: CGFloat = 22
-    /// Разделитель строк настроек начинается от текста: поле 16 + плашка 24 + зазор 12.
-    static let rowTextInset: CGFloat = 52
-}
-
-// «03 · Типографика · SF Pro»: кегль/строка и вес. 13 pt - базовый размер
-// интерфейса macOS, 10 pt - нижняя граница и только для служебных меток.
-enum TextStyle {
-    case largeTitle, title1, title2, title3, headline, body, subheadline, footnote, mono
+/// Шкала Northline: размер / межстрочный / трекинг / насыщенность. Один
+/// шрифт на всё - системный; моно - только для цифр и сочетаний клавиш.
+enum NLType {
+    case display, headingLg, heading, headingSm, headingXs
+    case bodyLg, body, bodySm, label, labelSm, caption, labelXs, overline, numeric
 
     var size: CGFloat {
         switch self {
-        case .largeTitle: return 26
-        case .title1: return 22
-        case .title2: return 17
-        case .title3: return 15
-        case .headline, .body: return 13
-        case .subheadline: return 11
-        case .footnote: return 10
-        case .mono: return 12
+        case .display: return 40
+        case .headingLg: return 24
+        case .heading: return 20
+        case .headingSm, .bodyLg: return 16
+        case .headingXs, .body, .numeric: return 14
+        case .bodySm, .label: return 13
+        case .labelSm, .caption: return 12
+        case .labelXs, .overline: return 11
         }
     }
 
-    var weight: Font.Weight { self == .headline ? .semibold : .regular }
-
-    /// Межстрочное из таблицы: 26/32, 22/26, 17/22, 15/20, 13/16, 11/14, 10/13.
-    var leading: CGFloat {
+    var lineHeight: CGFloat {
         switch self {
-        case .largeTitle: return 6
-        case .title1: return 4
-        case .title2, .title3: return 5
-        case .headline, .body, .subheadline, .footnote, .mono: return 3
+        case .display: return 44
+        case .headingLg: return 28.8
+        case .heading: return 25
+        case .headingSm: return 22.4
+        case .bodyLg: return 24.8
+        case .headingXs: return 19.6
+        case .body, .numeric: return 21.7
+        case .bodySm: return 19.5
+        case .label: return 15.6
+        case .labelSm: return 14.4
+        case .caption: return 16.8
+        case .labelXs, .overline: return 13.2
         }
     }
 
-    func font(_ weight: Font.Weight? = nil) -> Font {
-        .system(size: size, weight: weight ?? self.weight, design: self == .mono ? .monospaced : .default)
+    /// Трекинг в em, как в tokens.json.
+    var trackingEm: CGFloat {
+        switch self {
+        case .display: return -0.02
+        case .headingLg: return -0.015
+        case .heading: return -0.01
+        case .headingSm, .headingXs: return -0.005
+        case .labelSm: return 0.005
+        case .labelXs: return 0.01
+        case .overline: return 0.04
+        default: return 0
+        }
+    }
+
+    var weight: Font.Weight {
+        switch self {
+        case .display, .headingLg, .heading, .headingSm, .headingXs: return .semibold
+        case .label, .labelSm, .labelXs, .overline: return .medium
+        default: return .regular
+        }
+    }
+
+    var font: Font {
+        self == .numeric
+            ? .system(size: size, weight: weight, design: .monospaced)
+            : .system(size: size, weight: weight)
     }
 }
 
 extension View {
-    /// Текст по шкале: кегль, вес, межстрочное и цвет роли одним вызовом.
-    func textStyle(_ style: TextStyle, _ color: Color, weight: Font.Weight? = nil) -> some View {
-        font(style.font(weight))
-            .foregroundStyle(color)
-            .lineSpacing(style.leading)
+    /// Стиль текста из шкалы: шрифт, трекинг и межстрочный разом.
+    func nlType(_ style: NLType) -> some View {
+        font(style.font)
+            .tracking(style.size * style.trackingEm)
+            .lineSpacing(max(0, style.lineHeight - style.size * 1.2))
+            .textCase(style == .overline ? .uppercase : nil)
     }
 }
 
-// «05 · Движение»: hover 120 мс ease-out, поповер 250 мс (0.32, 0.72, 0, 1),
-// островок - пружина 400 мс с затуханием 0.85.
+// MARK: - отступы, радиусы, размеры
+
+/// Шаг 4pt. На экран - два ритма: плотный внутри группы (stackSm) и
+/// свободный между группами (stackLg).
+enum Space {
+    static let s0_5: CGFloat = 2
+    static let s1: CGFloat = 4
+    static let s1_5: CGFloat = 6
+    static let s2: CGFloat = 8
+    static let s3: CGFloat = 12
+    static let s4: CGFloat = 16
+    static let s5: CGFloat = 20
+    static let s6: CGFloat = 24
+    static let s8: CGFloat = 32
+    static let s12: CGFloat = 48
+
+    static let insetSm: CGFloat = 12
+    static let insetMd: CGFloat = 16
+    static let insetLg: CGFloat = 20
+    static let stackXs: CGFloat = 4
+    static let stackSm: CGFloat = 8
+    static let stackMd: CGFloat = 16
+    static let stackLg: CGFloat = 24
+    static let inlineSm: CGFloat = 8
+    static let inlineMd: CGFloat = 12
+    /// Поля страницы в приложении.
+    static let page: CGFloat = 24
+    static let contentMax: CGFloat = 720
+}
+
+enum Radius {
+    static let xs: CGFloat = 4
+    static let sm: CGFloat = 6
+    static let md: CGFloat = 8
+    static let lg: CGFloat = 10
+    static let xl: CGFloat = 12
+}
+
+enum Size {
+    static let controlSm: CGFloat = 28
+    static let controlMd: CGFloat = 32
+    static let control2xs: CGFloat = 20
+    static let iconSm: CGFloat = 16
+    static let iconMd: CGFloat = 20
+    static let iconXl: CGFloat = 32
+    static let rowHeight: CGFloat = 44
+    static let sidebar: CGFloat = 220
+}
+
+// MARK: - тени
+
+/// Тени Northline: нейтральные, двуслойные, размытие не больше 24pt. У
+/// карточки тени нет никогда - только у всплывающего.
+enum NLShadow { case xs, md, lg, xl }
+
+extension View {
+    @ViewBuilder
+    func nlShadow(_ level: NLShadow) -> some View {
+        switch level {
+        case .xs:
+            shadow(color: .black.opacity(0.06), radius: 1, y: 1)
+        case .md:
+            shadow(color: .black.opacity(0.08), radius: 2, y: 2)
+                .shadow(color: .black.opacity(0.10), radius: 4, y: 4)
+        case .lg:
+            shadow(color: .black.opacity(0.10), radius: 4, y: 4)
+                .shadow(color: .black.opacity(0.16), radius: 8, y: 8)
+        case .xl:
+            shadow(color: .black.opacity(0.12), radius: 8, y: 8)
+                .shadow(color: .black.opacity(0.18), radius: 12, y: 16)
+        }
+    }
+}
+
+// MARK: - поверхности
+
+extension View {
+    /// Карточка/регион: surface + граница 1pt, radius-lg, без тени.
+    func nlCard(padding: CGFloat? = Space.insetLg) -> some View {
+        self.padding(padding ?? 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(NL.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                    .strokeBorder(NL.border, lineWidth: 1)
+            }
+    }
+
+    /// Всплывающее: surface + граница + тень уровня и блик сверху в тёмной теме.
+    func nlRaised(_ level: NLShadow, radius: CGFloat = Radius.lg) -> some View {
+        background(NL.surface, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(NL.border, lineWidth: 1)
+            }
+            .overlay(alignment: .top) {
+                NL.raisedHighlight.frame(height: 1).padding(.horizontal, radius)
+            }
+            .nlShadow(level)
+    }
+}
+
+// MARK: - движение
+
+/// 100 мс - наведение и нажатие, 150 - фокус и подсказки, 200 - меню,
+/// 300 - окна. Всегда ease-out на вход; ничего не пружинит и не растёт больше 1.
 enum Motion {
-    static let hover = Animation.easeOut(duration: 0.12)
-    static let press = Animation.spring(response: 0.2, dampingFraction: 0.9)
-    static let page = Animation.timingCurve(0.32, 0.72, 0, 1, duration: 0.25)
-    static let island = Animation.spring(response: 0.4, dampingFraction: 0.85)
+    static let fast = Animation.easeOut(duration: 0.10)
+    static let base = Animation.easeOut(duration: 0.15)
+    static let moderate = Animation.easeOut(duration: 0.20)
+    static let slow = Animation.easeOut(duration: 0.30)
+    /// Чистая смена положения (индикатор вкладки).
+    static let position = Animation.easeInOut(duration: 0.20)
+}
+
+extension View {
+    func motion<V: Equatable>(_ animation: Animation = Motion.moderate, value: V) -> some View {
+        modifier(MotionModifier(animation: animation, value: value))
+    }
+}
+
+private struct MotionModifier<V: Equatable>: ViewModifier {
+    let animation: Animation
+    let value: V
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.animation(reduceMotion ? nil : animation, value: value)
+    }
+}
+
+/// withAnimation с оглядкой на «Уменьшить движение».
+func withMotion<Result>(_ animation: Animation = Motion.moderate, _ body: () throws -> Result) rethrows -> Result {
+    try withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : animation, body)
 }

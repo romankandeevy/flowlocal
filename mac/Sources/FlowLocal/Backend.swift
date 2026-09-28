@@ -12,7 +12,7 @@ final class Backend {
         case ready(String)      // "ru" | "en"
         case failed(String)
         case exited(Int32)
-        case partial(id: Int, text: String, words: Int)   // разобрано на ходу
+        case partial(id: Int, text: String, interim: String, words: Int)   // разобрано на ходу + черновик хвоста
     }
 
     struct Result {
@@ -42,12 +42,6 @@ final class Backend {
     // в трубу, и ждать её синхронно значило бы заморозить «Выйти».
     private let procLock = NSLock()
     private var live: Process?
-
-    /// Папку бэкенда вписывает build.sh в Info.plist (FLBackendDir).
-    static var directory: URL? {
-        guard let path = Bundle.main.object(forInfoDictionaryKey: "FLBackendDir") as? String else { return nil }
-        return URL(fileURLWithPath: path)
-    }
 
     func start() {
         queue.async { self.launch() }
@@ -145,13 +139,16 @@ final class Backend {
 
     private func launch() {
         guard process == nil else { return }
-        guard let dir = Backend.directory else {
-            emit(.failed("Не найдена папка распознавания (FLBackendDir в Info.plist)"))
+        guard let dir = Paths.backend,
+              FileManager.default.fileExists(atPath: dir.appendingPathComponent("server.py").path) else {
+            emit(.failed("Сборка неполная: нет бэкенда распознавания. Пересоберите: mac/build.sh"))
             return
         }
-        let python = dir.appendingPathComponent(".venv/bin/python")
+        // Окружение своё на каждом Маке (Paths). Нет его или оно чужое - битая
+        // ссылка на python того, кто собирал, - честно говорим, что делать.
+        let python = Paths.python
         guard FileManager.default.isExecutableFile(atPath: python.path) else {
-            emit(.failed("Нет \(python.path). Запустите mac/build.sh"))
+            emit(.failed("Не установлено окружение распознавания. Запустите mac/build.sh"))
             return
         }
         let p = Process()
@@ -162,6 +159,10 @@ final class Backend {
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
         env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+        env["FLOWLOCAL_MODELS"] = Paths.models.path
+        // Код бэкенда лежит внутри подписанного .app: __pycache__ рядом с ним
+        // сломал бы подпись, а с ней и выданные права.
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
         p.environment = env
 
         let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
@@ -242,7 +243,7 @@ final class Backend {
                 case "error": emit(.failed(obj["message"] as? String ?? "Ошибка распознавания"))
                 case "partial":
                     emit(.partial(id: obj["id"] as? Int ?? -1, text: obj["text"] as? String ?? "",
-                                  words: obj["words"] as? Int ?? 0))
+                                  interim: obj["interim"] as? String ?? "", words: obj["words"] as? Int ?? 0))
                 default: break
                 }
                 continue

@@ -21,6 +21,7 @@ final class LevelStore: ObservableObject {
         let now = Date()
         guard now.timeIntervalSince(lastPublish) >= 0.05 else { return }
         lastPublish = now
+        SuiteBroadcast.level(pending.max() ?? 0)
         levels = Array((levels + pending).suffix(Self.count))
         pending.removeAll(keepingCapacity: true)
     }

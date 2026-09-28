@@ -25,8 +25,9 @@ Parakeet TDT 0.6b v2 для английского переспроса.
 
 Проверка без приложения:
 
-    .venv/bin/python server.py --file запись.wav          целиком
-    .venv/bin/python server.py --stream-file запись.wav   как при диктовке, в реальном времени
+    PY="$HOME/Library/Application Support/FlowLocal/Python/bin/python3"
+    "$PY" server.py --file запись.wav          целиком
+    "$PY" server.py --stream-file запись.wav   как при диктовке, в реальном времени
 """
 
 import json
@@ -43,15 +44,20 @@ import numpy as np
 import langdetect
 
 SR = 16000
-HERE = os.path.dirname(os.path.abspath(__file__))
-MODELS_DIR = os.environ.get("FLOWLOCAL_MODELS", os.path.join(HERE, "models"))
+# Модели - в данных приложения, а не рядом с кодом: код едет внутри .app,
+# и его папка может быть только для чтения. Приложение передаёт путь само.
+MODELS_DIR = os.environ.get("FLOWLOCAL_MODELS") or os.path.expanduser(
+    "~/Library/Application Support/FlowLocal/Models")
 RU_MODEL = "gigaam-v3-e2e-rnnt"
 EN_MODEL = "nemo-parakeet-tdt-0.6b-v2"
 QUANT = "int8"
-# Два потока, и это замер на этом Маке (i5-8210Y, 2 ядра / 4 потока), а не
-# привычка: 28.8 с речи - 4.0 с на двух потоках против 5.9 с на четырёх.
-# Гиперпотоки делят те же два ядра, и на int8 это только мешает.
-THREADS = 2
+# Два потока по умолчанию (замер на i5-8210Y, 2 ядра / 4 потока):
+# 28.8 с речи - 4.0 с на двух потоках против 5.9 с на четырёх.
+# Переопределение: FLOWLOCAL_THREADS (на Apple Silicon замерьте своё).
+try:
+    THREADS = max(1, int(os.environ.get("FLOWLOCAL_THREADS", "2")))
+except ValueError:
+    THREADS = 2
 
 # Запасной путь (целиком): кусок не длиннее 30 с, рез в самой тихой паузе.
 # У GigaAM потолок 200 с, а память самовнимания растёт квадратом от длины
@@ -62,11 +68,11 @@ SEEK_SEC = 8.0
 # --- разбор на ходу (old/streaming.py) --------------------------------------
 WIN = int(0.2 * SR)          # окно громкости
 QUIET_RATIO = 0.18           # пауза - заметно тише среднего по куску
-MIN_TAIL_SEC = 5.0           # с какой длины берёмся резать (~10-12 слов)
+MIN_TAIL_SEC = 2.5           # с какой длины берёмся резать (~5 слов): чаще окончательные куски
 KEEP_TAIL_SEC = 1.8          # последние 1.8 с не трогаем: человек ещё говорит
 MAX_FEED_SEC = 10.0          # кусок не длиннее: отпускание не ждёт долгий кусок
 LONG_PAUSE_WINS = 3          # пауза от 0.6 с - граница фразы, режем по ней
-SHORT_PAUSE_OK_SEC = 12.0    # 200 мс паузы хватает, только если накопилось столько
+SHORT_PAUSE_OK_SEC = 4.0     # 200 мс паузы хватает, только если накопилось столько
 # Упреждение начинаем рано: живой замер - человек отпускает клавишу сразу за
 # последним словом, и при 0.35 с тишины и раз в 2 с заготовка не успевала
 # начаться вовсе (46 с речи, хвост 2.6 с, ожидание 1.4 с). Начатая заранее,
@@ -76,6 +82,15 @@ SPEC_MIN_GAP_SEC = 1.0
 MIN_PIECE_SEC = 1.0          # куски короче - лишний прогон модели и риск разрезать слово
 SPEC_MAX_TAIL_SEC = 10.0
 TICK = 0.2
+# Черновик хвоста - то, что сказано после последнего окончательного куска,
+# чтобы слова в окне появлялись сразу, а не после паузы и 5 с речи. Хвост
+# переразбирается целиком, поэтому черновик может уточняться. Бюджет: не
+# чаще раза в INTERIM_STEP_SEC нового звука и не раньше, чем через
+# INTERIM_COST_RATIO прошлого прогона - на двух ядрах окончательные куски и
+# отпускание не должны ждать черновик.
+INTERIM_MIN_SEC = 0.4
+INTERIM_STEP_SEC = 0.35
+INTERIM_COST_RATIO = 0.6
 
 _out_lock = threading.Lock()
 _proto = sys.stdout
@@ -177,8 +192,12 @@ def load(name: str):
         log(f"{name}: {e} - папка неполная, качаю заново")
         shutil.rmtree(d, ignore_errors=True)
         model = onnx_asr.load_model(name, **kw)
-    # Прогрев: первый прогон инициализирует кернелы.
-    model.recognize(np.zeros(SR, dtype=np.float32), sample_rate=SR)
+    # Прогрев: первый прогон инициализирует кернелы. Ошибка прогрева не
+    # должна ронять процесс: модель загружена, посчитает медленнее первый кусок.
+    try:
+        model.recognize(np.zeros(SR, dtype=np.float32), sample_rate=SR)
+    except Exception as e:  # noqa: BLE001
+        log(f"{name}: прогрев не удался ({type(e).__name__}: {e}), работаю без него")
     log(f"{name} загружена за {time.time() - t0:.1f} с")
     return model
 
@@ -248,6 +267,13 @@ def find_pause(audio: np.ndarray, allow_short: bool) -> tuple[int, float] | None
             j -= 1
         mid = (j + i + 1) * WIN // 2
         length = (i - j + 1) * WIN / SR
+        # Пауза у самого начала даёт огрызок (живой замер: куски 0.3 и 0.5 с).
+        # Раньше такую возвращали, а вызывающий её отбрасывал - и разбор на
+        # ходу вставал насовсем: самая поздняя пауза оставалась той же, и вся
+        # минута речи ждала отпускания (69 с звука - 10 с ожидания). Всё, что
+        # раньше, ещё ближе к началу - дальше не ищем.
+        if mid < MIN_PIECE_SEC * SR:
+            break
         if i - j + 1 >= LONG_PAUSE_WINS:
             return mid, length
         if short is None:
@@ -305,6 +331,9 @@ class Session:
         self.tried_at = 0
         self.spec: tuple[int, str, str, float] | None = None
         self.spec_at = 0
+        self.interim = ""
+        self.interim_at = 0
+        self.interim_next = 0.0
         self.finishing = False
         self.finish_t0 = 0.0
         self.cancelled = False
@@ -470,12 +499,15 @@ class Engine:
                 # Ищем паузу внутри первых MAX_FEED_SEC (find_pause сама
                 # отступает KEEP_TAIL_SEC от конца - добавляем их к окну).
                 inner = find_pause(audio[:limit + int(KEEP_TAIL_SEC * SR)], True)
-                cut, pause = inner if inner is not None else (quietest(audio[:limit]), 0.0)
+                lo = int(MIN_PIECE_SEC * SR)
+                cut, pause = inner if inner is not None else (lo + quietest(audio[lo:limit]), 0.0)
             elif cut is None and pending > 2 * limit:
-                cut, pause = quietest(audio[:limit]), 0.0
+                lo = int(MIN_PIECE_SEC * SR)
+                cut, pause = lo + quietest(audio[lo:limit]), 0.0
             # Пауза у самого начала даёт огрызок в полсекунды (живой замер:
             # куски 0.3 и 0.5 с). Ждём следующей паузы - она будет дальше.
-            if cut is not None and cut < MIN_PIECE_SEC * SR and pending < SHORT_PAUSE_OK_SEC * SR:
+            # Безусловно: субсекундный кусок у начала плох при любом pending.
+            if cut is not None and cut < MIN_PIECE_SEC * SR:
                 cut = None
             if cut is not None and cut > 0:
                 text, lang = self.rec_piece(audio[:cut], s.lang)
@@ -485,6 +517,8 @@ class Engine:
                     s.consumed = start + cut
                     s.streamed += cut
                     s.spec = None
+                    s.interim = ""
+                    s.interim_at = 0
                     if text:
                         s.parts.append((text, lang))
                     joined = " ".join(t for t, _ in s.parts).strip()
@@ -493,8 +527,7 @@ class Engine:
                 # Уже разобранное - окну: расшифровка в ходе речи и счёт слов.
                 # Куски окончательные, текст только дописывается и не мигает.
                 if text:
-                    emit({"event": "partial", "id": s.id, "text": joined,
-                          "words": len(joined.split())})
+                    self._emit_partial(s, joined, "")
                 return
         # Упреждающий хвост: человек замолчал - разбираем остаток заранее.
         if (0 < pending <= SPEC_MAX_TAIL_SEC * SR
@@ -507,9 +540,41 @@ class Engine:
             with self.cond:
                 if s is self.session and not s.cancelled and s.consumed == start:
                     s.spec = (total, text, lang, loud)
+                    s.interim = text
+                    s.interim_at = total
+                    joined = " ".join(t for t, _ in s.parts).strip()
+                else:
+                    return
+            self._emit_partial(s, joined, text)
+            return
+        # Черновик хвоста: слова на экране по ходу речи.
+        now = time.time()
+        if (pending >= INTERIM_MIN_SEC * SR
+                and total - s.interim_at >= INTERIM_STEP_SEC * SR
+                and now >= s.interim_next):
+            t0 = time.time()
+            model = self.en if s.lang == "en" and self.en is not None else self.ru
+            text = recognize(model, audio)
+            cost = time.time() - t0
+            with self.cond:
+                if s is not self.session or s.cancelled or s.consumed != start:
+                    return
+                s.interim = text
+                s.interim_at = total
+                s.interim_next = time.time() + cost * INTERIM_COST_RATIO
+                joined = " ".join(t for t, _ in s.parts).strip()
+            self._emit_partial(s, joined, text)
+
+    def _emit_partial(self, s: Session, final: str, interim: str) -> None:
+        """Окончательное и черновик отдельно: окончательное только дописывается,
+        черновик хвоста может перерисоваться целиком."""
+        emit({"event": "partial", "id": s.id, "text": final, "interim": interim,
+              "words": len(final.split()) + len(interim.split())})
 
     def _finish(self, s: Session) -> None:
         with self.cond:
+            if s.cancelled or s is not self.session:
+                return
             start, total = s.consumed, s.size
             tail = s.buf[start:total]
             spec = s.spec
@@ -552,6 +617,9 @@ class Engine:
 
 def read_floats(stream, n: int) -> np.ndarray:
     """Прочитать n float32 прямо в массив, без промежуточных копий."""
+    # Кап: 35 минут звука. Без него заголовок с samples=2**31 выделил бы 8 ГБ.
+    if n < 0 or n > 35 * 60 * SR:
+        raise ValueError(f"bad samples: {n}")
     out = np.empty(n, dtype="<f4")
     view = memoryview(out).cast("B")
     got = 0

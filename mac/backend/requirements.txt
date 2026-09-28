@@ -1,0 +1,3 @@
+onnxruntime==1.23.2
+onnx-asr[hub]==0.12.0
+numpy

@@ -28,10 +28,11 @@ final class Controller {
     private var restarts = 0
     private var lastBackendError: String?
     private var trustPromptShown = false
-    private var keyMonitor: Any?
     // Запись, которую не успели распознать: бэкенд упал посреди работы. Не
     // выбрасываем - распознаем, когда он поднимется.
     private var orphan: (samples: [Float], entry: Entry)?
+    // Последнее окончательное из разбора на ходу и оно же почищенное.
+    private var liveFinal = (raw: "", clean: "")
 
     private let holdID: UInt32 = 1
     private let escapeID: UInt32 = 2
@@ -60,61 +61,35 @@ final class Controller {
         bindHotkeys()
     }
 
+    /// Сочетания задаются в Hub Settings. Занятое, системное или совпадающее с другим сочетание не
+    /// регистрируется - причина пишется в журнал.
     func bindHotkeys() {
-        let hold = state.hotkey
-        let okHold = HotkeyCenter.shared.register(
-            id: holdID, keyCode: hold.keyCode, modifiers: hold.modifiers,
-            pressed: { [weak self] in self?.holdPressed() },
-            released: { [weak self] in self?.holdReleased() })
-        var errors: [HotkeyRole: String] = [:]
-        if !okHold { errors[.hold] = "Сочетание занято другой программой" }
-
-        let toggle = state.toggleHotkey
-        if toggle.same(as: hold) {
-            HotkeyCenter.shared.unregister(id: toggleID)
-            errors[.toggle] = "Совпадает с «Зажать» — выберите другое"
-        } else if !HotkeyCenter.shared.register(id: toggleID, keyCode: toggle.keyCode, modifiers: toggle.modifiers,
-                                                 pressed: { [weak self] in self?.togglePressed() }) {
-            errors[.toggle] = "Сочетание занято другой программой"
-        }
-        state.hotkeyError = errors
-    }
-
-    // MARK: - захват сочетания
-
-    // Пока идёт захват, оба хоткея сняты: иначе Carbon перехватил бы то же
-    // сочетание раньше окна и вместо захвата началась бы запись.
-    func beginHotkeyCapture(_ role: HotkeyRole) {
-        if state.capturing != nil { endHotkeyCapture() }
-        state.capturing = role
         HotkeyCenter.shared.unregister(id: holdID)
         HotkeyCenter.shared.unregister(id: toggleID)
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, let role = self.state.capturing else { return event }
-            if event.keyCode == UInt16(kVK_Escape) {
-                self.endHotkeyCapture()
-                return nil
-            }
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            if let preset = HotkeyPreset.captured(keyCode: event.keyCode, flags: flags,
-                                                  characters: event.charactersIgnoringModifiers) {
-                self.state.setHotkey(preset, for: role)
-                self.endHotkeyCapture()
-            }
-            return nil
+        let hold = state.hotkey
+        if usable(hold, .hold),
+           !HotkeyCenter.shared.register(id: holdID, keyCode: hold.keyCode, modifiers: hold.modifiers,
+                                         pressed: { [weak self] in self?.holdPressed() },
+                                         released: { [weak self] in self?.holdReleased() }) {
+            Log.write("сочетание «\(HotkeyRole.hold.title)» \(hold.label) занято другим приложением")
+        }
+        let toggle = state.toggleHotkey
+        if hold.isEnabled, toggle.same(as: hold) {
+            Log.write("сочетание «\(HotkeyRole.toggle.title)» совпадает с «\(HotkeyRole.hold.title)» - не регистрирую")
+        } else if usable(toggle, .toggle),
+                  !HotkeyCenter.shared.register(id: toggleID, keyCode: toggle.keyCode, modifiers: toggle.modifiers,
+                                                pressed: { [weak self] in self?.togglePressed() }) {
+            Log.write("сочетание «\(HotkeyRole.toggle.title)» \(toggle.label) занято другим приложением")
         }
     }
 
-    func endHotkeyCapture() {
-        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
-        keyMonitor = nil
-        state.capturing = nil
-        bindHotkeys()
-    }
-
-    func resetHotkey(_ role: HotkeyRole) {
-        state.setHotkey(HotkeyPreset.defaultPreset(role), for: role)
-        bindHotkeys()
+    private func usable(_ preset: HotkeyPreset, _ role: HotkeyRole) -> Bool {
+        guard preset.isEnabled else { return false }
+        if HotkeyPreset.isSystemCombo(keyCode: Int(preset.keyCode), mods: preset.modifiers) {
+            Log.write("сочетание «\(role.title)» \(preset.label) - системное, его перехват сломал бы macOS")
+            return false
+        }
+        return true
     }
 
     // MARK: - бэкенд
@@ -143,17 +118,14 @@ final class Controller {
             restarts += 1
             state.backend = .starting
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.backend.start() }
-        case let .partial(id, text, words):
+        case let .partial(id, text, interim, words):
             guard id == session else { return }
             switch state.phase {
             case .recording, .processing:
-                // Куски только дописываются - новое это то, что после старого.
-                let old = state.liveText
-                state.liveLatest = text.hasPrefix(old)
-                    ? String(text.dropFirst(old.count)).trimmingCharacters(in: .whitespaces)
-                    : text
-                state.liveText = text
-                state.liveWords = words
+                // Окончательное только дописывается, черновик хвоста
+                // перерисовывается целиком - так слова видны сразу.
+                LiveWords.shared.setCount(words)
+                pushLive(final: text, interim: interim)
             default:
                 break
             }
@@ -206,32 +178,52 @@ final class Controller {
             break
         }
         hideWork?.cancel()
-        recorder.deviceUID = state.micUID
-        do {
-            try recorder.start()
-        } catch {
-            flash(.failed("Микрофон не открылся"))
-            Log.write("микрофон не открылся: \(error.localizedDescription)")
-            return
-        }
-        if state.sounds { NSSound(named: "Tink")?.play() }
+        // Сначала - что запись идёт: капсула показывается сразу по нажатию,
+        // а не после того, как поднимется микрофон (на Bluetooth это заметно).
         session = backend.newID()
-        backend.begin(session, lang: state.langMode.rawValue)
+        let id = session
         pressedAt = Date()
         releasedTicks = 0
-        state.liveText = ""
-        state.liveLatest = ""
-        state.liveWords = 0
+        liveFinal = ("", "")
+        LiveWords.shared.reset()
         LevelStore.shared.reset()
         state.phase = .recording(since: Date(), locked: locked)
         if state.showPill { pill.present() }
         HotkeyCenter.shared.register(id: escapeID, keyCode: UInt32(kVK_Escape), modifiers: 0,
                                      pressed: { [weak self] in self?.cancel() })
+        // Микрофон - следующим оборотом цикла, чтобы капсула успела
+        // нарисоваться. Отпустили или отменили раньше - открывать уже нечего.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, id == self.session, case .recording = self.state.phase else { return }
+            self.openMicrophone(id)
+        }
         // .common, а не .default: в режиме по умолчанию таймер стоит, пока
         // открыто любое меню, и звук перестал бы уходить на разбор.
         let t = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in self?.onTick() }
+        t.tolerance = 0.03
         RunLoop.main.add(t, forMode: .common)
         tick = t
+    }
+
+    private func openMicrophone(_ id: Int) {
+        recorder.deviceUID = state.micUID
+        let t0 = Date()
+        do {
+            try recorder.start()
+        } catch {
+            HotkeyCenter.shared.unregister(id: escapeID)
+            tick?.invalidate()
+            tick = nil
+            state.phase = .idle
+            pill.dismiss()
+            flash(.failed("Не удалось открыть микрофон"))
+            Log.write("микрофон не открылся: \(error.localizedDescription)")
+            return
+        }
+        let ms = Int(Date().timeIntervalSince(t0) * 1000)
+        if ms > 150 { Log.write("микрофон открывался \(ms) мс") }
+        if state.sounds { NSSound(named: "Tink")?.play() }
+        backend.begin(id, lang: state.langMode.rawValue)
     }
 
     private func onTick() {
@@ -279,7 +271,7 @@ final class Controller {
         _ = stopRecording()
         backend.cancel(session)
         state.phase = .idle
-        state.liveText = ""
+        LiveWords.shared.reset()
         pill.dismiss()
     }
 
@@ -289,9 +281,23 @@ final class Controller {
         backend.cancel(session)
         session = backend.newID()
         state.phase = .idle
-        state.liveText = ""
+        LiveWords.shared.reset()
         pill.dismiss()
         Log.write("распознавание отменено")
+    }
+
+    /// «Начать / Закончить диктовку» из меню - как сочетание «По нажатию».
+    func toggleDictation() {
+        togglePressed()
+    }
+
+    /// «Отменить» в окне и в меню: и запись, и распознавание.
+    func cancelDictation() {
+        switch state.phase {
+        case .recording: cancel()
+        case .processing: cancelProcessing()
+        default: break
+        }
     }
 
     private func finish() {
@@ -304,7 +310,9 @@ final class Controller {
         guard seconds >= minRecordSec else {
             backend.cancel(id)
             Log.write(String(format: "запись короче %.1fс - отпустили сразу, без разбора", minRecordSec))
-            flash(.failed("Слишком коротко — не успел расслышать"), hideAfter: 1.5)
+            state.phase = .idle
+            pill.dismiss()
+            flash(.failed("Слишком короткая запись"), hideAfter: 1.5)
             return
         }
         state.recordSeconds = seconds
@@ -339,20 +347,23 @@ final class Controller {
             case let .failure(error):
                 Log.write("распознавание не удалось: \(error.localizedDescription) - запись сохранена до перезапуска")
                 self.orphan = (audio, draft)
-                self.flash(.failed("Перезапуск — текст придёт в буфер"), hideAfter: 3)
+                self.flash(.failed("Распознавание перезапускается"), hideAfter: 3)
             }
         }
     }
 
     private func recoverOrphan() {
         guard let (audio, draft) = orphan else { return }
+        // Не трогаем буфер и историю посреди активной диктовки:
+        // рестарт бэкенда мог совпасть с новой записью.
+        guard case .idle = state.phase else { return }
         orphan = nil
         backend.transcribe(backend.newID(), audio, lang: state.langMode.rawValue,
                            timeout: 30 + draft.seconds) { [weak self] result in
             guard let self else { return }
             var entry = draft
             if case let .success(r) = result {
-                entry.text = r.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.apply(r.text, to: &entry)
                 entry.lang = r.lang
             }
             entry.words = Entry.count(entry.text)
@@ -362,7 +373,7 @@ final class Controller {
             guard !entry.failed else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(entry.text, forType: .string)
-            self.flash(.copied("Диктовка восстановлена — ⌘V"), hideAfter: 3)
+            self.flash(.copied("Диктовка восстановлена. Нажмите ⌘V"), hideAfter: 3)
         }
     }
 
@@ -370,21 +381,22 @@ final class Controller {
         // Счётчик перезапусков - после настоящей работы, а не на «модель
         // загружена»: процесс, падающий позже загрузки, иначе крутился бы вечно.
         restarts = 0
-        let text = r.text.trimmingCharacters(in: .whitespacesAndNewlines)
         // Подписи по единицам, урок из TREE.md: «звук/на_ходу/хвост» - секунды
         // записи, «ожидание» - секунды работы после отпускания. Не путать.
         Log.write(String(format: "диктовка: звук=%.1fс на_ходу=%.1fс хвост=%.1fс заранее=%@ | ожидание=%.2fс язык=%@",
                          draft.seconds, r.streamedSec, r.tailSec, r.specHit ? "да" : "нет", r.wait, r.lang))
         var entry = draft
-        entry.text = text
+        apply(r.text, to: &entry)
         entry.lang = r.lang
-        entry.words = Entry.count(text)
-        entry.failed = text.isEmpty
-        state.liveText = text
+        let text = entry.text
+        LiveWords.shared.update(final: text, interim: "")
+        if let raw = entry.raw {
+            Log.write("чистка: \(Entry.count(raw)) → \(entry.words) слов")
+        }
         guard !text.isEmpty else {
             // Не расслышали - запись всё равно в истории: её можно перераспознать.
             if entry.audio != nil { state.add(entry) }
-            flash(.failed(entry.audio != nil ? "Не распознано — запись в истории" : "Речь не распознана"))
+            flash(.failed(entry.audio != nil ? "Речь не распознана. Запись в истории" : "Речь не распознана"))
             return
         }
         state.add(entry)
@@ -422,15 +434,46 @@ final class Controller {
                     self.state.rerecognizing.remove(entry.id)
                     guard case let .success(r) = result else { return }
                     var e = entry
-                    e.text = r.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    self.apply(r.text, to: &e)
                     e.lang = r.lang
-                    e.words = Entry.count(e.text)
-                    e.failed = e.text.isEmpty
                     self.state.update(e)
                     Log.write("перераспознано: \(e.words) слов, \(r.lang)")
                 }
             }
         }
+    }
+
+    /// Живая расшифровка по словам - уже почищенная. Точку в конце не
+    /// дописываем: фраза ещё идёт.
+    private func pushLive(final: String, interim: String) {
+        var o = state.cleanup
+        o.trailingPeriod = false
+        // Окончательное меняется раз в несколько секунд, черновик - несколько
+        // раз в секунду. Чистить весь растущий текст на каждый черновик -
+        // лишняя работа главного потока на длинной диктовке.
+        let f: String
+        if final == liveFinal.raw {
+            f = liveFinal.clean
+        } else {
+            f = final.isEmpty ? "" : TextCleaner.clean(final, o)
+            liveFinal = (final, f)
+        }
+        var t = o
+        let ended = f.isEmpty || f.hasSuffix(".") || f.hasSuffix("?") || f.hasSuffix("!")
+        t.capitalize = o.capitalize && ended
+        let i = interim.isEmpty ? "" : TextCleaner.clean(interim, t)
+        LiveWords.shared.update(final: f, interim: i)
+    }
+
+    /// Распознанный текст - в диктовку: чистка по настройкам, исходный
+    /// сохраняется, только если чистка что-то поменяла.
+    private func apply(_ recognized: String, to entry: inout Entry) {
+        let raw = recognized.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = state.cleaned(raw)
+        entry.text = clean
+        entry.raw = clean == raw ? nil : raw
+        entry.words = Entry.count(clean)
+        entry.failed = clean.isEmpty
     }
 
     func play(_ entry: Entry) {
@@ -445,7 +488,7 @@ final class Controller {
 
     private func insert(_ text: String, words: String) {
         // Пробел в конце - old/ append_space: следующая диктовка не прилипнет.
-        Inserter.insert(text + " ") { outcome in
+        Inserter.insert(state.addSpace ? text + " " : text, keep: state.keepInClipboard) { outcome in
             Log.write(outcome == .pasted ? "вставка: ⌘V" : "вставка: в буфер - нет права «Универсальный доступ»")
             self.state.refreshPermissions()
             switch outcome {
@@ -460,7 +503,7 @@ final class Controller {
                 Inserter.openAccessibilitySettings()
                 self.flash(.copied("Включите «Универсальный доступ»"), hideAfter: 5)
             case .copied:
-                self.flash(.copied("Нажмите ⌘V"), hideAfter: 2.5)
+                self.flash(.copied("Текст скопирован. Нажмите ⌘V"), hideAfter: 2.5)
             }
         }
     }

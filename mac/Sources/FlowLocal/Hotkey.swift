@@ -7,11 +7,6 @@ enum HotkeyRole: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
     var title: String { self == .hold ? "Удерживая клавиши" : "По нажатию" }
-    var hint: String {
-        self == .hold ? "Держите и говорите — отпустите, и текст встанет туда, где курсор"
-                      : "Нажмите, чтобы начать, и ещё раз, чтобы вставить текст"
-    }
-    var symbol: String { self == .hold ? "hand.point.up.left.fill" : "switch.2" }
 }
 
 // Глобальные хоткеи через Carbon RegisterEventHotKey. Не требует ни
@@ -46,61 +41,105 @@ struct HotkeyPreset: Identifiable, Equatable, Codable {
         role == .hold ? all[0] : toggleDefault
     }
 
-    private static func storeKey(_ role: HotkeyRole) -> String {
-        role == .hold ? "hotkeyPreset" : "hotkeyToggle"
+    /// Где лежит сочетание: код клавиши и модификаторы словами - так их пишет Hub Settings.
+    private static func storeKeys(_ role: HotkeyRole) -> (code: String, modifiers: String) {
+        role == .hold ? ("holdKeyCode", "holdModifiers") : ("toggleKeyCode", "toggleModifiers")
     }
 
-    /// Сохранённое сочетание, иначе - по умолчанию (для «Зажать» - как в old/).
+    /// Сохранённое сочетание (его задают в Hub Settings), иначе - по умолчанию (для «Зажать» - как в old/).
     static func load(_ role: HotkeyRole) -> HotkeyPreset {
-        if let data = UserDefaults.standard.data(forKey: storeKey(role)),
-           let saved = try? JSONDecoder().decode(HotkeyPreset.self, from: data) {
+        let d = UserDefaults.standard
+        let keys = storeKeys(role)
+        if let code = d.object(forKey: keys.code) as? Int, let names = d.stringArray(forKey: keys.modifiers) {
+            return HotkeyPreset(keyCode: code, modifierNames: names)
+        }
+        // Прошлые версии хранили сочетание JSON-ом под другим ключом - переносим.
+        let legacy = role == .hold ? "hotkeyPreset" : "hotkeyToggle"
+        if let data = d.data(forKey: legacy), let saved = try? JSONDecoder().decode(HotkeyPreset.self, from: data) {
+            saved.save(role)
+            d.removeObject(forKey: legacy)
             return saved
         }
         return defaultPreset(role)
     }
 
     func save(_ role: HotkeyRole) {
-        if let data = try? JSONEncoder().encode(self) {
-            UserDefaults.standard.set(data, forKey: Self.storeKey(role))
-        }
+        let keys = Self.storeKeys(role)
+        UserDefaults.standard.set(Int(keyCode), forKey: keys.code)
+        UserDefaults.standard.set(modifierNames, forKey: keys.modifiers)
     }
 
     func same(as other: HotkeyPreset) -> Bool {
         keyCode == other.keyCode && modifiers == other.modifiers
     }
 
-    /// Своё сочетание из захвата «Нажмите клавиши». Без модификатора не
-    /// принимаем: голая клавиша перехватывалась бы во всех программах.
-    static func captured(keyCode: UInt16, flags: NSEvent.ModifierFlags, characters: String?) -> HotkeyPreset? {
-        var mods: UInt32 = 0
-        var names: [String] = []
-        if flags.contains(.control) { mods |= UInt32(controlKey); names.append("CTRL") }
-        if flags.contains(.option) { mods |= UInt32(optionKey); names.append("OPTION") }
-        if flags.contains(.shift) { mods |= UInt32(shiftKey); names.append("SHIFT") }
-        if flags.contains(.command) { mods |= UInt32(cmdKey); names.append("CMD") }
-        guard mods != 0, let key = keyName(Int(keyCode), characters) else { return nil }
-        return HotkeyPreset(id: "custom", keyCode: UInt32(keyCode), modifiers: mods, keys: names + [key])
+    /// Сочетание убрали в Hub Settings (крестик в поле) - хоткея нет.
+    var isEnabled: Bool { modifiers != 0 }
+
+    private static let modifierTable: [(name: String, carbon: Int, key: String)] = [
+        ("control", controlKey, "CTRL"), ("option", optionKey, "OPTION"),
+        ("shift", shiftKey, "SHIFT"), ("command", cmdKey, "CMD"),
+    ]
+
+    /// Модификаторы словами, как их хранит Hub Settings: control, option, shift, command.
+    var modifierNames: [String] {
+        Self.modifierTable.filter { modifiers & UInt32($0.carbon) != 0 }.map(\.name)
     }
 
-    private static func keyName(_ code: Int, _ chars: String?) -> String? {
-        let named: [Int: String] = [
-            kVK_Space: "SPACE", kVK_Return: "RETURN", kVK_Tab: "TAB", kVK_Delete: "DELETE",
-            kVK_ForwardDelete: "DEL", kVK_Home: "HOME", kVK_End: "END", kVK_PageUp: "PGUP",
-            kVK_PageDown: "PGDN", kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑",
-            kVK_DownArrow: "↓", kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4",
-            kVK_F5: "F5", kVK_F6: "F6", kVK_F7: "F7", kVK_F8: "F8", kVK_F9: "F9",
-            kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12",
-        ]
-        // Esc - это «отмена» во время записи, отдавать его под хоткей нельзя.
-        if code == kVK_Escape { return nil }
+    /// Комбо, которые ломают систему, если их перехватить глобально.
+    static func isSystemCombo(keyCode: Int, mods: UInt32) -> Bool {
+        let cmd = mods & UInt32(cmdKey) != 0
+        guard cmd else { return false }
+        switch keyCode {
+        case kVK_ANSI_Q, kVK_ANSI_W, kVK_ANSI_H, kVK_ANSI_M, kVK_Space, kVK_Tab,
+             kVK_ANSI_F, kVK_Delete:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static let named: [Int: String] = [
+        kVK_Space: "SPACE", kVK_Return: "RETURN", kVK_Tab: "TAB", kVK_Delete: "DELETE",
+        kVK_ForwardDelete: "DEL", kVK_Home: "HOME", kVK_End: "END", kVK_PageUp: "PGUP",
+        kVK_PageDown: "PGDN", kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑",
+        kVK_DownArrow: "↓", kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4",
+        kVK_F5: "F5", kVK_F6: "F6", kVK_F7: "F7", kVK_F8: "F8", kVK_F9: "F9",
+        kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12",
+    ]
+
+    /// Имя клавиши по коду: буквы - по латинской раскладке, какая бы ни была включена.
+    static func keyName(_ code: Int) -> String {
         if let name = named[code] { return name }
-        guard let c = chars?.trimmingCharacters(in: .whitespaces), !c.isEmpty else { return nil }
-        return c.uppercased()
+        guard let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let pointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
+        else { return "#\(code)" }
+        let data = Unmanaged<CFData>.fromOpaque(pointer).takeUnretainedValue() as Data
+        var deadKeys: UInt32 = 0
+        var length = 0
+        var chars = [UniChar](repeating: 0, count: 4)
+        let status = data.withUnsafeBytes { raw in
+            UCKeyTranslate(raw.bindMemory(to: UCKeyboardLayout.self).baseAddress, UInt16(code),
+                           UInt16(kUCKeyActionDisplay), 0, UInt32(LMGetKbdType()),
+                           OptionBits(kUCKeyTranslateNoDeadKeysBit), &deadKeys, chars.count, &length, &chars)
+        }
+        guard status == noErr, length > 0 else { return "#\(code)" }
+        return String(utf16CodeUnits: chars, count: length).uppercased()
     }
 }
 
-/// Подписи клавиш так, как их рисует macOS: модификаторы - знаками ⌃ ⌥ ⇧ ⌘
-/// в строке и словом, как на самой клавише MacBook; остальные - словом.
+extension HotkeyPreset {
+    /// Сочетание из Hub Settings: код клавиши и модификаторы словами. Без модификаторов - сочетания нет.
+    init(keyCode: Int, modifierNames names: [String]) {
+        let used = Self.modifierTable.filter { names.contains($0.name) }
+        let mods = used.reduce(UInt32(0)) { $0 | UInt32($1.carbon) }
+        self.init(id: "custom", keyCode: UInt32(keyCode), modifiers: mods,
+                  keys: mods == 0 ? [] : used.map(\.key) + [Self.keyName(keyCode)])
+    }
+}
+
+/// Подписи клавиш так, как их пишет macOS в меню и Системных настройках:
+/// модификаторы - знаками ⌃ ⌥ ⇧ ⌘, остальное - знаком или словом.
 enum KeyGlyph {
     static func symbol(_ key: String) -> String? {
         switch key {
@@ -112,14 +151,15 @@ enum KeyGlyph {
         }
     }
 
-    /// Слово на клавише: control, option, space, return.
+    /// Слово для VoiceOver: control, option, пробел, return.
     static func word(_ key: String) -> String {
         switch key {
         case "CTRL": return "control"
         case "OPTION": return "option"
         case "SHIFT": return "shift"
         case "CMD": return "command"
-        case "SPACE", "RETURN", "TAB", "DELETE", "HOME", "END": return key.lowercased()
+        case "SPACE": return "пробел"
+        case "RETURN", "TAB", "DELETE", "HOME", "END": return key.lowercased()
         case "DEL": return "⌦"
         case "PGUP": return "page up"
         case "PGDN": return "page down"
@@ -127,11 +167,11 @@ enum KeyGlyph {
         }
     }
 
-    /// Короткая подпись в строке текста: ⌃, ⇧, Space, ↩, A.
+    /// Короткая подпись, как в русской macOS: ⌃, ⇧, Пробел, ↩, A.
     static func short(_ key: String) -> String {
         if let glyph = symbol(key) { return glyph }
         switch key {
-        case "SPACE": return "Space"
+        case "SPACE": return "Пробел"
         case "RETURN": return "↩"
         case "TAB": return "⇥"
         case "DELETE": return "⌫"
@@ -141,16 +181,6 @@ enum KeyGlyph {
         case "PGUP": return "⇞"
         case "PGDN": return "⇟"
         default: return key
-        }
-    }
-
-    /// Ширина большой клавиши - в пропорциях клавиатуры MacBook.
-    static func width(_ key: String) -> CGFloat {
-        switch key {
-        case "SPACE": return 132
-        case "SHIFT", "RETURN": return 68
-        case "CTRL", "OPTION", "CMD", "TAB", "DELETE": return 56
-        default: return 40
         }
     }
 }

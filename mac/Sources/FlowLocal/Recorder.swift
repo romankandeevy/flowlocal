@@ -19,6 +19,9 @@ final class Recorder {
     // Только главный поток.
     private var engine: AVAudioEngine?
     private var observer: NSObjectProtocol?
+    private var format: AVAudioFormat?
+    private var restartPending = false
+    private var restarts = 0
     private(set) var running = false
     /// UID выбранного микрофона. nil или пропал - системный по умолчанию.
     var deviceUID: String?
@@ -44,6 +47,7 @@ final class Recorder {
         samples.removeAll(keepingCapacity: true)
         sent = 0
         lock.unlock()
+        restarts = 0
         try startEngine()
         running = true
     }
@@ -89,6 +93,7 @@ final class Recorder {
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
         ) { [weak self] _ in self?.configurationChanged() }
         self.engine = engine
+        self.format = format
     }
 
     private func teardown() {
@@ -97,6 +102,7 @@ final class Recorder {
         engine?.inputNode.removeTap(onBus: 0)
         engine?.stop()
         engine = nil
+        format = nil
         lock.lock()
         converter = nil
         lock.unlock()
@@ -104,8 +110,36 @@ final class Recorder {
 
     // Подключили наушники посреди фразы - движок останавливается сам и молча.
     // Поднимаем его на новом устройстве; записанное остаётся.
+    //
+    // Уведомление приходит и без смены устройства - например, от выбора
+    // микрофона в startEngine() или от Bluetooth-гарнитуры, переключающей
+    // профиль. Перезапуск на каждое такое вызывал новое уведомление, движок
+    // крутился в цикле по несколько раз в секунду и запись выходила пустой.
+    // Поэтому: пачку уведомлений склеиваем в одно, живой движок с прежним
+    // форматом не трогаем, а перезапусков на одну запись - не больше трёх.
     private func configurationChanged() {
-        guard running else { return }
+        guard running, !restartPending else { return }
+        restartPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self else { return }
+            self.restartPending = false
+            self.restartIfNeeded()
+        }
+    }
+
+    private func restartIfNeeded() {
+        guard running, let engine else { return }
+        let now = engine.inputNode.outputFormat(forBus: 0)
+        if engine.isRunning, let format,
+           now.sampleRate == format.sampleRate, now.channelCount == format.channelCount {
+            return
+        }
+        guard restarts < 3 else {
+            Log.write("микрофон: слишком много перезапусков подряд - останавливаю запись")
+            onFailure?(Recorder.error("Микрофон постоянно переключается"))
+            return
+        }
+        restarts += 1
         Log.write("микрофон: сменилась конфигурация - перезапускаю движок")
         teardown()
         do {
