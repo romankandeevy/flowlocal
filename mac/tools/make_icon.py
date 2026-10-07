@@ -1,6 +1,7 @@
-"""Иконка FlowLocal по сетке иконок macOS: чёрный «сквиркл» 824 из 1024 с
-тенью в самом рисунке, внутри - волна из семи капсул systemBlue. Тот же язык,
-что у островка и окна: чёрное основание, один акцент.
+"""Иконка FlowLocal по сетке иконок macOS: «сквиркл» 824 из 1024 цвета
+бумаги с тенью в самом рисунке, на нём - зелёная капсула записи с волной из
+семи полосок. Тот же язык, что у окна и капсулы: тёплая бумага, один
+зелёный акцент, сама капсула - и есть продукт.
 
     backend/.venv/bin/python tools/make_icon.py     ->  Resources/AppIcon.icns
 
@@ -64,26 +65,43 @@ shadow = squircle_sd(C, C + 14, HALF)
 over(img, (0, 0, 0), 0.32 * np.clip(1 - shadow / 34, 0, 1) ** 2 * (shadow > -1))
 over(img, (0, 0, 0), 0.18 * np.clip(1 - np.maximum(shadow, 0) / 10, 0, 1))
 
-# Основание: почти чёрный, едва светлее сверху - объём без «градиента на фоне».
+# Основание: бумага, чуть теплее и темнее книзу - объём без яркого градиента.
 body = squircle_sd(C, C, HALF)
 t = ((y - (C - HALF)) / (2 * HALF)).clip(0, 1)[..., None]
-base = hexrgb(0x2A2A2E) * (1 - t) + hexrgb(0x0A0A0C) * t
+base = hexrgb(0xFCFAF5) * (1 - t) + hexrgb(0xEAE3D5) * t
 over(img, base, cover(body))
 
-# Тонкая кромка света по верхнему краю - так читается стекло корпуса.
-rim = np.clip(1 - np.abs(body + 2.0) / 2.0, 0, 1) * np.clip((C - y) / HALF + 0.2, 0, 1)
-over(img, (1, 1, 1), 0.16 * rim * cover(body))
+# Тонкая тёплая кромка по краю - чтобы бумага не растворялась на светлом Доке.
+edge = np.clip(1 - np.abs(body + 1.5) / 1.5, 0, 1)
+over(img, hexrgb(0x8A7B62), 0.22 * edge)
 
-# Волна: семь капсул systemBlue, выше к центру - голос, который становится текстом.
-heights = [0.30, 0.55, 0.82, 1.0, 0.70, 0.46, 0.26]
-bar_w, gap, full = 56.0, 30.0, 430.0
+
+def pill_sd(cx, cy, half_w, r):
+    """Расстояние до горизонтальной капсулы: полуширина half_w, радиус r."""
+    px = np.clip(x, cx - half_w + r, cx + half_w - r)
+    return np.hypot(x - px, y - cy) - r
+
+
+# Капсула записи: мягкая тень под ней, затем зелёное тело.
+PW, PR = 300.0, 128.0          # полуширина и радиус капсулы
+pill_shadow = pill_sd(C, C + 22, PW, PR)
+over(img, hexrgb(0x3C301E), 0.30 * np.clip(1 - pill_shadow / 46, 0, 1) ** 2 * (pill_shadow > -1))
+pill = pill_sd(C, C, PW, PR)
+tp = ((y - (C - PR)) / (2 * PR)).clip(0, 1)[..., None]
+green = hexrgb(0x3E8462) * (1 - tp) + hexrgb(0x245841) * tp
+over(img, green, cover(pill))
+# Блик по верхнему краю капсулы.
+hl = np.clip(1 - np.abs(pill + 2.5) / 2.5, 0, 1) * np.clip((C - y) / PR, 0, 1)
+over(img, (1, 1, 1), 0.28 * hl * cover(pill))
+
+# Волна: семь полосок цвета бумаги, выше к центру - голос, который становится текстом.
+heights = [0.34, 0.60, 0.86, 1.0, 0.74, 0.50, 0.30]
+bar_w, gap, full = 30.0, 26.0, 170.0
 x0 = C - (len(heights) * bar_w + (len(heights) - 1) * gap) / 2 + bar_w / 2
-top_col, bot_col = hexrgb(0x4DA3FF), hexrgb(0x0A6CFF)
 for i, k in enumerate(heights):
     h = full * k
     sd = capsule_sd(x0 + i * (bar_w + gap), C - h / 2, C + h / 2, bar_w / 2)
-    tt = ((y - (C - full / 2)) / full).clip(0, 1)[..., None]
-    over(img, top_col * (1 - tt) + bot_col * tt, cover(sd))
+    over(img, hexrgb(0xF7F5F0), cover(sd))
 
 
 def write_png(path, rgba):

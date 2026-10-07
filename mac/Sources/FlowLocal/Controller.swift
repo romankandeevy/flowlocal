@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import SwiftUI
 
 // Диктовка целиком: хоткеи -> микрофон -> бэкенд -> вставка -> окно и плашка.
 //
@@ -449,17 +450,34 @@ final class Controller {
                 guard let self else { return }
                 guard let samples, !samples.isEmpty else {
                     self.state.rerecognizing.remove(entry.id)
+                    self.state.note(entry.id, "Записи нет")
                     Log.write("перераспознать: нет файла \(name)")
                     return
                 }
                 self.backend.transcribe(self.backend.newID(), samples, lang: self.state.langMode.rawValue,
                                         timeout: 30 + entry.seconds) { result in
                     self.state.rerecognizing.remove(entry.id)
-                    guard case let .success(r) = result else { return }
+                    guard case let .success(r) = result else {
+                        self.state.note(entry.id, "Не вышло — ещё раз")
+                        Log.write("перераспознать: ошибка распознавания")
+                        return
+                    }
                     var e = entry
                     self.apply(r.text, to: &e)
+                    // Пусто - текст не затираем: в записи просто тишина.
+                    guard !e.text.isEmpty else {
+                        var kept = entry
+                        if entry.failed { kept.silent = true }
+                        self.state.update(kept)
+                        self.state.note(entry.id, "В записи тишина")
+                        Log.write("перераспознано: тишина")
+                        return
+                    }
                     e.lang = r.lang
-                    self.state.update(e)
+                    e.silent = nil
+                    let same = e.text == entry.text
+                    withMotion(Motion.moderate) { self.state.update(e) }
+                    self.state.note(entry.id, same ? "Без изменений" : "Распознано заново")
                     Log.write("перераспознано: \(e.words) слов, \(r.lang)")
                 }
             }

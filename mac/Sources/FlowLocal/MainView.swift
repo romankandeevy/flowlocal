@@ -40,25 +40,21 @@ struct MainView: View {
             VStack(spacing: 0) {
                 WindowDragArea()
                     .frame(height: Space.s8 + Space.s1)
-                ZStack {
+                // Смена раздела без общей анимации: прежний раздел уходит
+                // сразу, новый проступает сам (PageAppear). С переходом в
+                // ZStack уходящий держался поверх нового, пока шла пружина.
+                Group {
                     switch state.tab {
-                    case .home:
-                        HomeView(actions: actions)
-                            .transition(.sectionSwap)
-                    case .history:
-                        HistoryView(actions: actions)
-                            .transition(.sectionSwap)
-                    case .stats:
-                        StatsView()
-                            .transition(.sectionSwap)
-                    case .style:
-                        StyleView()
-                            .transition(.sectionSwap)
-                    case .dictionary:
-                        DictionaryView()
-                            .transition(.sectionSwap)
+                    case .home: HomeView(actions: actions)
+                    case .history: HistoryView(actions: actions)
+                    case .stats: StatsView()
+                    case .style: StyleView()
+                    case .dictionary: DictionaryView()
                     }
                 }
+                .id(state.tab)
+                .modifier(PageAppear())
+                .transaction(value: state.tab) { $0.animation = nil }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .background(NL.canvas)
@@ -79,11 +75,19 @@ struct MainView: View {
     }
 }
 
-extension AnyTransition {
-    /// Смена раздела: проступание и сдвиг на 6pt. Уходящий раздел исчезает
-    /// сразу: при растворении обоих они на миг просвечивали друг сквозь друга.
-    static var sectionSwap: AnyTransition {
-        .asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .identity)
+/// Новый раздел проступает со сдвигом на 6pt - своей анимацией, не
+/// общей со сменой раздела.
+private struct PageAppear: ViewModifier {
+    @State private var shown = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown || reduceMotion ? 0 : 6)
+            .onAppear {
+                if reduceMotion { shown = true } else { withAnimation(Motion.moderate) { shown = true } }
+            }
     }
 }
 

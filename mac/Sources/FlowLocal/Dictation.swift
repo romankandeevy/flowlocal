@@ -114,7 +114,9 @@ struct EntryRow: View {
     private var selected: Bool { state.historySelection == [entry.id] }
 
     private var meta: String {
-        if entry.failed { return "Не распознано · " + MainView.clock(entry.seconds) }
+        if entry.failed {
+            return (entry.silent == true ? "В записи тишина · " : "Не распознано · ") + MainView.clock(entry.seconds)
+        }
         var parts = [wordsLabel(entry.words), MainView.clock(entry.seconds)]
         if showDay { parts.insert(HistoryFormat.sectionTitle(Calendar.current.startOfDay(for: entry.date)), at: 0) }
         if entry.lang.lowercased() == "en" { parts.append("English") }
@@ -131,6 +133,14 @@ struct EntryRow: View {
                 if state.rerecognizing.contains(entry.id) {
                     ProgressView().controlSize(.small)
                         .transition(.opacity)
+                } else if let note = state.rowNotes[entry.id] {
+                    Text(note)
+                        .font(NLFont.ui(12, .semibold))
+                        .foregroundStyle(NL.textAccent)
+                        .padding(.horizontal, 9)
+                        .frame(height: 22)
+                        .background(NL.accentSubtle, in: Capsule())
+                        .transition(.scale(scale: 0.85).combined(with: .opacity))
                 } else if copied {
                     HStack(spacing: 5) {
                         Image(systemName: "checkmark")
@@ -144,7 +154,7 @@ struct EntryRow: View {
                     .background(NL.accent, in: Capsule())
                     .transition(.scale(scale: 0.85).combined(with: .opacity))
                 } else if entry.failed {
-                    if canRetry {
+                    if canRetry && entry.silent != true {
                         Text("Распознать заново")
                             .font(NLFont.ui(12, .semibold))
                             .foregroundStyle(NL.textDanger)
@@ -175,12 +185,13 @@ struct EntryRow: View {
             .accessibilityLabel("Действия")
         }
         .animation(Motion.pop, value: copied)
+        .animation(Motion.pop, value: state.rowNotes[entry.id])
     }
 
     private func primary() {
         state.historySelection = [entry.id]
         if entry.failed {
-            if canRetry && !state.rerecognizing.contains(entry.id) { actions.rerecognize(entry) }
+            if canRetry && entry.silent != true && !state.rerecognizing.contains(entry.id) { actions.rerecognize(entry) }
             return
         }
         Clipboard.copy([entry])

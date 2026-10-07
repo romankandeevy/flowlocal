@@ -173,6 +173,8 @@ struct Entry: Identifiable, Codable, Equatable {
     /// Куда диктовали: приложение впереди в начале записи.
     var appID: String?
     var appName: String?
+    /// Перераспознали - в записи тишина: распознавать нечего.
+    var silent: Bool?
 
     init(id: UUID = UUID(), text: String, lang: String, date: Date = Date(), seconds: Double,
          audio: String? = nil, failed: Bool = false) {
@@ -204,6 +206,7 @@ struct Entry: Identifiable, Codable, Equatable {
         raw = try c.decodeIfPresent(String.self, forKey: .raw)
         appID = try c.decodeIfPresent(String.self, forKey: .appID)
         appName = try c.decodeIfPresent(String.self, forKey: .appName)
+        silent = try c.decodeIfPresent(Bool.self, forKey: .silent)
     }
 }
 
@@ -388,6 +391,15 @@ final class AppState: ObservableObject {
     }
     /// Диктовка, которую правят в окне («Исправить…»).
     @Published var editing: Entry?
+    /// Короткие метки у строк истории: «Распознано заново», «В записи тишина».
+    @Published var rowNotes: [UUID: String] = [:]
+
+    func note(_ id: UUID, _ text: String) {
+        rowNotes[id] = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { [weak self] in
+            if self?.rowNotes[id] == text { self?.rowNotes[id] = nil }
+        }
+    }
 
     private static func save<T: Encodable>(_ value: T, _ key: String) {
         if let data = try? JSONEncoder().encode(value) { UserDefaults.standard.set(data, forKey: key) }
