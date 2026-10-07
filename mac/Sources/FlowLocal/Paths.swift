@@ -8,6 +8,7 @@ import Foundation
 //       Python/        окружение бэкенда, своё на каждом Маке (заводит build.sh)
 //       Models/        модели распознавания, докачиваются при первом старте
 //       Recordings/    звук диктовок
+//       history.json   история диктовок - весь текст, без лимита
 //   ~/Library/Logs/FlowLocal.log
 //
 // FLOWLOCAL_BACKEND_DIR в окружении - взять server.py прямо из репозитория,
@@ -21,6 +22,7 @@ enum Paths {
     static var python: URL { support.appendingPathComponent("Python/bin/python3") }
     static var models: URL { support.appendingPathComponent("Models", isDirectory: true) }
     static var recordings: URL { support.appendingPathComponent("Recordings", isDirectory: true) }
+    static var history: URL { support.appendingPathComponent("history.json") }
 
     static var backend: URL? {
         if let dev = ProcessInfo.processInfo.environment["FLOWLOCAL_BACKEND_DIR"], !dev.isEmpty {

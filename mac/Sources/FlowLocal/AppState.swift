@@ -261,6 +261,8 @@ final class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(tab.rawValue, forKey: "section") }
     }
     @Published var historyQuery = ""
+    /// День, выбранный в календаре истории или на графике «Обзора».
+    @Published var historyDay: Date?
     /// ⌘F: растёт - поле поиска забирает фокус.
     @Published var searchFocusRequest = 0
     @Published var historySelection: Set<UUID> = []
@@ -516,13 +518,7 @@ final class AppState: ObservableObject {
         // Прошлые версии хранили срок числом, а замены - JSON-ом: переводим в вид, который понимает хаб.
         if d.object(forKey: "historyDays") is NSNumber { d.set(String(historyDays), forKey: "historyDays") }
         if d.object(forKey: "replacements") is Data { d.set(Replacement.pairs(replacements), forKey: "replacements") }
-        if let data = d.data(forKey: "history") {
-            if let saved = try? JSONDecoder().decode([Entry].self, from: data) {
-                history = saved
-            } else {
-                historyLoaded = false
-            }
-        }
+        loadHistory(d)
         refreshPermissions()
         refreshDevices()
     }
@@ -605,11 +601,20 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Сколько последних диктовок хранят звук. Текст хранится весь и всегда:
+    /// история и статистика «за всё время» - по всем диктовкам. Звук тяжёлый,
+    /// у старых записей он уходит, а текст остаётся.
+    static let audioKept = 500
+
     func add(_ entry: Entry) {
         history.insert(entry, at: 0)
-        if history.count > 500 {
-            for old in history[500...] { AudioStore.delete(old.audio) }
-            history.removeLast(history.count - 500)
+        var withAudio = 0
+        for i in history.indices where history[i].audio != nil {
+            withAudio += 1
+            if withAudio > Self.audioKept {
+                AudioStore.delete(history[i].audio)
+                history[i].audio = nil
+            }
         }
         saveHistory()
     }
@@ -651,7 +656,7 @@ final class AppState: ObservableObject {
         delete(Set(history.map(\.id)), undo: undo, action: "очистку истории")
     }
 
-    /// История - в фоне: 500 записей в JSON - заметная пауза главного потока
+    /// История - в фоне: тысячи записей в JSON - заметная пауза главного потока
     /// ровно в момент вставки. Очередь последовательная - порядок сохранений
     /// не путается; массив копируется, данные не делятся между потоками.
     private static let saveQueue = DispatchQueue(label: "flowlocal.history", qos: .utility)
@@ -659,9 +664,42 @@ final class AppState: ObservableObject {
     private func saveHistory() {
         let snapshot = history
         Self.saveQueue.async {
-            if let data = try? JSONEncoder().encode(snapshot) {
-                UserDefaults.standard.set(data, forKey: "history")
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? FileManager.default.createDirectory(at: Paths.support, withIntermediateDirectories: true)
+            try? data.write(to: Paths.history, options: .atomic)
+        }
+    }
+
+    /// История - файлом в данных приложения. Раньше она жила в UserDefaults
+    /// (и обрезалась до 500 записей): без лимита там ей тесно - весь plist
+    /// читается в память при каждом запуске. Старую переносим один раз.
+    private func loadHistory(_ d: UserDefaults) {
+        let fm = FileManager.default
+        if let data = try? Data(contentsOf: Paths.history) {
+            if let saved = try? JSONDecoder().decode([Entry].self, from: data) {
+                history = saved
+            } else {
+                // Битый файл откладываем в сторону, а не затираем новыми
+                // диктовками; звук не чистим (historyLoaded) - разберёмся руками.
+                historyLoaded = false
+                let aside = Paths.support.appendingPathComponent("history-broken-\(Int(Date().timeIntervalSince1970)).json")
+                try? fm.moveItem(at: Paths.history, to: aside)
+                Log.write("история не прочиталась, отложена в \(aside.lastPathComponent)")
             }
+            return
+        }
+        guard let data = d.data(forKey: "history") else { return }
+        guard let saved = try? JSONDecoder().decode([Entry].self, from: data) else {
+            historyLoaded = false
+            return
+        }
+        history = saved
+        do {
+            try fm.createDirectory(at: Paths.support, withIntermediateDirectories: true)
+            try data.write(to: Paths.history, options: .atomic)
+            d.removeObject(forKey: "history")
+        } catch {
+            Log.write("история не перенеслась в файл: \(error.localizedDescription)")
         }
     }
 
