@@ -23,7 +23,11 @@ struct StatsView: View {
                 Spacer(minLength: 0)
                 PeriodSwitch(selection: $period)
             }
-            BarChart(days: days)
+            BarChart(days: days) { day in
+                // Столбик дня - в историю этого дня.
+                state.historyDay = day
+                state.tab = .history
+            }
                 .padding(.horizontal, 24)
                 .padding(.top, 22)
                 .padding(.bottom, 14)
@@ -163,6 +167,7 @@ private struct PeriodSwitch: View {
 /// появлении один за другим.
 private struct BarChart: View {
     let days: [DayWords]
+    var open: (Date) -> Void = { _ in }
     @State private var hovered: Date?
     @State private var grown = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -197,6 +202,8 @@ private struct BarChart: View {
                         .onHover { inside in
                             if inside { hovered = day.date } else if hovered == day.date { hovered = nil }
                         }
+                        .onTapGesture { if day.words > 0 { open(day.date) } }
+                        .help(day.words > 0 ? "Открыть диктовки этого дня" : "")
                         .animation(reduceMotion ? nil : Motion.slow.delay(Double(index) * (dense ? 0.01 : 0.04)),
                                    value: grown)
                         .accessibilityElement()

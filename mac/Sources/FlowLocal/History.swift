@@ -32,6 +32,9 @@ struct HistoryView: View {
                 .frame(maxWidth: .infinity)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
+                    if !state.history.isEmpty {
+                        ActivityCalendar(history: state.history, selected: $state.historyDay)
+                    }
                     ForEach(HistoryFormat.days(items)) { day in
                         DaySection(day: day, actions: actions)
                     }
@@ -44,7 +47,7 @@ struct HistoryView: View {
                 // Анимируем только появление и удаление диктовок: при поиске
                 // список меняется на каждую букву, и анимация сотен строк
                 // тормозила бы ввод.
-                .motion(Motion.moderate, value: query.isEmpty && filter == .all ? items.map(\.id) : [])
+                .motion(Motion.moderate, value: query.isEmpty && filter == .all && state.historyDay == nil ? items.map(\.id) : [])
             }
             .entryKeys(items, actions: actions)
             .overlay { empty(items) }
@@ -66,7 +69,15 @@ struct HistoryView: View {
             }
             if !state.history.isEmpty {
                 SearchField(text: $state.historyQuery, focusRequest: state.searchFocusRequest)
-                FilterChips(selection: $filter)
+                HStack(spacing: 8) {
+                    FilterChips(selection: $filter)
+                    if let day = state.historyDay {
+                        DayChip(title: HistoryFormat.sectionTitle(day)) {
+                            withMotion(Motion.base) { state.historyDay = nil }
+                        }
+                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    }
+                }
             }
         }
     }
@@ -90,7 +101,8 @@ struct HistoryView: View {
             case .en: passes = !entry.failed && lang == "en"
             case .failed: passes = entry.failed
             }
-            return passes && (q.isEmpty || entry.text.localizedCaseInsensitiveContains(q))
+            let inDay = state.historyDay.map { Calendar.current.isDate(entry.date, inSameDayAs: $0) } ?? true
+            return passes && inDay && (q.isEmpty || entry.text.localizedCaseInsensitiveContains(q))
         }
     }
 
@@ -104,7 +116,7 @@ struct HistoryView: View {
                          message: query.isEmpty ? "В этом фильтре пока пусто." : "Нет диктовок со словами «\(query)».") {
                 Button("Сбросить") {
                     state.historyQuery = ""
-                    withMotion(Motion.base) { filter = .all }
+                    withMotion(Motion.base) { filter = .all; state.historyDay = nil }
                 }
                 .nlButton(.secondary, .sm)
             }
@@ -131,6 +143,36 @@ private struct DaySection: View {
             }
             EntryList(entries: day.entries, actions: actions)
         }
+    }
+}
+
+/// Выбранный в календаре день - капсулой с крестиком.
+private struct DayChip: View {
+    let title: String
+    let clear: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: clear) {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 11, weight: .medium))
+                Text(title)
+                    .font(NLFont.ui(12.5, .medium))
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .opacity(hover ? 1 : 0.6)
+            }
+            .foregroundStyle(NL.textAccent)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(Capsule().fill(NL.accentSubtle))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help("Показать все дни")
+        .accessibilityLabel("День \(title), показать все дни")
     }
 }
 
