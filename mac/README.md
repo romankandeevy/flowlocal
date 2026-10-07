@@ -20,6 +20,12 @@
 Spotlight или Дока. `./build.sh run` — собрать и запустить прямо из
 `build/`, для разработки.
 
+`./build.sh dmg` — образ для релиза `build/FlowLocal-<версия>.dmg`: один
+бинарник под arm64 и x86_64 (lipo), подпись ad-hoc, окружение этого Мака не
+нужно. Python приложение из .dmg заводит само при первом запуске
+(`PythonSetup.swift`). Проверить первый запуск, не трогая свои данные:
+`FLOWLOCAL_SUPPORT_DIR=/tmp/fl-test` — другая папка данных.
+
 Сборка переносима: ни одного абсолютного пути ни в `.app`, ни в скриптах —
 репозиторий может лежать где угодно, `.app` можно положить в «Программы» или
 переслать. Всё, что зависит от конкретного Мака, живёт в данных пользователя:
@@ -197,6 +203,7 @@ Mac, и она старше замедления int8 из 1.25.
 | `Sources/FlowLocal/Commands.swift` | Строка меню: «Вид» (⌘1…⌘3), «Диктовка», «Найти…», «Справка» |
 | `Sources/FlowLocal/MainView.swift` | Окно: сайдбар, разделы, поле поиска; мост AppKit → сцены |
 | `Sources/FlowLocal/Home.swift`, `History.swift`, `ActivityCalendar.swift`, `Onboarding.swift` | Главная, История и её календарь, первые шаги |
+| `Sources/FlowLocal/PythonSetup.swift` | первый запуск из .dmg: качает python-build-standalone (sha256), ставит requirements.txt в `Application Support/FlowLocal/Python`, пишет ту же метку, что build.sh |
 | `Sources/FlowLocal/CodeSpeech.swift`, `backend/codemerge.py` | диктовка кода: слова-знаки и имена; склейка GigaAM + Parakeet по словам и времени (`lang: code`) |
 | `Sources/FlowLocal/Dictation.swift` | Строка диктовки, клавиатура в списках, живая запись |
 | `Sources/FlowLocal/StyleView.swift`, `DictionaryView.swift` | Вкладки «Стиль» и «Словарь» |

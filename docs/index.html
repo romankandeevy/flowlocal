@@ -474,7 +474,7 @@
       <a href="#keys">Клавиши</a>
       <a href="https://github.com/romankandeevy/flowlocal">GitHub</a>
     </div>
-    <a class="btn small" href="#install">Установить</a>
+    <a class="btn small" href="https://github.com/romankandeevy/flowlocal/releases/latest" data-download>Скачать</a>
   </div>
 </nav>
 
@@ -485,16 +485,16 @@
     <p class="lead" id="lead" aria-label="Зажали клавишу. Сказали. Отпустили. Слова уже там, где вы печатали.">Зажали клавишу. Сказали. Отпустили. Слова уже там, где вы печатали.</p>
     <p class="sublead">Диктовка для Mac, которая работает без интернета. Русский и английский, знаки препинания, чистка «ну» и «э», стиль под каждое приложение. Звук и текст не покидают Мак.</p>
     <div class="buttons">
-      <a class="btn" href="#install">
+      <a class="btn" href="https://github.com/romankandeevy/flowlocal/releases/latest" data-download>
         <svg width="16" height="18" viewBox="0 0 17 20" aria-hidden="true"><path fill="currentColor" d="M14.1 10.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9C3.6 4.8 2 5.8 1.1 7.4c-1.9 3.2-.5 8 1.3 10.6.9 1.3 1.9 2.7 3.3 2.6 1.3-.1 1.8-.8 3.4-.8 1.6 0 2 .8 3.4.8 1.4 0 2.3-1.3 3.2-2.6 1-1.5 1.4-2.9 1.4-3-.1 0-2.9-1.1-3-4.4zM11.5 3c.7-.9 1.2-2 1.1-3.2-1 0-2.3.7-3 1.6-.7.8-1.2 2-1.1 3.1 1.2.1 2.3-.6 3-1.5z"/></svg>
-        Установить на Mac
+        Скачать для macOS
       </a>
       <a class="btn ghost" href="https://github.com/romankandeevy/flowlocal">
         <svg width="17" height="17" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         Исходный код
       </a>
     </div>
-    <p class="note"><span data-version>Версия 3.0 · </span>Бесплатно · открытый код, MIT · macOS 14 и новее · Apple Silicon и Intel</p>
+    <p class="note"><span data-version>Версия 3.2 · </span>Бесплатно · открытый код, MIT · macOS 14 и новее · Apple Silicon и Intel</p>
 
     <div class="try" id="try">
       <div class="scribble left">сама переходит из приложения в приложение — смотрите, как меняется стиль
@@ -806,8 +806,16 @@
   </section>
 
   <section id="install">
-    <h2 class="reveal">Установка — одна строка</h2>
-    <p class="sub reveal">Откройте Терминал, вставьте и нажмите Enter. Скрипт соберёт приложение, положит его в «Программы» и запустит.</p>
+    <h2 class="reveal">Установка — как у обычного приложения</h2>
+    <p class="sub reveal">Скачали, перетащили в «Программы», открыли. Всё остальное FlowLocal сделает сам.</p>
+    <div class="steps">
+      <div class="step reveal"><span class="n">1</span><div class="vis"><a class="btn small" href="https://github.com/romankandeevy/flowlocal/releases/latest" data-download>Скачать .dmg</a></div><h3>Скачайте</h3><p>Один файл на любой Мак — Apple Silicon и Intel. Около 3 МБ.</p></div>
+      <div class="step reveal"><span class="n">2</span><div class="vis"><svg width="64" height="40" viewBox="0 0 64 40" fill="none" stroke="var(--green)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 20h18M14 13l7 7-7 7"/><path d="M30 10a3 3 0 0 1 3-3h8l4 4h13a3 3 0 0 1 3 3v19a3 3 0 0 1-3 3H33a3 3 0 0 1-3-3z"/></svg></div><h3>Перетащите</h3><p>Откройте .dmg и перетащите FlowLocal на папку «Программы».</p></div>
+      <div class="step reveal"><span class="n">3</span><div class="vis"><span class="big" style="font-size:34px">~1 ГБ</span></div><h3>Откройте</h3><p>При первом запуске FlowLocal сам скачает Python и модели распознавания — один раз, дальше без интернета.</p></div>
+    </div>
+    <p class="sub reveal" style="margin-top:22px">macOS скажет, что не может проверить разработчика: приложение бесплатное и не куплено у Apple. Откройте <b>Системные настройки → Конфиденциальность и безопасность</b> и нажмите <b>«Всё равно открыть»</b> — один раз.</p>
+    <h3 class="reveal" style="text-align:center;font-size:22px;margin:46px 0 14px">Или одной командой в Терминале</h3>
+    <p class="sub reveal" style="margin-bottom:22px">Соберёт FlowLocal прямо на вашем Маке из исходников — без вопросов от macOS. Нужны Command Line Tools: macOS предложит поставить их сама.</p>
     <div class="term reveal">
       <div class="bar"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span><span class="name">Терминал — zsh</span></div>
       <pre><span class="p">~ % </span><span id="cmd">curl -fsSL https://raw.githubusercontent.com/romankandeevy/flowlocal/main/mac/install.sh | bash</span>
@@ -816,12 +824,11 @@
 == собираю (несколько минут при первом разе) ==</span></pre>
     </div>
     <div class="copy-row reveal">
-      <button class="btn" id="copy">Скопировать команду</button>
-      <a class="btn ghost" href="https://github.com/romankandeevy/flowlocal#установка">Другие способы</a>
+      <button class="btn ghost" id="copy">Скопировать команду</button>
     </div>
     <div class="reqs">
-      <div class="req reveal"><b>macOS 14+</b>Apple Silicon или Intel. Нужны Command Line Tools — macOS предложит поставить сама.</div>
-      <div class="req reveal"><b>Python 3.11–3.13</b>Если его нет, скрипт поставит через Homebrew. Модели (~850 МБ) скачаются при первом запуске.</div>
+      <div class="req reveal"><b>macOS 14+</b>Apple Silicon или Intel — один и тот же файл.</div>
+      <div class="req reveal"><b>Интернет — один раз</b>Python и модели (~1 ГБ) докачиваются при первом запуске. Дальше всё работает офлайн.</div>
       <div class="req reveal"><b>Два разрешения</b>Микрофон — слышать. Универсальный доступ — вставлять ⌘V в чужое окно.</div>
     </div>
   </section>
@@ -831,7 +838,7 @@
     <h2 class="reveal">Хватит печатать.<br><em>Говорите.</em></h2>
     <p class="sub reveal">Бесплатно, без облака и без аккаунта. Попробуйте один день — клавиатура покажется медленной.</p>
     <div class="buttons reveal">
-      <a class="btn" href="#install">Установить на Mac</a>
+      <a class="btn" href="https://github.com/romankandeevy/flowlocal/releases/latest" data-download>Скачать для macOS</a>
       <a class="btn ghost" href="https://github.com/romankandeevy/flowlocal">Звезда на GitHub ★</a>
     </div>
   </section>
@@ -843,13 +850,17 @@
 <div class="toast" id="toast">Скопировано — вставьте в Терминал</div>
 
 <script>
-  // Номер версии - из последнего релиза на GitHub. Не ответил - остаётся вписанный.
+  // Версия и ссылка на .dmg - из последнего релиза на GitHub. Не ответил - остаются вписанные.
   (async () => {
     try {
       const res = await fetch('https://api.github.com/repos/romankandeevy/flowlocal/releases/latest', { headers: { Accept: 'application/vnd.github+json' } });
       if (!res.ok) return;
-      const v = ((await res.json()).tag_name || '').replace(/^v/, '');
+      const rel = await res.json();
+      const v = (rel.tag_name || '').replace(/^v/, '');
       if (v) document.querySelector('[data-version]').textContent = 'Версия ' + v + ' · ';
+      // «Скачать» качает .dmg последнего релиза сразу, без страницы релиза.
+      const dmg = (rel.assets || []).find(a => /\.dmg$/i.test(a.name));
+      if (dmg) for (const a of document.querySelectorAll('[data-download]')) { a.href = dmg.browser_download_url; a.setAttribute('download', ''); }
     } catch {}
   })();
 </script>
