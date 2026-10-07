@@ -1,7 +1,8 @@
-"""Иконка FlowLocal по сетке иконок macOS: тёмный «сквиркл» 824 из 1024 с
-зелёным светом изнутри и бликом по кромке; на нём - светящиеся «буквы»,
-которые набегают на текстовый курсор: сказанное ложится туда, где курсор.
-Дух - Raycast / Linear: тёмная основа, один смелый символ со свечением.
+"""Иконка FlowLocal по сетке иконок macOS: «сквиркл» 824 из 1024 цвета
+тёплого угля (тёмная тема окна), на нём - две строки текста, который
+набирается: слова цвета бумаги, последнее ещё проявляется зелёным, в конце -
+зелёный курсор с мягким свечением. Сказанное ложится туда, где курсор.
+Цвета - токены окна: бумага, уголь, зелёный акцент.
 
     backend/.venv/bin/python tools/make_icon.py     ->  Resources/AppIcon.icns
 
@@ -90,7 +91,55 @@ def caret():
     img.add((1,1,1),cover(rr(cx-10,C-120,8,110,8))*0.35,m)
     return img
 
-art = caret()
+def typing():
+    img = Img()
+    # Основа: тёплый уголь, светлее сверху, тёплое пятно света.
+    sh = sq(C, C + 16, HALF)
+    img.over((0, 0, 0), 0.42 * np.clip(1 - sh / 40, 0, 1) ** 2 * (sh > -1))
+    b = sq(C, C, HALF)
+    m = cover(b)
+    col = lin(0x2E2A24, 0x13110E, (y - (C - HALF)) / (2 * HALF))
+    r = np.hypot(x - (C - 60), (y - (C - 300)) * 1.15) / 560
+    col = col + H(0x3B342A)[None, None, :] * (np.clip(1 - r, 0, 1) ** 2)[..., None] * 0.55
+    img.over(np.clip(col, 0, 1), m)
+    edge = np.clip(1 - np.abs(b + 2) / 2, 0, 1)
+    img.add((1, 1, 1), edge * np.clip((C - y) / HALF + 0.1, 0, 1) * 0.26, m)
+    img.add(H(0x000000), edge * 0, m)
+
+    PAPER, GREEN, MINT = 0xEFE8DA, 0x6CC196, 0xA6E3C4
+    H_W = 76  # высота «слова»
+
+    def word(x0, w, cy):
+        return rr(x0 + w / 2, cy, w / 2, H_W / 2, H_W / 2)
+
+    # Первая строка - уже написанное, тише.
+    xx = C - 282
+    for w in (166, 104, 214):
+        wm = cover(word(xx, w, C - 84))
+        img.over(H(PAPER), wm * m * 0.62)
+        xx += w + 38
+    # Вторая строка - пишется сейчас: слова ярче, последнее проявляется зелёным.
+    xx = C - 290
+    for w in (132, 186):
+        wm = cover(word(xx, w, C + 80))
+        img.over(H(PAPER), wm * m * 0.96)
+        xx += w + 38
+    nw = 122
+    fresh = cover(word(xx, nw, C + 80))
+    fade = np.clip((x - xx) / nw, 0, 1)
+    glow(img, fresh, GREEN, 40, 0.45, m)
+    img.over(lin(GREEN, MINT, 1 - fade) * 1, fresh * m * (0.55 + 0.45 * (1 - fade)))
+    xx += nw + 32
+    # Курсор: зелёный, светится, с бликом.
+    cx = xx + 15
+    cm = cover(rr(cx, C + 80, 15, 106, 15))
+    glow(img, cm, GREEN, 90, 1.0, m)
+    glow(img, cm, MINT, 26, 0.6, m)
+    img.over(lin(0xD8F7E6, GREEN, (y - (C - 26)) / 212), cm * m)
+    return img
+
+
+art = typing()
 img = np.concatenate([art.rgb * art.a[..., None], art.a[..., None]], axis=2)
 
 
