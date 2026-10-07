@@ -703,7 +703,9 @@ final class AppState: ObservableObject {
         let fm = FileManager.default
         if let data = try? Data(contentsOf: Paths.history) {
             if let saved = try? JSONDecoder().decode([Entry].self, from: data) {
-                history = saved
+                // Нераспознанные, в которых оказалась тишина, раньше оставались
+                // в истории с пометкой - теперь их там нет.
+                history = saved.filter { !($0.failed && $0.silent == true) }
             } else {
                 // Битый файл откладываем в сторону, а не затираем новыми
                 // диктовками; звук не чистим (historyLoaded) - разберёмся руками.

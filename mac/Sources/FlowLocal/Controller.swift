@@ -370,11 +370,12 @@ final class Controller {
         var draft = Entry(id: entryID, text: "", lang: state.langMode.rawValue, seconds: seconds, audio: audio)
         draft.appID = target.id
         draft.appName = target.name
+        let quiet = Self.isQuiet(all)
         backend.finish(id, timeout: 15 + seconds * 0.3) { [weak self] result in
             guard let self, id == self.session else { return }
             switch result {
             case let .success(r):
-                self.deliver(r, draft: draft)
+                self.deliver(r, draft: draft, quiet: quiet)
             case let .failure(error):
                 Log.write("разбор на ходу не удался: \(error.localizedDescription) - распознаю целиком")
                 self.fallback(all, draft: draft)
@@ -389,7 +390,7 @@ final class Controller {
             guard let self, id == self.session else { return }
             switch result {
             case let .success(r):
-                self.deliver(r, draft: draft)
+                self.deliver(r, draft: draft, quiet: Self.isQuiet(audio))
             case let .failure(error):
                 Log.write("распознавание не удалось: \(error.localizedDescription) - запись сохранена до перезапуска")
                 self.orphan = (audio, draft)
@@ -423,7 +424,25 @@ final class Controller {
         }
     }
 
-    private func deliver(_ r: Backend.Result, draft: Entry) {
+    /// Тишина ли в записи: самое громкое окно в 0,1 с тише -40 дБ. Речь,
+    /// даже вполголоса и с режимом шёпота, громче в разы; тише - шум
+    /// микрофона, нажали и промолчали.
+    static func isQuiet(_ samples: [Float]) -> Bool {
+        let win = Int(Recorder.sampleRate / 10)
+        guard win > 0, !samples.isEmpty else { return true }
+        var loudest: Float = 0
+        var i = 0
+        while i < samples.count {
+            let end = min(samples.count, i + win)
+            var sum: Float = 0
+            for k in i..<end { sum += samples[k] * samples[k] }
+            loudest = max(loudest, (sum / Float(end - i)).squareRoot())
+            i = end
+        }
+        return loudest < 0.01
+    }
+
+    private func deliver(_ r: Backend.Result, draft: Entry, quiet: Bool = false) {
         // Счётчик перезапусков - после настоящей работы, а не на «модель
         // загружена»: процесс, падающий позже загрузки, иначе крутился бы вечно.
         restarts = 0
@@ -440,7 +459,15 @@ final class Controller {
             Log.write("чистка: \(Entry.count(raw)) → \(entry.words) слов")
         }
         guard !text.isEmpty else {
-            // Не расслышали - запись всё равно в истории: её можно перераспознать.
+            // Распознавание отработало, слов нет, и в записи тихо - нажали и
+            // промолчали. Такой записи в истории не место: её звук уберётся
+            // при следующем запуске (AudioStore.purge).
+            if quiet {
+                Log.write("диктовка: тишина - в историю не пишу")
+                flash(.failed("Тишина — ничего не записано"), hideAfter: 1.5)
+                return
+            }
+            // Голос был, а слов нет - запись в истории: её можно перераспознать.
             if entry.audio != nil { state.add(entry) }
             flash(.failed(entry.audio != nil ? "Речь не распознана. Запись в истории" : "Речь не распознана"))
             return
@@ -491,11 +518,14 @@ final class Controller {
                     self.apply(r.text, to: &e)
                     // Пусто - текст не затираем: в записи просто тишина.
                     guard !e.text.isEmpty else {
-                        var kept = entry
-                        if entry.failed { kept.silent = true }
-                        self.state.update(kept)
-                        self.state.note(entry.id, "В записи тишина")
-                        Log.write("перераспознано: тишина")
+                        // Нераспознанная и снова пусто - в ней тишина: из
+                        // истории прочь. Распознанную не трогаем.
+                        if entry.failed {
+                            withMotion(Motion.moderate) { self.state.delete([entry.id], undo: nil) }
+                            Log.write("перераспознано: тишина - убрано из истории")
+                        } else {
+                            self.state.note(entry.id, "В записи тишина")
+                        }
                         return
                     }
                     e.lang = r.lang
