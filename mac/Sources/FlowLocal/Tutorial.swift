@@ -120,8 +120,13 @@ struct TutorialView: View {
         }
         .frame(width: 1000, height: 660)
         .onAppear { models.start() }
-        .onDisappear { models.stop(); state.tutorialPractice = false }
-        .onChange(of: step) { _, new in state.tutorialPractice = new == .practice }
+        .onDisappear { models.stop(); state.tutorialPractice = false; state.tutorialStyle = nil }
+        .onChange(of: step) { _, new in
+            // Проба - на шагах «Первая диктовка» и «Код голосом»: не вставлять,
+            // а на коде ещё и разбирать стилем «Код».
+            state.tutorialStyle = new == .code ? .code : nil
+            state.tutorialPractice = new == .practice || new == .code
+        }
     }
 
     // MARK: рельс слева
@@ -209,10 +214,13 @@ struct TutorialView: View {
                 .font(NLFont.ui(12.5))
                 .foregroundStyle(NL.textTertiary)
             Spacer()
-            if step == .hello {
-                Button("Пропустить обучение") { go(.done) }.buttonStyle(.plain)
-                    .font(NLFont.ui(14, .medium)).foregroundStyle(NL.textSecondary).padding(.horizontal, 12)
-            } else {
+            if step != .done {
+                // Пропустить можно с любого шага - обучение закрывается,
+                // открыть снова: «Справка → Обучение…».
+                Button("Пропустить обучение") { hooks.finished() }.buttonStyle(.plain)
+                    .font(NLFont.ui(14, .medium)).foregroundStyle(NL.textTertiary).padding(.horizontal, 12)
+            }
+            if step != .hello {
                 Button("Назад") { go(TStep(rawValue: step.rawValue - 1) ?? .hello) }.buttonStyle(.plain)
                     .font(NLFont.ui(14, .medium)).foregroundStyle(NL.textSecondary).padding(.horizontal, 12)
                     .keyboardShortcut(.leftArrow, modifiers: [.command])
@@ -244,7 +252,7 @@ struct TutorialView: View {
         case .recognition: RecognitionStep(models: models)
         case .practice: PracticeStep(models: models)
         case .styles: StylesStep()
-        case .code: CodeStep()
+        case .code: CodeStep(models: models)
         case .dictionary: DictionaryStep()
         case .tips: TipsStep()
         case .done: DoneStep(hooks: hooks)
@@ -535,7 +543,15 @@ private struct KeysStep: View {
                     } action: { set(role, Self.off) }
                 }
             }
-            if heard == role {
+            if let issue = state.hotkeyIssues[role] {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.circle.fill").foregroundStyle(NL.warning)
+                    Text(issue).font(NLFont.ui(13.5, .medium)).foregroundStyle(NL.textWarning)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(NL.warningSubtle, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else if heard == role {
                 HStack(spacing: 8) {
                     Circle().fill(NL.accent).frame(width: 8, height: 8)
                     Text("Работает — вы нажали \(current.label)").font(NLFont.ui(13.5, .medium)).foregroundStyle(NL.textAccent)
@@ -735,14 +751,35 @@ final class ModelProgress: ObservableObject {
 private struct PracticeStep: View {
     @EnvironmentObject var state: AppState
     @ObservedObject var models: ModelProgress
-    @State private var since = Date()
-
-    private var attempt: Entry? { state.history.first { $0.date >= since } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             StepTitle(title: "Попробуйте — прямо здесь",
                       subtitle: "Зажмите **\(state.hotkey.label)**, скажите фразу и отпустите. Например: *«Привет, это моя первая диктовка, встречаемся завтра в десять»*.")
+            PracticeBox(models: models, placeholder: "Здесь появится то, что вы скажете")
+            HStack(alignment: .top, spacing: 10) {
+                Tip(title: "Говорите как обычно", text: "Запятые и точки поставятся сами — диктовать их не нужно.")
+                Tip(title: "Капсула внизу экрана", text: "Чёрная, с полосками и временем — значит, слушает.")
+                Tip(title: "Передумали", text: "Esc — запись отменится, ничего не вставится.")
+            }
+            .frame(height: 108)
+        }
+    }
+}
+
+/// Поле пробы: показывает последнюю диктовку, сделанную на этом шаге.
+/// Ничего не вставляется (state.tutorialPractice) - текст берётся из истории.
+private struct PracticeBox: View {
+    @EnvironmentObject var state: AppState
+    @ObservedObject var models: ModelProgress
+    let placeholder: String
+    var mono = false
+    @State private var since = Date()
+
+    private var attempt: Entry? { state.history.first { $0.date >= since } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
             field
             if let e = attempt, !e.failed {
                 HStack(spacing: 12) {
@@ -755,12 +792,6 @@ private struct PracticeStep: View {
                 .background(NL.accentSubtle, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .transition(.opacity)
             }
-            HStack(alignment: .top, spacing: 10) {
-                Tip(title: "Говорите как обычно", text: "Запятые и точки поставятся сами — диктовать их не нужно.")
-                Tip(title: "Капсула внизу экрана", text: "Чёрная, с полосками и временем — значит, слушает.")
-                Tip(title: "Передумали", text: "Esc — запись отменится, ничего не вставится.")
-            }
-            .frame(height: 108)
         }
         .animation(Motion.moderate, value: attempt?.id)
         .onAppear { since = Date() }
@@ -772,7 +803,7 @@ private struct PracticeStep: View {
         VStack(alignment: .leading) {
             if let e = attempt {
                 Text(e.failed ? "Не расслышал — попробуйте ещё раз, чуть ближе к микрофону." : e.text)
-                    .font(NLFont.ui(18))
+                    .font(mono && !e.failed ? .system(size: 16, design: .monospaced) : NLFont.ui(18))
                     .foregroundStyle(e.failed ? NL.textTertiary : NL.textPrimary)
                     .textSelection(.enabled)
             } else if state.isBusy {
@@ -781,11 +812,11 @@ private struct PracticeStep: View {
                 Text("Распознавание ещё готовится — \(Int(models.ru * 100))%. Как только будет готово, можно пробовать.")
                     .font(NLFont.ui(16)).foregroundStyle(NL.textTertiary)
             } else {
-                Text("Здесь появится то, что вы скажете").font(NLFont.ui(18)).foregroundStyle(NL.textQuaternary)
+                Text(placeholder).font(NLFont.ui(18)).foregroundStyle(NL.textQuaternary)
             }
         }
         .padding(.horizontal, 20).padding(.vertical, 18)
-        .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: mono ? 84 : 120, alignment: .topLeading)
         .background(NL.surface, in: shape)
         .overlay { shape.strokeBorder(state.isBusy ? NL.accent : NL.border, lineWidth: state.isBusy ? 2 : 1) }
         .animation(Motion.fast, value: state.isBusy)
@@ -879,6 +910,8 @@ private struct StylesStep: View {
 // MARK: - 7. Код голосом
 
 private struct CodeStep: View {
+    @EnvironmentObject var state: AppState
+    @ObservedObject var models: ModelProgress
     private let examples: [(String, String)] = [
         ("let greeting равно кавычки привет кавычки", "let greeting = \"привет\""),
         ("func load profile скобки открыть фигурную", "func loadProfile() {"),
@@ -908,6 +941,11 @@ private struct CodeStep: View {
                 }
             }
             .nlCard(padding: 0)
+            VStack(alignment: .leading, spacing: 8) {
+                (Text("Попробуйте: ").font(NLFont.ui(14, .semibold)).foregroundStyle(NL.textPrimary)
+                 + Text("зажмите \(state.hotkey.label) и скажите строчку из таблицы — здесь она разбирается как в Xcode.").font(NLFont.ui(14)).foregroundStyle(NL.textSecondary))
+                PracticeBox(models: models, placeholder: "let greeting = \"привет\"", mono: true)
+            }
             HStack(alignment: .top, spacing: 10) {
                 Tip(title: "Знаки словами", text: "равно, точка, запятая, скобки, открыть / закрыть скобку, квадратную, фигурную, кавычки, стрелка, плюс, минус, больше, меньше, новая строка")
                 Tip(title: "Как писать имя", text: "по умолчанию camelCase. Перед именем: «снейк кейс», «паскаль кейс», «кебаб кейс», «капс», «слитно»")

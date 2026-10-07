@@ -78,21 +78,34 @@ final class Controller {
     func bindHotkeys() {
         HotkeyCenter.shared.unregister(id: holdID)
         HotkeyCenter.shared.unregister(id: toggleID)
+        var issues: [HotkeyRole: String] = [:]
         let hold = state.hotkey
+        if hold.isEnabled && HotkeyPreset.isSystemCombo(keyCode: Int(hold.keyCode), mods: hold.modifiers) {
+            issues[.hold] = "\(hold.label) занято macOS — выберите другое"
+        }
         if usable(hold, .hold),
            !HotkeyCenter.shared.register(id: holdID, keyCode: hold.keyCode, modifiers: hold.modifiers,
                                          pressed: { [weak self] in self?.holdPressed() },
                                          released: { [weak self] in self?.holdReleased() }) {
             Log.write("сочетание «\(HotkeyRole.hold.title)» \(hold.label) занято другим приложением")
+            issues[.hold] = "\(hold.label) уже занято другим приложением — выберите другое"
         }
         let toggle = state.toggleHotkey
         if hold.isEnabled, toggle.same(as: hold) {
             Log.write("сочетание «\(HotkeyRole.toggle.title)» совпадает с «\(HotkeyRole.hold.title)» - не регистрирую")
-        } else if usable(toggle, .toggle),
-                  !HotkeyCenter.shared.register(id: toggleID, keyCode: toggle.keyCode, modifiers: toggle.modifiers,
-                                                pressed: { [weak self] in self?.togglePressed() }) {
-            Log.write("сочетание «\(HotkeyRole.toggle.title)» \(toggle.label) занято другим приложением")
+            issues[.toggle] = "Совпадает с «Удерживать» — выберите другое или «Не нужно»"
+        } else {
+            if toggle.isEnabled && HotkeyPreset.isSystemCombo(keyCode: Int(toggle.keyCode), mods: toggle.modifiers) {
+                issues[.toggle] = "\(toggle.label) занято macOS — выберите другое"
+            }
+            if usable(toggle, .toggle),
+               !HotkeyCenter.shared.register(id: toggleID, keyCode: toggle.keyCode, modifiers: toggle.modifiers,
+                                             pressed: { [weak self] in self?.togglePressed() }) {
+                Log.write("сочетание «\(HotkeyRole.toggle.title)» \(toggle.label) занято другим приложением")
+                issues[.toggle] = "\(toggle.label) уже занято другим приложением — выберите другое"
+            }
         }
+        if issues != state.hotkeyIssues { state.hotkeyIssues = issues }
     }
 
     private func usable(_ preset: HotkeyPreset, _ role: HotkeyRole) -> Bool {

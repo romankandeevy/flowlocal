@@ -269,8 +269,12 @@ final class AppState: ObservableObject {
     @Published var backend: BackendState = .starting
     /// Первый запуск из .dmg: приложение заводит себе Python (PythonSetup).
     @Published var setupStep: PythonSetup.Step?
-    /// Открыт шаг «Первая диктовка» в обучении: диктовка не вставляется.
+    /// Открыт шаг с пробой в обучении: диктовка не вставляется.
     @Published var tutorialPractice = false
+    /// Стиль пробы в обучении («Код» на шаге про код) - вместо стиля приложения.
+    @Published var tutorialStyle: TextStyle?
+    /// Почему сочетание не работает (занято, системное, совпадает) - по ролям.
+    @Published var hotkeyIssues: [HotkeyRole: String] = [:]
 
     /// Что сейчас делается до готовности распознавания - одной строкой.
     var startingNote: String {
@@ -427,7 +431,8 @@ final class AppState: ObservableObject {
     }
 
     func style(for appID: String?) -> TextStyle {
-        AppStyleRule.style(for: appID, in: appStyles)
+        if tutorialPractice, let s = tutorialStyle { return s }
+        return AppStyleRule.style(for: appID, in: appStyles)
     }
 
     /// Чистка под стиль приложения; выученные исправления - после своих замен.

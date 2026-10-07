@@ -90,8 +90,13 @@ struct HotkeyPreset: Identifiable, Equatable, Codable {
     static func isSystemCombo(keyCode: Int, mods: UInt32) -> Bool {
         let cmd = mods & UInt32(cmdKey) != 0
         guard cmd else { return false }
+        // Пробел системный только с ⌘ (Spotlight) и ⌘⌥ (поиск Finder); ⌘⇧Пробел -
+        // свободен, его и предлагаем.
+        if keyCode == kVK_Space {
+            return mods == UInt32(cmdKey) || mods == UInt32(cmdKey | optionKey)
+        }
         switch keyCode {
-        case kVK_ANSI_Q, kVK_ANSI_W, kVK_ANSI_H, kVK_ANSI_M, kVK_Space, kVK_Tab,
+        case kVK_ANSI_Q, kVK_ANSI_W, kVK_ANSI_H, kVK_ANSI_M, kVK_Tab,
              kVK_ANSI_F, kVK_Delete:
             return true
         default:

@@ -159,6 +159,10 @@ final class Backend {
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
         env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+        // Без Xet модель качается обычным HTTP: файл растёт на диске по мере
+        // скачивания, и обучение видит проценты по размеру папки. С Xet файл
+        // появлялся целиком в конце - и прогресс три минуты стоял на нуле.
+        env["HF_HUB_DISABLE_XET"] = "1"
         env["FLOWLOCAL_MODELS"] = Paths.models.path
         // Код бэкенда лежит внутри подписанного .app: __pycache__ рядом с ним
         // сломал бы подпись, а с ней и выданные права.
