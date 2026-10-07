@@ -94,10 +94,11 @@ final class PillPanel: NSPanel {
     }
 }
 
-// Капсула - тёмное стекло в форме таблетки, как «остров» у чёлки: одинаково
-// читается на светлом и тёмном фоне. Появляется пружиной из чуть меньшего
-// размера с размытием, гаснет обратно; ширина под содержимое меняется
-// той же пружиной.
+// Капсула - в тон окну: тёплая бумага в светлой теме, тёплый уголь в
+// тёмной, шрифт Onest, зелёный акцент. Над чужими окнами её держат
+// стекло под заливкой, тонкая кромка и мягкая тень. Появляется пружиной из
+// чуть меньшего размера с размытием, гаснет обратно; ширина под содержимое
+// меняется той же пружиной.
 struct PillView: View {
     @EnvironmentObject var state: AppState
     @ObservedObject private var meter = LevelStore.shared
@@ -109,7 +110,6 @@ struct PillView: View {
 
     var body: some View {
         PillCapsule { content }
-            .environment(\.colorScheme, .dark)
             .opacity(visible ? 1 : 0)
             .scaleEffect(visible || reduceMotion ? 1 : 0.86, anchor: state.pillPosition == .top ? .top : .bottom)
             .blur(radius: visible || reduceMotion ? 0 : 6)
@@ -159,7 +159,7 @@ struct PillView: View {
             PillIcon(symbol: "checkmark", tint: Pill.green)
             Text(message)
         case let .copied(message):
-            PillIcon(symbol: "doc.on.clipboard.fill", tint: Pill.blue)
+            PillIcon(symbol: "doc.on.clipboard.fill", tint: Pill.amber)
             Text(message)
         case let .failed(message):
             PillIcon(symbol: "exclamationmark", tint: Pill.red)
@@ -168,13 +168,19 @@ struct PillView: View {
     }
 }
 
-/// Цвета капсулы - свои: она всегда тёмная, независимо от темы окна.
+/// Цвета капсулы - токены окна: светлая и тёмная тема по системе.
 enum Pill {
-    static let red = Color(red: 1.0, green: 0.27, blue: 0.23)
-    static let green = Color(red: 0.2, green: 0.84, blue: 0.42)
-    static let blue = Color(red: 0.25, green: 0.6, blue: 1.0)
-    static let text = Color.white.opacity(0.95)
-    static let secondary = Color.white.opacity(0.55)
+    /// Запись - тёплый красный, видно на бумаге и на угле.
+    static let red = Color(nsColor: NSColor(name: nil) { a in
+        (a.bestMatch(from: [.aqua, .darkAqua]) ?? .aqua) == .darkAqua
+            ? NSColor(srgbRed: 0.93, green: 0.42, blue: 0.33, alpha: 1)
+            : NSColor(srgbRed: 0.84, green: 0.29, blue: 0.20, alpha: 1)
+    })
+    static let green = NL.accent
+    static let amber = NL.warning
+    static let text = NL.textPrimary
+    static let secondary = NL.textTertiary
+    static let divider = NL.border
 }
 
 /// Значок статуса - в цветном кружке, появляется пружиной.
@@ -186,7 +192,7 @@ private struct PillIcon: View {
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(.white)
+            .foregroundStyle(NL.textOnAccent)
             .frame(width: 20, height: 20)
             .background(tint, in: Circle())
             .scaleEffect(shown ? 1 : 0.4)
@@ -215,7 +221,8 @@ private struct PillSpinner: View {
     }
 }
 
-/// Сама капсула: тёмное стекло, тонкая светлая кромка, мягкая тень.
+/// Сама капсула: стекло под заливкой surface, тонкая тёплая кромка,
+/// двуслойная мягкая тень - как карточки окна, только парит.
 struct PillCapsule<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
@@ -223,25 +230,30 @@ struct PillCapsule<Content: View>: View {
         HStack(spacing: 10) {
             content()
         }
-        .font(.system(size: 13, weight: .medium))
+        .font(NLFont.ui(13.5, .medium))
         .foregroundStyle(Pill.text)
         .lineLimit(1)
         .padding(.leading, 12)
         .padding(.trailing, 16)
-        .frame(height: 40)
+        .frame(height: 42)
         .fixedSize()
         .background {
             Capsule(style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(Capsule(style: .continuous).fill(Color.black.opacity(0.62)))
+                .fill(.regularMaterial)
+                .overlay(Capsule(style: .continuous).fill(NL.surface.opacity(0.86)))
         }
         .overlay {
             Capsule(style: .continuous)
-                .strokeBorder(LinearGradient(colors: [.white.opacity(0.18), .white.opacity(0.05)],
-                                             startPoint: .top, endPoint: .bottom), lineWidth: 1)
+                .strokeBorder(NL.borderStrong, lineWidth: 0.5)
+        }
+        .overlay(alignment: .top) {
+            // Блик кромки сверху - в тёмной теме.
+            Capsule(style: .continuous)
+                .strokeBorder(NL.raisedHighlight, lineWidth: 1)
         }
         .clipShape(Capsule(style: .continuous))
-        .shadow(color: .black.opacity(0.28), radius: 14, y: 6)
+        .shadow(color: .black.opacity(0.10), radius: 2, y: 1)
+        .shadow(color: .black.opacity(0.16), radius: 16, y: 8)
     }
 }
 
@@ -289,19 +301,27 @@ struct PillRecordingRow<Words: View>: View {
             }
             if state.pillShowTimer {
                 Text(MainView.clock(elapsed))
-                    .font(.system(size: 13, weight: .medium).monospacedDigit())
+                    .font(NLFont.ui(13.5, .semibold).monospacedDigit())
                     .foregroundStyle(Pill.text)
                     .contentTransition(.numericText())
             }
             if state.pillShowWave {
-                LiveWaveform(color: Pill.text, count: 14, barWidth: 2.5,
+                LiveWaveform(color: Pill.green, count: 14, barWidth: 2.5,
                              spacing: 2.5, height: 18, floor: 0.12)
-                    .opacity(silent ? 0.35 : 0.9)
+                    .opacity(silent ? 0.35 : 1)
+            }
+            if state.whisperMode {
+                Text("шёпот")
+                    .font(NLFont.ui(11, .semibold))
+                    .foregroundStyle(Pill.green)
+                    .padding(.horizontal, 7)
+                    .frame(height: 18)
+                    .background(NL.accentSubtle, in: Capsule())
             }
             // Бегущая строка расшифровки: видно каждое слово, не глядя в окно.
             if showWords {
                 if showDot || state.pillShowTimer || state.pillShowWave {
-                    Color.white.opacity(0.14).frame(width: 1, height: 16)
+                    Pill.divider.frame(width: 1, height: 16)
                 }
                 words()
                     .transition(.opacity)

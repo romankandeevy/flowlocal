@@ -1,10 +1,9 @@
 import AppKit
 import SwiftUI
 
-// Дизайн-система Northline (v2), перенесённая в SwiftUI. Источник правды -
-// tokens.json из _materials/northline-design-system-v2: цвета, шрифтовая
-// шкала, отступы, радиусы, тени и движение здесь - те же значения, под
-// теми же семантическими именами. В коде экранов - только эти имена,
+// Тёплая тема FlowLocal (мокап C, 2026-10): бумажный фон, тёплые чернила,
+// один зелёный акцент, шрифт Onest. Имена токенов прежние (NL), поэтому
+// экраны и компоненты меняются вместе. В коде экранов - только эти имена,
 // никаких «сырых» цветов и размеров шрифта.
 
 // MARK: - цвет
@@ -25,45 +24,53 @@ private func hex(_ value: UInt32, _ alpha: CGFloat = 1) -> NSColor {
 private func black(_ a: CGFloat) -> NSColor { NSColor(srgbRed: 0, green: 0, blue: 0, alpha: a) }
 private func white(_ a: CGFloat) -> NSColor { NSColor(srgbRed: 1, green: 1, blue: 1, alpha: a) }
 
-/// Семантические цвета Northline. Светлая тема - значения `:root`, тёмная -
-/// `[data-theme="dark"]` из tokens.css.
+private func warm(_ a: CGFloat) -> NSColor { NSColor(srgbRed: 60 / 255, green: 48 / 255, blue: 30 / 255, alpha: a) }
+private func paper(_ a: CGFloat) -> NSColor { NSColor(srgbRed: 1, green: 240 / 255, blue: 215 / 255, alpha: a) }
+
+/// Семантические цвета. Светлая тема - бумага, тёмная - тёплый уголь.
 enum NL {
-    // Фоны
-    static let canvas = dynamic(hex(0xFDFDFE), hex(0x0D0D0E))
-    static let surface = dynamic(hex(0xF8F8F9), hex(0x131415))
-    static let subtle = dynamic(hex(0xF1F2F3), hex(0x1C1D1E))
-    static let hover = dynamic(black(0.08), white(0.10))
-    static let active = dynamic(black(0.12), white(0.15))
-    static let selected = dynamic(hex(0xEAF2FE), hex(0x161D28))
-    static let disabled = dynamic(hex(0xF1F2F3), hex(0x1C1D1E))
+    // Фоны: canvas - страница, surface - карточки, sidebar - левая колонка
+    static let canvas = dynamic(hex(0xF7F5F0), hex(0x1B1916))
+    static let surface = dynamic(hex(0xFFFDF9), hex(0x23201C))
+    static let sidebar = dynamic(hex(0xEFEBE3), hex(0x151310))
+    static let subtle = dynamic(hex(0xEFEBE3), hex(0x2B2823))
+    static let hover = dynamic(warm(0.06), paper(0.05))
+    static let active = dynamic(warm(0.10), paper(0.09))
+    static let rowHover = dynamic(hex(0xFAF8F3), hex(0x29261F))
+    static let selected = dynamic(hex(0xE6EFE9), hex(0x1F2A23))
+    static let disabled = dynamic(hex(0xEFEBE3), hex(0x2B2823))
+    static let popover = dynamic(hex(0xFFFDF9), hex(0x2C2823))
+    static let chartBar = dynamic(hex(0xE4DDCF), hex(0x36312A))
+    static let chartBarHover = dynamic(hex(0xD3CAB8), hex(0x4A443A))
 
-    static let accent = dynamic(hex(0x2D69C0), hex(0x2368C9))
-    static let accentHover = dynamic(hex(0x3268B5), hex(0x4F8CE5))
-    static let accentActive = dynamic(hex(0x1755AA), hex(0x0853B2))
-    static let accentSubtle = dynamic(hex(0xEAF2FE), hex(0x161D28))
+    static let accent = dynamic(hex(0x2F6B4F), hex(0x6CC196))
+    static let accentHover = dynamic(hex(0x3A7A5B), hex(0x7DCCA4))
+    static let accentActive = dynamic(hex(0x255A42), hex(0x5AA982))
+    static let accentSubtle = dynamic(hex(0xE6EFE9), hex(0x1F2A23))
 
-    static let success = dynamic(hex(0x007A51), hex(0x007A4D))
-    static let successSubtle = dynamic(hex(0xE9F5EF), hex(0x14201B))
-    static let warning = dynamic(hex(0xCC8700), hex(0xCF8500))
-    static let warningSubtle = dynamic(hex(0xF9F0E5), hex(0x231B11))
-    static let danger = dynamic(hex(0xBF3D27), hex(0xC13A24))
-    static let dangerSubtle = dynamic(hex(0xFFEDE9), hex(0x271916))
-    static let dangerHover = dynamic(hex(0xB03D2A), hex(0xDB614B))
-    static let dangerActive = dynamic(hex(0xA8250E), hex(0xA92008))
-    static let infoSubtle = dynamic(hex(0xE9F4FA), hex(0x141F24))
+    static let success = accent
+    static let successSubtle = accentSubtle
+    static let warning = dynamic(hex(0xC98A2E), hex(0xE0A94F))
+    static let warningSubtle = dynamic(hex(0xF8EEDF), hex(0x2A2218))
+    static let danger = dynamic(hex(0xB4572E), hex(0xE48A62))
+    static let dangerSubtle = dynamic(hex(0xF8E8E0), hex(0x2C1D16))
+    static let dangerHover = dynamic(hex(0xA24C26), hex(0xEC9C78))
+    static let dangerActive = dynamic(hex(0x8F4120), hex(0xD47851))
+    static let infoSubtle = accentSubtle
 
     // Текст
-    static let textPrimary = dynamic(hex(0x202224), hex(0xE5E8EC))
-    static let textSecondary = dynamic(hex(0x4A4D52), hex(0xA6ABB2))
-    static let textTertiary = dynamic(hex(0x646970), hex(0x858D97))
-    static let textDisabled = dynamic(hex(0xAAAEB4), hex(0x5E646C))
-    static let textPlaceholder = dynamic(hex(0x757B83), hex(0x737B86))
-    static let textOnAccent = Color.white
-    static let textAccent = dynamic(hex(0x2B4D7F), hex(0x85ADE7))
-    static let textSuccess = dynamic(hex(0x125B42), hex(0x76BC9E))
-    static let textWarning = dynamic(hex(0x6A4400), hex(0xCDA366))
-    static let textDanger = dynamic(hex(0x7C3326), hex(0xE39382))
-    static let textInfo = dynamic(hex(0x15546E), hex(0x78B4D1))
+    static let textPrimary = dynamic(hex(0x231F19), hex(0xF1ECE3))
+    static let textSecondary = dynamic(hex(0x6F685B), hex(0xB3AB9C))
+    static let textTertiary = dynamic(hex(0x8A8273), hex(0x948B7B))
+    static let textQuaternary = dynamic(hex(0x9D9587), hex(0x857D6C))
+    static let textDisabled = dynamic(hex(0xB9B2A5), hex(0x5A544A))
+    static let textPlaceholder = textQuaternary
+    static let textOnAccent = dynamic(hex(0xFFFFFF), hex(0x0F2219))
+    static let textAccent = accent
+    static let textSuccess = accent
+    static let textWarning = dynamic(hex(0x8F5A12), hex(0xE0A94F))
+    static let textDanger = danger
+    static let textInfo = accent
 
     // Иконки - те же ступени, что у текста
     static let iconPrimary = textPrimary
@@ -71,14 +78,15 @@ enum NL {
     static let iconTertiary = textTertiary
     static let iconAccent = textAccent
 
-    // Границы: всегда 1pt, полупрозрачные - кроме фокуса и ошибки
-    static let border = dynamic(black(0.10), white(0.12))
-    static let borderSubtle = dynamic(black(0.06), white(0.06))
-    static let borderStrong = dynamic(black(0.18), white(0.18))
-    static let borderHover = dynamic(black(0.15), white(0.15))
-    static let borderFocus = dynamic(hex(0x2D69C0), hex(0x4F8CE5))
-    static let borderDanger = dynamic(hex(0xBF3D27), hex(0xC13A24))
-    static let ringFocus = dynamic(hex(0x2D69C0, 0.35), hex(0x4F8CE5, 0.45))
+    // Границы: полупрозрачные тёплые - кроме фокуса и ошибки
+    static let border = dynamic(warm(0.12), paper(0.09))
+    static let borderSubtle = dynamic(hex(0xEFE9DE), hex(0x2E2A24))
+    static let borderStrong = dynamic(warm(0.20), paper(0.16))
+    static let borderHover = dynamic(warm(0.18), paper(0.14))
+    static let borderFocus = accent
+    static let borderDanger = danger
+    static let ringFocus = dynamic(hex(0x2F6B4F, 0.30), hex(0x6CC196, 0.35))
+    static let sidebarBorder = dynamic(hex(0xE3DDD1), hex(0x2A2620))
 
     /// Тонкий верхний блик поднятых поверхностей - только в тёмной теме.
     static let raisedHighlight = dynamic(white(0), white(0.04))
@@ -147,7 +155,25 @@ enum NLType {
     var font: Font {
         self == .numeric
             ? .system(size: size, weight: weight, design: .monospaced)
-            : .system(size: size, weight: weight)
+            : NLFont.ui(size, weight)
+    }
+}
+
+/// Onest лежит в Resources/Fonts и регистрируется при запуске; нет файла -
+/// системный шрифт, вид тот же по размерам.
+enum NLFont {
+    static let family = "Onest"
+    private static var registered = false
+
+    static func register() {
+        guard !registered, let url = Bundle.main.url(forResource: "Onest", withExtension: "ttf",
+                                                    subdirectory: "Fonts") else { return }
+        registered = CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+            || NSFont(name: family, size: 12) != nil
+    }
+
+    static func ui(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        registered ? .custom(family, size: size).weight(weight) : .system(size: size, weight: weight)
     }
 }
 
@@ -187,8 +213,8 @@ enum Space {
     static let inlineSm: CGFloat = 8
     static let inlineMd: CGFloat = 12
     /// Поля страницы в приложении.
-    static let page: CGFloat = 24
-    static let contentMax: CGFloat = 720
+    static let page: CGFloat = 40
+    static let contentMax: CGFloat = 760
 }
 
 enum Radius {
@@ -207,7 +233,7 @@ enum Size {
     static let iconMd: CGFloat = 20
     static let iconXl: CGFloat = 32
     static let rowHeight: CGFloat = 44
-    static let sidebar: CGFloat = 220
+    static let sidebar: CGFloat = 228
 }
 
 // MARK: - тени
@@ -238,15 +264,18 @@ extension View {
 // MARK: - поверхности
 
 extension View {
-    /// Карточка/регион: surface + граница 1pt, radius-lg, без тени.
-    func nlCard(padding: CGFloat? = Space.insetLg) -> some View {
-        self.padding(padding ?? 0)
+    /// Карточка: surface, тонкая тёплая граница и едва заметная тень под
+    /// формой (тень у фигуры, а не у содержимого - дёшево при прокрутке).
+    func nlCard(padding: CGFloat? = Space.insetLg, radius: CGFloat = 14) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return self.padding(padding ?? 0)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(NL.surface, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
-                    .strokeBorder(NL.border, lineWidth: 1)
+            .clipShape(shape)
+            .background {
+                shape.fill(NL.surface)
+                    .shadow(color: .black.opacity(0.05), radius: 1.5, y: 1)
             }
+            .overlay { shape.strokeBorder(NL.border, lineWidth: 0.5) }
     }
 
     /// Всплывающее: surface + граница + тень уровня и блик сверху в тёмной теме.

@@ -54,6 +54,31 @@ enum AudioDevices {
         inputs().first { $0.uid == uid }
     }
 
+    /// Входная громкость (чувствительность) по элементам, которые можно
+    /// менять: общий регулятор или каждый канал. Пусто - регулятора нет.
+    static func inputVolume(_ id: AudioDeviceID) -> [(element: UInt32, value: Float32)] {
+        (0...UInt32(max(1, inputChannels(id)))).compactMap { element in
+            var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar,
+                                                  mScope: kAudioDevicePropertyScopeInput, mElement: element)
+            var settable: DarwinBoolean = false
+            guard AudioObjectHasProperty(id, &addr),
+                  AudioObjectIsPropertySettable(id, &addr, &settable) == noErr, settable.boolValue else { return nil }
+            var value: Float32 = 0
+            var size = UInt32(MemoryLayout<Float32>.size)
+            guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &value) == noErr else { return nil }
+            return (element, value)
+        }
+    }
+
+    static func setInputVolume(_ id: AudioDeviceID, _ values: [(element: UInt32, value: Float32)]) {
+        for item in values {
+            var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar,
+                                                  mScope: kAudioDevicePropertyScopeInput, mElement: item.element)
+            var value = item.value
+            AudioObjectSetPropertyData(id, &addr, 0, nil, UInt32(MemoryLayout<Float32>.size), &value)
+        }
+    }
+
     private static func inputChannels(_ id: AudioDeviceID) -> Int {
         var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreamConfiguration,
                                               mScope: kAudioDevicePropertyScopeInput,

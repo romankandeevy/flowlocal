@@ -620,6 +620,8 @@ struct EntryCommands: View {
         .disabled(!playable)
         Button("Распознать заново") { recorded.forEach(actions.rerecognize) }
             .disabled(recorded.isEmpty)
+        Button("Исправить…") { state.editing = one }
+            .disabled(one == nil || one?.failed == true)
         if editing {
             Divider()
             Button("Удалить") { state.delete(Set(entries.map(\.id)), undo: undo) }

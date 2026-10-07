@@ -33,6 +33,9 @@ final class Controller {
     private var orphan: (samples: [Float], entry: Entry)?
     // Последнее окончательное из разбора на ходу и оно же почищенное.
     private var liveFinal = (raw: "", clean: "")
+    /// Куда диктуем: приложение впереди в начале записи.
+    private var target: (id: String?, name: String?) = (nil, nil)
+    private let watcher = CorrectionWatcher()
 
     private let holdID: UInt32 = 1
     private let escapeID: UInt32 = 2
@@ -45,6 +48,7 @@ final class Controller {
 
     init(state: AppState) {
         self.state = state
+        watcher.onLearn = { [weak state] pairs in state?.addCorrections(pairs) }
     }
 
     func start() {
@@ -178,6 +182,11 @@ final class Controller {
             break
         }
         hideWork?.cancel()
+        watcher.finish()
+        // Своё окно впереди - стиль «Обычный»: диктуем в историю.
+        let front = NSWorkspace.shared.frontmostApplication
+        target = front?.bundleIdentifier == Bundle.main.bundleIdentifier
+            ? (nil, nil) : (front?.bundleIdentifier, front?.localizedName)
         // Сначала - что запись идёт: капсула показывается сразу по нажатию,
         // а не после того, как поднимется микрофон (на Bluetooth это заметно).
         session = backend.newID()
@@ -207,6 +216,7 @@ final class Controller {
 
     private func openMicrophone(_ id: Int) {
         recorder.deviceUID = state.micUID
+        recorder.whisper = state.whisperMode
         let t0 = Date()
         do {
             try recorder.start()
@@ -331,7 +341,9 @@ final class Controller {
         if state.saveAudio {
             DispatchQueue.global(qos: .utility).async { _ = AudioStore.save(all, id: entryID) }
         }
-        let draft = Entry(id: entryID, text: "", lang: state.langMode.rawValue, seconds: seconds, audio: audio)
+        var draft = Entry(id: entryID, text: "", lang: state.langMode.rawValue, seconds: seconds, audio: audio)
+        draft.appID = target.id
+        draft.appName = target.name
         backend.finish(id, timeout: 15 + seconds * 0.3) { [weak self] result in
             guard let self, id == self.session else { return }
             switch result {
@@ -412,7 +424,7 @@ final class Controller {
             flash(.done("\(wordsLabel(entry.words)) в истории"), hideAfter: 1.5)
             return
         }
-        insert(text, words: wordsLabel(entry.words))
+        insert(text, words: wordsLabel(entry.words), style: state.style(for: entry.appID), learn: true)
     }
 
     /// «Вставить» из истории: прячем окно - фокус возвращается туда, где
@@ -420,7 +432,10 @@ final class Controller {
     func paste(_ entry: Entry) {
         NSApp.hide(nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-            self?.insert(entry.text, words: wordsLabel(entry.words))
+            guard let self else { return }
+            // Вставляем туда, где сейчас курсор, - стиль того приложения.
+            let style = self.state.style(for: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+            self.insert(entry.text, words: wordsLabel(entry.words), style: style, learn: false)
         }
     }
 
@@ -454,7 +469,7 @@ final class Controller {
     /// Живая расшифровка по словам - уже почищенная. Точку в конце не
     /// дописываем: фраза ещё идёт.
     private func pushLive(final: String, interim: String) {
-        var o = state.cleanup
+        var o = state.cleanup(for: state.style(for: target.id))
         o.trailingPeriod = false
         // Окончательное меняется раз в несколько секунд, черновик - несколько
         // раз в секунду. Чистить весь растущий текст на каждый черновик -
@@ -477,7 +492,7 @@ final class Controller {
     /// сохраняется, только если чистка что-то поменяла.
     private func apply(_ recognized: String, to entry: inout Entry) {
         let raw = recognized.trimmingCharacters(in: .whitespacesAndNewlines)
-        let clean = state.cleaned(raw)
+        let clean = state.process(raw, style: state.style(for: entry.appID))
         entry.text = clean
         entry.raw = clean == raw ? nil : raw
         entry.words = Entry.count(clean)
@@ -494,13 +509,17 @@ final class Controller {
         state.playing = player.play(AudioStore.url(name)) ? entry.id : nil
     }
 
-    private func insert(_ text: String, words: String) {
+    private func insert(_ text: String, words: String, style: TextStyle, learn: Bool) {
         // Пробел в конце - old/ append_space: следующая диктовка не прилипнет.
-        Inserter.insert(state.addSpace ? text + " " : text, keep: state.keepInClipboard) { outcome in
+        // В коде - без него.
+        let spaced = state.addSpace && style.addsSpace ? text + " " : text
+        Inserter.insert(spaced, keep: state.keepInClipboard) { outcome in
             Log.write(outcome == .pasted ? "вставка: ⌘V" : "вставка: в буфер - нет права «Универсальный доступ»")
             self.state.refreshPermissions()
             switch outcome {
             case .pasted:
+                // Поправит человек слово прямо в поле - запомним.
+                if learn && self.state.learnFromEdits { self.watcher.watch(inserted: text) }
                 self.flash(.done("\(words) вставлено"), hideAfter: 1.2)
             case .copied where !self.trustPromptShown:
                 // Системный запрос при запуске легко закрыть не глядя. Здесь

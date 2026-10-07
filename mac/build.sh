@@ -164,7 +164,9 @@ cp backend/server.py backend/langdetect.py backend/requirements.txt "$APP/Conten
 # Локализация ru: меню «Правка», «Окно», «Службы», «Завершить», поле поиска и
 # «Отменить удаление…» macOS подписывает по-русски, в тон нашим строкам.
 mkdir -p "$APP/Contents/Resources/ru.lproj"
-# Шрифты - системные SF Pro и SF Mono, своих файлов в сборке нет.
+# Шрифт окна - Onest (OFL), регистрируется при запуске (Theme.swift).
+mkdir -p "$APP/Contents/Resources/Fonts"
+cp Resources/Fonts/Onest.ttf Resources/Fonts/OFL.txt "$APP/Contents/Resources/Fonts/"
 # Иконка - Resources/AppIcon.icns (рисует tools/make_icon.py).
 if [ -f Resources/AppIcon.icns ]; then
     cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"

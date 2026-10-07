@@ -41,6 +41,8 @@ struct AppCommands: Commands {
                 .disabled(!state.isRecording && !state.canDictate)
             Button("Отменить диктовку", action: actions.cancelDictation)
                 .disabled(!state.isBusy)
+            Toggle("Режим шёпота", isOn: $state.whisperMode)
+                .keyboardShortcut("w", modifiers: [.command, .option])
             Divider()
             EntryCommands(state: state, entries: state.entries(state.historySelection), actions: actions,
                           editing: false)

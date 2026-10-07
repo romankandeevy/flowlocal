@@ -17,16 +17,29 @@ enum BackendState: Equatable {
     case failed(String)
 }
 
-/// Разделы главного окна - переключатель в верхней панели. Настроек в окне
-/// нет: они в Hub Settings, ⌘, открывает его.
+/// Разделы главного окна - пункты сайдбара. Настроек в окне нет: они в
+/// Hub Settings, ⌘, открывает его.
 enum Tab: String, CaseIterable, Identifiable {
-    case dictations, stats
+    case home, history, stats, style, dictionary
 
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .dictations: return "Диктовки"
+        case .home: return "Главная"
+        case .history: return "История"
         case .stats: return "Обзор"
+        case .style: return "Стиль"
+        case .dictionary: return "Словарь"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .home: return "house"
+        case .history: return "list.bullet"
+        case .stats: return "chart.bar"
+        case .style: return "textformat"
+        case .dictionary: return "character.book.closed"
         }
     }
 
@@ -157,6 +170,9 @@ struct Entry: Identifiable, Codable, Equatable {
     var failed: Bool            // речь не распознана - можно распознать заново
     /// Текст до чистки - если чистка что-то убрала.
     var raw: String?
+    /// Куда диктовали: приложение впереди в начале записи.
+    var appID: String?
+    var appName: String?
 
     init(id: UUID = UUID(), text: String, lang: String, date: Date = Date(), seconds: Double,
          audio: String? = nil, failed: Bool = false) {
@@ -186,6 +202,8 @@ struct Entry: Identifiable, Codable, Equatable {
         audio = try c.decodeIfPresent(String.self, forKey: .audio)
         failed = try c.decodeIfPresent(Bool.self, forKey: .failed) ?? false
         raw = try c.decodeIfPresent(String.self, forKey: .raw)
+        appID = try c.decodeIfPresent(String.self, forKey: .appID)
+        appName = try c.decodeIfPresent(String.self, forKey: .appName)
     }
 }
 
@@ -349,6 +367,77 @@ final class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(Replacement.pairs(replacements), forKey: "replacements") }
     }
 
+    /// Режим шёпота: тихая речь усиливается до разбора.
+    @Published var whisperMode: Bool {
+        didSet { UserDefaults.standard.set(whisperMode, forKey: "whisperMode") }
+    }
+    /// Стиль текста по приложениям - настраивается в окне, во вкладке «Стиль».
+    @Published var appStyles: [AppStyleRule] {
+        didSet { Self.save(appStyles, "appStyles") }
+    }
+    /// Словарь: имена и термины, как их писать.
+    @Published var vocabulary: [String] {
+        didSet { UserDefaults.standard.set(vocabulary, forKey: "vocabulary") }
+    }
+    /// Выученные из правок замены.
+    @Published var corrections: [Vocabulary.Correction] {
+        didSet { Self.save(corrections, "learnedCorrections") }
+    }
+    @Published var learnFromEdits: Bool {
+        didSet { UserDefaults.standard.set(learnFromEdits, forKey: "learnFromEdits") }
+    }
+    /// Диктовка, которую правят в окне («Исправить…»).
+    @Published var editing: Entry?
+
+    private static func save<T: Encodable>(_ value: T, _ key: String) {
+        if let data = try? JSONEncoder().encode(value) { UserDefaults.standard.set(data, forKey: key) }
+    }
+
+    private static func load<T: Decodable>(_ type: T.Type, _ key: String) -> T? {
+        UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+    }
+
+    func style(for appID: String?) -> TextStyle {
+        AppStyleRule.style(for: appID, in: appStyles)
+    }
+
+    /// Чистка под стиль приложения; выученные исправления - после своих замен.
+    func cleanup(for style: TextStyle) -> CleanupOptions {
+        var o = style.adjust(cleanup)
+        o.replacements += corrections.map { ($0.from, $0.to) }
+        return o
+    }
+
+    /// Распознанное - в текст диктовки: чистка, словарь, отделка стиля.
+    func process(_ raw: String, style: TextStyle) -> String {
+        let clean = TextCleaner.clean(raw, cleanup(for: style))
+        return style.finish(Vocabulary.apply(clean, terms: vocabulary))
+    }
+
+    func addCorrections(_ pairs: [(from: String, to: String)]) {
+        guard !pairs.isEmpty else { return }
+        corrections = Vocabulary.merge(pairs, into: corrections)
+        Log.write("выучено исправлений: \(pairs.count)")
+    }
+
+    /// Правка диктовки в окне: новый текст и, если включено, урок.
+    func saveEdit(_ entry: Entry, text: String) {
+        let edited = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard edited != entry.text else { return }
+        if learnFromEdits, !entry.failed { addCorrections(Vocabulary.learn(original: entry.text, edited: edited)) }
+        var e = entry
+        e.text = edited
+        e.words = Entry.count(edited)
+        e.failed = edited.isEmpty
+        update(e)
+    }
+
+    func addTerm(_ term: String) {
+        let t = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, !vocabulary.contains(where: { $0.caseInsensitiveCompare(t) == .orderedSame }) else { return }
+        vocabulary.append(t)
+    }
+
     var cleanup: CleanupOptions {
         CleanupOptions(level: cleanupLevel, removeRepeats: removeRepeats, capitalize: capitalize,
                        trailingPeriod: trailingPeriod,
@@ -369,7 +458,7 @@ final class AppState: ObservableObject {
         let d = UserDefaults.standard
         hotkey = HotkeyPreset.load(.hold)
         toggleHotkey = HotkeyPreset.load(.toggle)
-        tab = Tab(rawValue: d.string(forKey: "section") ?? "") ?? .dictations
+        tab = Tab(rawValue: d.string(forKey: "section") ?? "") ?? .home
         insertAutomatically = d.object(forKey: "insertAutomatically") as? Bool ?? true
         showPill = d.object(forKey: "showPill") as? Bool ?? true
         saveAudio = d.object(forKey: "saveAudio") as? Bool ?? true
@@ -400,6 +489,18 @@ final class AppState: ObservableObject {
         trailingPeriod = d.object(forKey: "trailingPeriod") as? Bool ?? true
         customFillers = d.string(forKey: "customFillers") ?? ""
         replacements = Replacement.load(d.object(forKey: "replacements")) ?? []
+        whisperMode = d.bool(forKey: "whisperMode")
+        vocabulary = d.stringArray(forKey: "vocabulary") ?? []
+        corrections = Self.load([Vocabulary.Correction].self, "learnedCorrections") ?? []
+        learnFromEdits = d.object(forKey: "learnFromEdits") as? Bool ?? true
+        if let saved = Self.load([AppStyleRule].self, "appStyles") {
+            appStyles = saved
+        } else {
+            // Первый запуск: стили для того, что установлено.
+            appStyles = AppStyleRule.suggestions.filter {
+                NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0.bundleID) != nil
+            }
+        }
         // Прошлые версии хранили срок числом, а замены - JSON-ом: переводим в вид, который понимает хаб.
         if d.object(forKey: "historyDays") is NSNumber { d.set(String(historyDays), forKey: "historyDays") }
         if d.object(forKey: "replacements") is Data { d.set(Replacement.pairs(replacements), forKey: "replacements") }
@@ -595,14 +696,34 @@ final class AppState: ObservableObject {
         Double(speedWPM) / Self.typingWPM
     }
 
-    /// Слова по дням за последние 7 дней, сегодня - последний.
-    var lastDays: [DayWords] {
+    /// Диктовки за последние `days` дней, считая сегодня.
+    func recent(days: Int) -> [Entry] {
+        let cal = Calendar.current
+        let since = cal.date(byAdding: .day, value: -(days - 1), to: cal.startOfDay(for: Date()))!
+        return history.filter { $0.date >= since }
+    }
+
+    /// Минут сэкономлено за последние `days` дней - так же, как за всё время.
+    func savedMinutes(days: Int) -> Int {
+        let saved = recent(days: days)
+            .reduce(0.0) { $0 + max(0, Double($1.words) / Self.typingWPM - $1.seconds / 60) }
+        return Int(saved.rounded())
+    }
+
+    /// Слова за последние 7 дней, сегодня - последний.
+    var lastDays: [DayWords] { lastDays(7) }
+
+    /// Слова по дням за последние `count` дней, сегодня - последний.
+    func lastDays(_ count: Int) -> [DayWords] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
-        return (0..<7).reversed().map { back in
+        var byDay: [Date: Int] = [:]
+        for entry in recent(days: count) {
+            byDay[cal.startOfDay(for: entry.date), default: 0] += entry.words
+        }
+        return (0..<count).reversed().map { back in
             let day = cal.date(byAdding: .day, value: -back, to: today)!
-            let words = history.filter { cal.isDate($0.date, inSameDayAs: day) }.reduce(0) { $0 + $1.words }
-            return DayWords(date: day, words: words)
+            return DayWords(date: day, words: byDay[day] ?? 0)
         }
     }
 }

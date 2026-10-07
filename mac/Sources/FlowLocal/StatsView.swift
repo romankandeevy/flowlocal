@@ -1,161 +1,244 @@
-import Charts
 import SwiftUI
 
-// «Обзор» - одна колонка для чтения сверху вниз: главное число недели
-// крупно, под ним - сколько это сэкономило; полоса показателей; неделя
-// графиком (наведение показывает день); итог за всё время. Числа меняются
-// перекатом цифр, столбики при входе вырастают от нуля.
+// «Обзор» - одна колонка сверху вниз: слова за период крупно и сколько это
+// сэкономило; переключатель «Неделя / Месяц»; график по дням (наведение
+// показывает день, столбики вырастают при входе); три числа и итог за всё
+// время. Числа меняются перекатом цифр.
 struct StatsView: View {
     @EnvironmentObject var state: AppState
+    @State private var period: Period = .week
 
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.s8) {
-                hero
-                StatStrip(items: [
-                    .init(label: "Слов сегодня", value: grouped(state.wordsToday)),
-                    .init(label: "Диктовок сегодня", value: grouped(state.dictationsToday)),
-                    .init(label: "Скорость речи", value: state.speedWPM > 0 ? "\(state.speedWPM) сл/мин" : "—"),
-                    .init(label: "Быстрее клавиатуры", value: ratio),
-                ])
-                chartSection
-                allTimeSection
-            }
-            .frame(maxWidth: Space.contentMax, alignment: .leading)
-            .padding(.horizontal, Space.s8)
-            .padding(.vertical, Space.s8)
-            .frame(maxWidth: .infinity)
-        }
-        .background(NL.canvas)
+    enum Period: Int, CaseIterable, Identifiable {
+        case week = 7, month = 30
+        var id: Int { rawValue }
+        var title: String { self == .week ? "Неделя" : "Месяц" }
     }
 
-    private var hero: some View {
-        VStack(alignment: .leading, spacing: Space.s1) {
-            Text("За последние 7 дней")
-                .nlType(.label)
-                .foregroundStyle(NL.textSecondary)
-            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
-                Text(grouped(state.wordsWeek))
-                    .nlType(.display)
+    var body: some View {
+        let days = state.lastDays(period.rawValue)
+        let words = days.reduce(0) { $0 + $1.words }
+        PageScroll {
+            HStack(alignment: .top, spacing: Space.s4) {
+                hero(words: words)
+                Spacer(minLength: 0)
+                PeriodSwitch(selection: $period)
+            }
+            BarChart(days: days)
+                .padding(.horizontal, 24)
+                .padding(.top, 22)
+                .padding(.bottom, 14)
+                .nlCard(padding: 0)
+            HStack(spacing: 10) {
+                StatTile(value: state.speedWPM > 0 ? "\(state.speedWPM) сл/мин" : "—", label: "скорость речи")
+                StatTile(value: ratio, label: "быстрее клавиатуры")
+                StatTile(value: averageLength, label: "средняя диктовка")
+            }
+            allTime
+        }
+    }
+
+    private func hero(words: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("За последние \(period.rawValue) \(plural(period.rawValue, "день", "дня", "дней"))")
+                .font(NLFont.ui(13.5, .medium))
+                .foregroundStyle(NL.textTertiary)
+                .contentTransition(.opacity)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(grouped(words))
+                    .font(NLFont.ui(52, .semibold))
+                    .tracking(-1.8)
                     .monospacedDigit()
                     .foregroundStyle(NL.textPrimary)
                     .contentTransition(.numericText())
-                Text(plural(state.wordsWeek, "слово", "слова", "слов"))
-                    .nlType(.headingSm)
+                Text(plural(words, "слово", "слова", "слов"))
+                    .font(NLFont.ui(20, .medium))
                     .foregroundStyle(NL.textSecondary)
             }
-            .motion(Motion.slow, value: state.wordsWeek)
             Text(savedLine)
-                .nlType(.bodySm)
+                .font(NLFont.ui(14))
                 .foregroundStyle(NL.textSecondary)
+                .contentTransition(.opacity)
         }
+        .motion(Motion.slow, value: words)
     }
 
     private var savedLine: String {
-        let minutes = weekSavedMinutes
+        let minutes = state.savedMinutes(days: period.rawValue)
         guard minutes > 0 else { return "Надиктуйте больше — и здесь появится сэкономленное время." }
-        return "Примерно \(minutes) мин сэкономлено по сравнению с набором на клавиатуре."
-    }
-
-    /// Экономия недели - так же, как за всё время: печать минус речь.
-    private var weekSavedMinutes: Int {
-        let since = Calendar.current.date(byAdding: .day, value: -6, to: Calendar.current.startOfDay(for: Date()))!
-        let saved = state.history.filter { $0.date >= since }
-            .reduce(0.0) { $0 + max(0, Double($1.words) / AppState.typingWPM - $1.seconds / 60) }
-        return Int(saved.rounded())
-    }
-
-    private var chartSection: some View {
-        VStack(alignment: .leading, spacing: Space.stackSm) {
-            SectionTitle("По дням")
-            Group {
-                if state.lastDays.allSatisfy({ $0.words == 0 }) {
-                    NLEmptyState(symbol: "chart.bar", title: "Пока пусто",
-                                 message: "Диктуйте — и здесь появятся слова по дням.")
-                } else {
-                    WeekChart(days: state.lastDays)
-                        .padding(Space.insetLg)
-                }
-            }
-            .nlCard(padding: 0)
-        }
-    }
-
-    private var allTimeSection: some View {
-        let ok = state.history.filter { !$0.failed }
-        let words = ok.reduce(0) { $0 + $1.words }
-        let seconds = ok.reduce(0.0) { $0 + $1.seconds }
-        return VStack(alignment: .leading, spacing: Space.stackSm) {
-            SectionTitle("За всё время")
-            VStack(spacing: 0) {
-                KVRow(key: "Диктовок", value: grouped(state.history.count))
-                KVRow(key: "Слов", value: grouped(words))
-                KVRow(key: "Говорили", value: "\(grouped(Int((seconds / 60).rounded()))) мин")
-                KVRow(key: "Сэкономлено", value: "\(grouped(state.savedMinutes)) мин")
-                KVRow(key: "Убрано слов-паразитов", value: grouped(state.removedWords), last: true)
-            }
-            .padding(.horizontal, Space.insetMd)
-            .padding(.vertical, Space.s1)
-            .nlCard(padding: 0)
-            FormFooter("Сравнение — со скоростью набора 40 слов в минуту.")
-        }
+        return "Примерно \(grouped(minutes)) мин сэкономлено по сравнению с клавиатурой."
     }
 
     private var ratio: String {
         guard state.speedWPM > 0 else { return "—" }
         return state.voiceRatio.formatted(.number.precision(.fractionLength(1))) + "×"
     }
+
+    private var averageLength: String {
+        let ok = state.history.filter { !$0.failed }
+        guard !ok.isEmpty else { return "—" }
+        return MainView.clock(ok.reduce(0) { $0 + $1.seconds } / Double(ok.count))
+    }
+
+    private var allTime: some View {
+        let ok = state.history.filter { !$0.failed }
+        let words = ok.reduce(0) { $0 + $1.words }
+        let seconds = ok.reduce(0.0) { $0 + $1.seconds }
+        let rows: [(String, String)] = [
+            ("Диктовок", grouped(state.history.count)),
+            ("Слов", grouped(words)),
+            ("Говорили", "\(grouped(Int((seconds / 60).rounded()))) мин"),
+            ("Сэкономлено", "\(grouped(state.savedMinutes)) мин"),
+            ("Убрано слов-паразитов", grouped(state.removedWords)),
+        ]
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("За всё время")
+                .font(NLFont.ui(15, .semibold))
+                .foregroundStyle(NL.textPrimary)
+            VStack(spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                    HStack {
+                        Text(row.0).foregroundStyle(NL.textSecondary)
+                        Spacer(minLength: Space.s4)
+                        Text(row.1)
+                            .fontWeight(.semibold)
+                            .monospacedDigit()
+                            .foregroundStyle(NL.textPrimary)
+                    }
+                    .font(NLFont.ui(14))
+                    .frame(height: 44)
+                    .overlay(alignment: .top) {
+                        if index > 0 { NL.borderSubtle.frame(height: 1) }
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 4)
+            .nlCard(padding: 0)
+            Text("Сравнение — со скоростью набора 40 слов в минуту.")
+                .nlType(.caption)
+                .foregroundStyle(NL.textTertiary)
+                .padding(.horizontal, 4)
+        }
+    }
 }
 
-/// Слова по дням. Сегодня - акцентом, прочие - нейтральной ступенью;
-/// наведённый день подсвечивается, над ним - число. Столбики вырастают
-/// при появлении (ease-out 300 мс).
-private struct WeekChart: View {
+/// «Неделя / Месяц»: подложка и карточка выбранного, которая переезжает.
+private struct PeriodSwitch: View {
+    @Binding var selection: StatsView.Period
+    @Namespace private var thumb
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(StatsView.Period.allCases) { item in
+                let selected = selection == item
+                Button {
+                    withMotion(Motion.position) { selection = item }
+                } label: {
+                    Text(item.title)
+                        .font(NLFont.ui(12.5, .medium))
+                        .foregroundStyle(selected ? NL.textPrimary : NL.textSecondary)
+                        .padding(.horizontal, 12)
+                        .frame(height: 28)
+                        .background {
+                            if selected {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(NL.surface)
+                                    .shadow(color: .black.opacity(0.06), radius: 1, y: 1)
+                                    .matchedGeometryEffect(id: "period", in: thumb)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .background(NL.hover, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+/// Слова по дням столбиками. Сегодня - акцентом, остальные - тёплой
+/// ступенью, наведённый темнеет; над ним - число. Столбики вырастают при
+/// появлении один за другим.
+private struct BarChart: View {
     let days: [DayWords]
     @State private var hovered: Date?
     @State private var grown = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private let plot: CGFloat = 172
+
     var body: some View {
-        Chart(days) { day in
-            let isToday = Calendar.current.isDateInToday(day.date)
-            let isHovered = hovered.map { Calendar.current.isDate($0, inSameDayAs: day.date) } ?? false
-            BarMark(x: .value("День", day.date, unit: .day),
-                    y: .value("Слова", grown ? day.words : 0),
-                    width: .ratio(0.55))
-                .foregroundStyle(isToday ? NL.accent : isHovered ? NL.textTertiary : NL.borderStrong)
-                .clipShape(UnevenRoundedRectangle(topLeadingRadius: Radius.xs, topTrailingRadius: Radius.xs,
-                                                  style: .continuous))
-                .annotation(position: .top, spacing: 4) {
-                    if isHovered || (hovered == nil && isToday && day.words > 0) {
-                        Text(grouped(day.words))
-                            .nlType(.labelSm)
-                            .monospacedDigit()
-                            .foregroundStyle(NL.textPrimary)
-                    }
+        let peak = max(1, days.map(\.words).max() ?? 1)
+        let dense = days.count > 7
+        VStack(spacing: 0) {
+            HStack(alignment: .bottom, spacing: dense ? 4 : 14) {
+                ForEach(Array(days.enumerated()), id: \.element.id) { index, day in
+                    let today = Calendar.current.isDateInToday(day.date)
+                    let isHovered = hovered == day.date
+                    let showValue = isHovered || (hovered == nil && today && day.words > 0)
+                    let height = day.words == 0 ? 3 : max(4, CGFloat(day.words) / CGFloat(peak) * plot)
+                    RoundedRectangle(cornerRadius: dense ? 3 : 7, style: .continuous)
+                        .fill(today ? NL.accent : isHovered ? NL.chartBarHover : NL.chartBar)
+                        .frame(maxWidth: 56)
+                        .frame(height: grown ? height : 0)
+                        .overlay(alignment: .top) {
+                            Text(grouped(day.words))
+                                .font(NLFont.ui(12, .semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(NL.textPrimary)
+                                .fixedSize()
+                                .offset(y: -20)
+                                .opacity(showValue ? 1 : 0)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                        .contentShape(Rectangle())
+                        .onHover { inside in
+                            if inside { hovered = day.date } else if hovered == day.date { hovered = nil }
+                        }
+                        .animation(reduceMotion ? nil : Motion.slow.delay(Double(index) * (dense ? 0.01 : 0.04)),
+                                   value: grown)
+                        .accessibilityElement()
+                        .accessibilityLabel("\(Self.label(day.date, today: today)): \(wordsLabel(day.words))")
                 }
-        }
-        .chartXSelection(value: $hovered)
-        .chartXAxis {
-            AxisMarks(values: .stride(by: .day)) { _ in
-                AxisValueLabel(format: .dateTime.weekday(.abbreviated), centered: true)
-                    .font(NLType.caption.font)
-                    .foregroundStyle(NL.textTertiary)
             }
-        }
-        .chartYAxis {
-            AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { _ in
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 1))
-                    .foregroundStyle(NL.borderSubtle)
-                AxisValueLabel()
-                    .font(NLType.caption.font.monospacedDigit())
-                    .foregroundStyle(NL.textTertiary)
+            .frame(height: plot + 24)
+            .animation(Motion.moderate, value: days.map(\.words))
+            .animation(Motion.fast, value: hovered)
+            NL.borderSubtle.frame(height: 1)
+            HStack(spacing: dense ? 4 : 14) {
+                ForEach(Array(days.enumerated()), id: \.element.id) { index, day in
+                    let today = Calendar.current.isDateInToday(day.date)
+                    Text(dense ? (index % 5 == 4 || today ? Self.dayNumber.string(from: day.date) : "")
+                               : Self.label(day.date, today: today))
+                        .font(NLFont.ui(12, today ? .semibold : .medium))
+                        .foregroundStyle(today ? NL.textPrimary : NL.textTertiary)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .frame(maxWidth: .infinity)
+                }
             }
+            .padding(.top, 10)
         }
-        .frame(height: 180)
-        .animation(Motion.fast, value: hovered)
-        .onAppear {
-            if reduceMotion { grown = true } else { withAnimation(Motion.slow) { grown = true } }
-        }
+        .onAppear { grown = true }
+    }
+
+    private static let weekday: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ru_RU")
+        f.dateFormat = "EE"
+        return f
+    }()
+
+    private static let dayNumber: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ru_RU")
+        f.dateFormat = "d"
+        return f
+    }()
+
+    static func label(_ date: Date, today: Bool) -> String {
+        today ? "Сегодня" : weekday.string(from: date).capitalized
     }
 }

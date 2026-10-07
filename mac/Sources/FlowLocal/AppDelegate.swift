@@ -104,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             openSettings: { HubSync.openSettings() },
             showMain: { SceneBridge.showMain() },
             find: { [weak self] in
-                self?.state.tab = .dictations
+                self?.state.tab = .history
                 SceneBridge.showMain()
                 self?.state.searchFocusRequest += 1
             })

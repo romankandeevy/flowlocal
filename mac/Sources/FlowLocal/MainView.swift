@@ -25,45 +25,51 @@ enum AppInfo {
     static let helpURL = URL(string: "https://github.com/romankandeevy/flowlocal/tree/main/mac#readme")!
 }
 
-// Главное окно - одно на всё. В тулбаре: состояние слева, разделы
-// переключателем по центру. Под ним раздел; смена раздела -
-// новый раздел проступает со сдвигом на 6pt, прежний уходит сразу.
+// Главное окно - одно на всё: слева сайдбар с разделами, неделей и
+// состоянием, справа раздел. Заголовка у окна нет - «светофоры» лежат на
+// сайдбаре, а за верхнюю полосу и пустое место сайдбара окно можно тянуть.
+// Смена раздела - новый проступает со сдвигом, прежний уходит сразу.
 struct MainView: View {
     @EnvironmentObject var state: AppState
     let actions: AppActions
 
     var body: some View {
-        ZStack {
-            switch state.tab {
-            case .dictations:
-                DictationsView(actions: actions)
-                    .transition(.sectionSwap)
-            case .stats:
-                StatsView()
-                    .transition(.sectionSwap)
+        HStack(spacing: 0) {
+            Sidebar(actions: actions)
+            NL.sidebarBorder.frame(width: 1)
+            VStack(spacing: 0) {
+                WindowDragArea()
+                    .frame(height: Space.s8 + Space.s1)
+                ZStack {
+                    switch state.tab {
+                    case .home:
+                        HomeView(actions: actions)
+                            .transition(.sectionSwap)
+                    case .history:
+                        HistoryView(actions: actions)
+                            .transition(.sectionSwap)
+                    case .stats:
+                        StatsView()
+                            .transition(.sectionSwap)
+                    case .style:
+                        StyleView()
+                            .transition(.sectionSwap)
+                    case .dictionary:
+                        DictionaryView()
+                            .transition(.sectionSwap)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .background(NL.canvas)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .motion(Motion.moderate, value: state.tab)
-        .overlay(alignment: .top) { NL.border.frame(height: 1) }
-        .frame(minWidth: 780, minHeight: 500)
+        .ignoresSafeArea(.container, edges: .top)
+        .frame(minWidth: 820, minHeight: 540)
         .background(NL.canvas)
-        // Верхняя панель - тулбар окна со своими видами: высота, место
-        // «светофоров» и перетаскивание окна остаются системными.
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                EngineStatus().padding(.horizontal, Space.s2)
-            }
-            .plainToolbarBackground()
-            ToolbarItem(placement: .principal) {
-                SectionSwitcher(selection: $state.tab)
-            }
-            .plainToolbarBackground()
-        }
-        .toolbarBackground(NL.canvas, for: .windowToolbar)
-        .toolbarBackground(.visible, for: .windowToolbar)
-        .navigationTitle("")
         .tint(NL.accent)
+        .sheet(item: $state.editing) { entry in
+            EditEntrySheet(entry: entry)
+        }
         .modifier(SceneBridgeCapture())
     }
 
@@ -73,106 +79,175 @@ struct MainView: View {
     }
 }
 
-extension ToolbarContent {
-    /// macOS 26 кладёт каждый элемент тулбара на своё «стекло». У нас и статус,
-    /// и переключатель разделов со своей подложкой - второе стекло вокруг
-    /// выглядит двойной рамкой и обрезает текст статуса. На старых SDK и
-    /// системах модификатора нет - там и стекла нет.
-    @ToolbarContentBuilder
-    func plainToolbarBackground() -> some ToolbarContent {
-        #if compiler(>=6.2)
-        if #available(macOS 26, *) {
-            sharedBackgroundVisibility(.hidden)
-        } else {
-            self
-        }
-        #else
-        self
-        #endif
-    }
-}
-
 extension AnyTransition {
-    /// Смена раздела: растворение и сдвиг на 4pt, без масштаба.
+    /// Смена раздела: проступание и сдвиг на 6pt. Уходящий раздел исчезает
+    /// сразу: при растворении обоих они на миг просвечивали друг сквозь друга.
     static var sectionSwap: AnyTransition {
-        // Уходящий раздел исчезает сразу: при растворении обоих они на миг
-        // просвечивали друг сквозь друга.
-        .asymmetric(insertion: .opacity.combined(with: .offset(y: 6)).combined(with: .scale(scale: 0.99)),
-                    removal: .identity)
+        .asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .identity)
     }
 }
 
-// MARK: - верхняя панель
+/// Страница раздела: колонка до 760pt по центру, поля 40pt.
+struct PageScroll<Content: View>: View {
+    @ViewBuilder var content: () -> Content
 
-/// Разделы - сегменты в подложке subtle; выбранный - surface с тенью xs,
-/// переезжает под новый раздел (ease-in-out, чистая смена положения).
-private struct SectionSwitcher: View {
-    @Binding var selection: Tab
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28, content: content)
+                .frame(maxWidth: Space.contentMax, alignment: .leading)
+                .padding(.horizontal, Space.page)
+                .padding(.top, Space.s3)
+                .padding(.bottom, Space.s12)
+                .frame(maxWidth: .infinity)
+        }
+        .scrollIndicators(.automatic)
+    }
+}
+
+// MARK: - сайдбар
+
+private struct Sidebar: View {
+    @EnvironmentObject var state: AppState
+    let actions: AppActions
     @Namespace private var thumb
 
     var body: some View {
-        HStack(spacing: Space.s0_5) {
+        VStack(alignment: .leading, spacing: 2) {
+            // Место «светофоров».
+            Color.clear.frame(height: 50)
             ForEach(Tab.allCases) { tab in
-                Segment(title: tab.title, selected: selection == tab, namespace: thumb) {
-                    withMotion(Motion.position) { selection = tab }
+                NavItem(tab: tab, selected: state.tab == tab, namespace: thumb) {
+                    withMotion(Motion.position) { state.tab = tab }
                 }
             }
-        }
-        .padding(Space.s0_5)
-        .background(NL.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-    }
-
-    private struct Segment: View {
-        let title: String
-        let selected: Bool
-        let namespace: Namespace.ID
-        let action: () -> Void
-        @State private var hover = false
-
-        var body: some View {
-            Button(action: action) {
-                Text(title)
-                    .nlType(.label)
-                    .foregroundStyle(selected || hover ? NL.textPrimary : NL.textSecondary)
-                    .padding(.horizontal, Space.s4)
-                    .frame(height: 26)
-                    .background {
-                        if selected {
-                            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                                .fill(NL.surface)
-                                .nlShadow(.xs)
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                                        .strokeBorder(NL.borderSubtle, lineWidth: 1)
-                                }
-                                .matchedGeometryEffect(id: "thumb", in: namespace)
-                        }
-                    }
-                    .contentShape(Rectangle())
+            Spacer(minLength: Space.s4)
+            if !state.history.isEmpty {
+                WeekCard()
+                    .transition(.opacity)
             }
-            .buttonStyle(.plain)
-            .onHover { hover = $0 }
-            .animation(Motion.fast, value: hover)
-            .accessibilityAddTraits(selected ? .isSelected : [])
+            WhisperSwitch()
+                .padding(.top, Space.s3)
+            StatusLine(actions: actions)
+                .padding(.top, Space.s2)
         }
+        .padding(.horizontal, Space.s3)
+        .padding(.bottom, Space.s3 + 2)
+        .frame(width: Size.sidebar)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background { WindowDragArea() }
+        .background(NL.sidebar)
+        .motion(Motion.moderate, value: state.history.isEmpty)
     }
 }
 
-/// Готовность распознавания - точкой и словом.
-private struct EngineStatus: View {
+/// Пункт сайдбара: значок и название. Выбранный - карточкой, которая
+/// переезжает под новый пункт.
+private struct NavItem: View {
+    let tab: Tab
+    let selected: Bool
+    let namespace: Namespace.ID
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: tab.symbol)
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 18)
+                Text(tab.title)
+                    .font(NLFont.ui(13.5, .medium))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(selected || hover ? NL.textPrimary : NL.textSecondary)
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background {
+                if selected {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(NL.surface)
+                        .shadow(color: .black.opacity(0.06), radius: 1, y: 1)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(NL.border, lineWidth: 0.5)
+                        }
+                        .matchedGeometryEffect(id: "thumb", in: namespace)
+                } else if hover {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(NL.hover)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .animation(Motion.fast, value: hover)
+        .help("\(tab.title) (⌘\(String(tab.shortcut.character)))")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// Неделя в сайдбаре: слова и сэкономленное время.
+private struct WeekCard: View {
     @EnvironmentObject var state: AppState
 
     var body: some View {
-        HStack(spacing: Space.s1_5) {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("На этой неделе")
+                .nlType(.caption)
+                .foregroundStyle(NL.textTertiary)
+            Text(wordsLabel(state.wordsWeek))
+                .font(NLFont.ui(22, .semibold))
+                .tracking(-0.4)
+                .monospacedDigit()
+                .foregroundStyle(NL.textPrimary)
+                .contentTransition(.numericText())
+            Text(saved)
+                .nlType(.caption)
+                .foregroundStyle(NL.textTertiary)
+        }
+        .padding(14)
+        .nlCard(padding: 0, radius: 12)
+        .motion(Motion.slow, value: state.wordsWeek)
+    }
+
+    private var saved: String {
+        let m = state.savedMinutes(days: 7)
+        return m > 0 ? "≈ \(grouped(m)) мин сэкономлено" : "Говорите — время начнёт копиться"
+    }
+}
+
+/// Готовность распознавания - точкой и словом; справа - настройки.
+private struct StatusLine: View {
+    @EnvironmentObject var state: AppState
+    let actions: AppActions
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 7) {
             Circle().fill(tone).frame(width: 6, height: 6)
             Text(state.statusText)
                 .nlType(.caption)
                 .foregroundStyle(NL.textTertiary)
                 .lineLimit(1)
                 .contentTransition(.opacity)
+            Spacer(minLength: 0)
+            Button(action: actions.openSettings) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 13))
+                    .foregroundStyle(hover ? NL.textPrimary : NL.textTertiary)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(hover ? NL.hover : .clear))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hover = $0 }
+            .animation(Motion.fast, value: hover)
+            .help("Настройки (⌘,)")
+            .accessibilityLabel("Настройки")
         }
+        .padding(.leading, 6)
         .motion(Motion.base, value: state.statusText)
-        .accessibilityElement(children: .combine)
     }
 
     private var tone: Color {
@@ -186,52 +261,175 @@ private struct EngineStatus: View {
     }
 }
 
-/// Поле поиска Northline: surface, граница, иконка третичным; в фокусе -
-/// граница и кольцо акцента. ⌘F - забирает фокус, Esc - очищает.
+/// Режим шёпота одним щелчком: капсула-переключатель над состоянием.
+private struct WhisperSwitch: View {
+    @EnvironmentObject var state: AppState
+    @State private var hover = false
+
+    var body: some View {
+        Button {
+            withMotion(Motion.base) { state.whisperMode.toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: state.whisperMode ? "waveform.badge.mic" : "waveform")
+                    .font(.system(size: 12, weight: .medium))
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(width: 18)
+                Text("Шёпот")
+                    .font(NLFont.ui(13, .medium))
+                Spacer(minLength: 0)
+                Capsule()
+                    .fill(state.whisperMode ? NL.accent : NL.borderStrong)
+                    .frame(width: 26, height: 15)
+                    .overlay(alignment: state.whisperMode ? .trailing : .leading) {
+                        Circle().fill(.white).frame(width: 11, height: 11).padding(2)
+                            .shadow(color: .black.opacity(0.15), radius: 1, y: 0.5)
+                    }
+            }
+            .foregroundStyle(state.whisperMode ? NL.textPrimary : NL.textSecondary)
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(hover ? NL.hover : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .animation(Motion.fast, value: hover)
+        .help("Режим шёпота: тихая речь усиливается (⌥⌘W)")
+        .accessibilityLabel("Режим шёпота")
+        .accessibilityValue(state.whisperMode ? "включён" : "выключен")
+    }
+}
+
+/// «Исправить…»: текст диктовки целиком; сохранили - поправки учатся.
+private struct EditEntrySheet: View {
+    @EnvironmentObject var state: AppState
+    @Environment(\.dismiss) private var dismiss
+    let entry: Entry
+    @State private var text = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Исправить диктовку")
+                    .font(NLFont.ui(18, .semibold))
+                    .foregroundStyle(NL.textPrimary)
+                Text(state.learnFromEdits
+                     ? "Поправьте слова, которые модель написала неправильно, — в следующий раз они напишутся верно."
+                     : "Обучение на исправлениях выключено в «Словаре».")
+                    .font(NLFont.ui(13))
+                    .foregroundStyle(NL.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            TextEditor(text: $text)
+                .font(NLFont.ui(15))
+                .lineSpacing(4)
+                .scrollContentBackground(.hidden)
+                .padding(10)
+                .frame(minHeight: 160)
+                .background(NL.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(NL.border, lineWidth: 0.5)
+                }
+            HStack {
+                Spacer()
+                Button("Отменить") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .nlButton(.ghost)
+                Button("Сохранить") {
+                    state.saveEdit(entry, text: text)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(InkButtonStyle())
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
+        .background(NL.canvas)
+        .onAppear { text = entry.text }
+    }
+}
+
+// MARK: - перетаскивание окна
+
+/// Пустое место, за которое тянут окно: у окна без заголовка иначе
+/// перетаскивать не за что - SwiftUI забирает щелчки себе.
+struct WindowDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { DragView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class DragView: NSView {
+        override var mouseDownCanMoveWindow: Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount == 2 {
+                window?.performZoom(nil)
+            } else {
+                window?.performDrag(with: event)
+            }
+        }
+    }
+}
+
+// MARK: - поиск
+
+/// Поле поиска: карточка 40pt, лупа, ⌘F справа; в фокусе - кольцо
+/// акцента. ⌘F забирает фокус, Esc очищает.
 struct SearchField: View {
     @Binding var text: String
     var focusRequest: Int
     @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(spacing: Space.s1_5) {
+        HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12))
+                .font(.system(size: 14))
                 .foregroundStyle(NL.iconTertiary)
-            TextField("", text: $text, prompt: Text("Поиск").foregroundColor(NL.textPlaceholder))
+            TextField("", text: $text, prompt: Text("Найти по словам").foregroundColor(NL.textPlaceholder))
                 .textFieldStyle(.plain)
-                .nlType(.bodySm)
+                .font(NLFont.ui(14))
                 .foregroundStyle(NL.textPrimary)
                 .focused($focused)
                 .onExitCommand { text = ""; focused = false }
             if !text.isEmpty {
                 Button { text = "" } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12))
+                        .font(.system(size: 13))
                         .foregroundStyle(NL.iconTertiary)
                 }
                 .buttonStyle(.plain)
                 .help("Очистить поиск")
+                .transition(.opacity)
             } else {
                 Text("⌘F")
-                    .nlType(.labelXs)
+                    .font(NLFont.ui(11.5, .semibold))
                     .foregroundStyle(NL.textTertiary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .strokeBorder(NL.border, lineWidth: 0.5)
+                    }
+                    .transition(.opacity)
             }
         }
-        .padding(.horizontal, Space.s2)
-        .frame(height: Size.controlSm)
-        .background(NL.surface, in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+        .padding(.horizontal, 14)
+        .frame(height: 40)
+        .background(NL.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                .strokeBorder(focused ? NL.borderFocus : NL.border, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(focused ? NL.borderFocus : NL.border, lineWidth: focused ? 1 : 0.5)
         }
         .background {
-            RoundedRectangle(cornerRadius: Radius.sm + 3, style: .continuous)
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
                 .fill(NL.ringFocus)
                 .padding(-3)
                 .opacity(focused ? 1 : 0)
         }
         .animation(Motion.base, value: focused)
+        .animation(Motion.fast, value: text.isEmpty)
         .onChange(of: focusRequest) { _, _ in focused = true }
     }
 }

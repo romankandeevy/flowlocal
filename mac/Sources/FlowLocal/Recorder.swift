@@ -27,6 +27,12 @@ final class Recorder {
     private(set) var running = false
     /// UID выбранного микрофона. nil или пропал - системный по умолчанию.
     var deviceUID: String?
+    /// Режим шёпота: тихая речь поднимается до обычной (WhisperGain).
+    /// Задаётся до start(); под lock - его читает аудиопоток.
+    var whisper = false
+    private var gainer = WhisperGain()
+    /// Чувствительность микрофона до шёпота - вернуть после записи.
+    private var savedVolume: (device: AudioDeviceID, values: [(element: UInt32, value: Float32)])?
 
     /// RMS каждого куска, зовётся с аудиопотока.
     var onLevel: ((Float) -> Void)?
@@ -49,6 +55,7 @@ final class Recorder {
         samples.removeAll(keepingCapacity: true)
         sent = 0
         lastBuffer = Date()
+        gainer = WhisperGain()
         lock.unlock()
         restarts = 0
         do {
@@ -61,6 +68,7 @@ final class Recorder {
             deviceUID = nil
             try startEngine()
         }
+        if whisper { boostInput() }
         // Отсчёт сторожа - от поднятого движка: на Bluetooth открытие идёт
         // до нескольких секунд, и это не тишина.
         lock.lock()
@@ -212,7 +220,8 @@ final class Recorder {
             lock.unlock()
             return
         }
-        let chunk = UnsafeBufferPointer(start: ch, count: Int(out.frameLength))
+        var chunk = Array(UnsafeBufferPointer(start: ch, count: Int(out.frameLength)))
+        if whisper { gainer.process(&chunk) }
         samples.append(contentsOf: chunk)
         lastBuffer = Date()
         var sum: Float = 0
@@ -235,6 +244,7 @@ final class Recorder {
         guard restarts < 3 else {
             Log.write("микрофон молчит и не поднимается - останавливаю запись")
             running = false
+            restoreInput()
             onFailure?(Recorder.error("Микрофон не отдаёт звук"))
             return
         }
@@ -269,9 +279,29 @@ final class Recorder {
         return out
     }
 
+    /// Шёпот: чувствительность микрофона на максимум на время записи. Тихий
+    /// голос тогда выше собственного шума микрофона - цифровое усиление
+    /// одно этого не даёт (замер: модель сама выравнивает громкость).
+    private func boostInput() {
+        guard savedVolume == nil,
+              let device = deviceUID.flatMap(AudioDevices.device(uid:)) ?? AudioDevices.defaultInput() else { return }
+        let now = AudioDevices.inputVolume(device.id)
+        guard !now.isEmpty, now.contains(where: { $0.value < 0.99 }) else { return }
+        savedVolume = (device.id, now)
+        AudioDevices.setInputVolume(device.id, now.map { ($0.element, 1.0) })
+        Log.write(String(format: "шёпот: чувствительность %.0f%% → 100%%", (now.first?.value ?? 0) * 100))
+    }
+
+    private func restoreInput() {
+        guard let saved = savedVolume else { return }
+        savedVolume = nil
+        AudioDevices.setInputVolume(saved.device, saved.values)
+    }
+
     /// Остановить: вся запись и то, что ещё не отдали через drain().
     func stop() -> (all: [Float], rest: [Float]) {
         guard running else { return ([], []) }
+        restoreInput()
         teardown()
         running = false
         lock.lock()
