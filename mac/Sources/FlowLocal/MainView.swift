@@ -10,6 +10,8 @@ struct AppActions {
     var rerecognize: (Entry) -> Void = { _ in }
     var play: (Entry) -> Void = { _ in }
     var openLog: () -> Void = {}
+    /// Ещё раз завести окружение распознавания (не скачалось - нет сети).
+    var retrySetup: () -> Void = {}
     var openRecordings: () -> Void = {}
     /// Настройки - в Hub Settings.
     var openSettings: () -> Void = {}

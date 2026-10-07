@@ -5,6 +5,9 @@
 #   ./build.sh          собрать mac/build/FlowLocal.app
 #   ./build.sh run      собрать и запустить
 #   ./build.sh install  собрать, положить в /Applications и запустить оттуда
+#   ./build.sh dmg      build/FlowLocal-<версия>.dmg для релиза: Apple Silicon +
+#                       Intel в одном файле, без окружения этого Мака - Python
+#                       приложение заведёт само при первом запуске (PythonSetup.swift)
 #
 # Что где (см. Sources/FlowLocal/Paths.swift):
 #   build/FlowLocal.app                          приложение, бэкенд внутри
@@ -16,6 +19,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 HERE="$(pwd)"
+MODE="${1:-}"
 APP="$HERE/build/FlowLocal.app"
 SUPPORT="$HOME/Library/Application Support/FlowLocal"
 VENV="$SUPPORT/Python"
@@ -84,7 +88,8 @@ venv_ok() {
         "$VENV/bin/python3" -c 'import onnxruntime, onnx_asr, numpy' 2>/dev/null
 }
 
-if ! venv_ok; then
+# Для .dmg окружение этого Мака не нужно: у человека его заведёт приложение.
+if [ "$MODE" != dmg ] && ! venv_ok; then
     PY="$(find_python || true)"
     if [ -z "$PY" ] && command -v brew >/dev/null 2>&1; then
         say "подходящего Python нет - ставлю python@3.13 через Homebrew"
@@ -140,18 +145,33 @@ fi
 # ${OVERLAY[@]+...} - потому что bash 3.2 из macOS с set -u падает на пустом массиве.
 # -O по умолчанию: на двухъядерном Intel интерфейс без оптимизации заметно
 # тяжелее. Архитектура - та, на которой собираем (Intel или Apple Silicon).
+# Для .dmg - обе архитектуры и lipo в один файл.
 SWIFT_LOG="$HERE/build/swiftc.log"
-if ! xcrun swiftc ${SWIFT_OPT:--O} -swift-version 5 -target "$(uname -m)-apple-macos14.0" \
-    -sdk "$SDK" ${OVERLAY[@]+"${OVERLAY[@]}"} \
-    Sources/FlowLocal/*.swift -o "$HERE/build/FlowLocal" \
-    -framework AppKit -framework AVFoundation -framework Carbon -framework ApplicationServices \
-    2> >(tee "$SWIFT_LOG" >&2); then
-    if grep -q "SwiftUIMacros" "$SWIFT_LOG"; then
-        die "SDK этой macOS требует плагин макросов SwiftUI, а он есть только в Xcode.
+ARCHS=("$(uname -m)")
+[ "$MODE" = dmg ] && ARCHS=(arm64 x86_64)
+SLICES=()
+for ARCH in "${ARCHS[@]}"; do
+    OUT="$HERE/build/FlowLocal-$ARCH"
+    [ "${#ARCHS[@]}" -gt 1 ] && say "swiftc $ARCH"
+    if ! xcrun swiftc ${SWIFT_OPT:--O} -swift-version 5 -target "$ARCH-apple-macos14.0" \
+        -sdk "$SDK" ${OVERLAY[@]+"${OVERLAY[@]}"} \
+        Sources/FlowLocal/*.swift -o "$OUT" \
+        -framework AppKit -framework AVFoundation -framework Carbon -framework ApplicationServices \
+        2> >(tee "$SWIFT_LOG" >&2); then
+        if grep -q "SwiftUIMacros" "$SWIFT_LOG"; then
+            die "SDK этой macOS требует плагин макросов SwiftUI, а он есть только в Xcode.
     Поставьте Xcode из App Store (запускать не обязательно) и повторите ./build.sh."
+        fi
+        die "swiftc не собрал приложение - ошибки выше и в $SWIFT_LOG"
     fi
-    die "swiftc не собрал приложение - ошибки выше и в $SWIFT_LOG"
+    SLICES+=("$OUT")
+done
+if [ "${#SLICES[@]}" -gt 1 ]; then
+    lipo -create "${SLICES[@]}" -output "$HERE/build/FlowLocal"
+else
+    mv "${SLICES[0]}" "$HERE/build/FlowLocal"
 fi
+rm -f "$HERE"/build/FlowLocal-arm64 "$HERE"/build/FlowLocal-x86_64
 
 say "$APP"
 rm -rf "$APP"
@@ -182,7 +202,9 @@ fi
 # Годится и общий сертификат разработки «Local Dev Signing», если он уже
 # есть в связке: право тоже привязывается к нему, а не к хэшу.
 SIGN_ID="-"
-for CERT in "FlowLocal Dev" "Local Dev Signing"; do
+# В .dmg - ad-hoc: самоподписанный сертификат на чужом Маке не доверенный,
+# и Gatekeeper отнёсся бы к нему строже, чем к ad-hoc.
+[ "$MODE" = dmg ] || for CERT in "FlowLocal Dev" "Local Dev Signing"; do
     if security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$CERT\""; then
         SIGN_ID="$CERT"
         break
@@ -200,7 +222,20 @@ stop_running() {
     fi
 }
 
-case "${1:-}" in
+case "$MODE" in
+dmg)
+    # Образ: приложение и ярлык «Программы» - перетащить одно на другое.
+    VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")"
+    DMG="$HERE/build/FlowLocal-$VERSION.dmg"
+    STAGE="$HERE/build/dmg"
+    rm -rf "$STAGE" "$DMG"
+    mkdir -p "$STAGE"
+    cp -R "$APP" "$STAGE/"
+    ln -s /Applications "$STAGE/Программы"
+    hdiutil create -quiet -volname "FlowLocal" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+    rm -rf "$STAGE"
+    say "образ: $DMG ($(du -h "$DMG" | cut -f1))"
+    ;;
 run)
     stop_running
     open "$APP"

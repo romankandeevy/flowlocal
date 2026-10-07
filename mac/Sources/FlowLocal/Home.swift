@@ -144,14 +144,21 @@ private struct AttentionBanner: View {
     var body: some View {
         Group {
             if case let .failed(message) = state.backend {
-                NLAlert(kind: .danger, title: "Распознавание не запустилось", message: message,
-                        actionTitle: "Журнал", action: actions.openLog)
+                // Не завелось окружение (первый запуск из .dmg, нет сети) -
+                // проще всего попробовать ещё раз; иначе - журнал.
+                if PythonSetup.needed {
+                    NLAlert(kind: .danger, title: "Распознавание не подготовилось", message: message,
+                            actionTitle: "Ещё раз", action: actions.retrySetup)
+                } else {
+                    NLAlert(kind: .danger, title: "Распознавание не запустилось", message: message,
+                            actionTitle: "Журнал", action: actions.openLog)
+                }
             } else if !state.micGranted {
                 NLAlert(kind: .warning, title: "Нет доступа к микрофону", message: "Без него диктовка не начнётся.",
                         actionTitle: "Разрешить", action: { openMicrophoneAccess(state) })
             } else if state.backend == .starting {
-                NLAlert(kind: .info, title: "Загружаю распознавание",
-                        message: "Первый раз после запуска — около 20 секунд.")
+                NLAlert(kind: .info, title: state.setupStep == nil ? "Загружаю распознавание" : "Готовлю распознавание",
+                        message: state.startingNote)
             } else if !state.axTrusted {
                 NLAlert(kind: .warning, title: "Текст не вставится сам",
                         message: "Без универсального доступа диктовка попадёт только в буфер обмена.",

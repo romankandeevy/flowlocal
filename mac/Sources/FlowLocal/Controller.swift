@@ -62,7 +62,7 @@ final class Controller {
         }
         player.onEnd = { [weak self] in self?.state.playing = nil }
         backend.onEvent = { [weak self] in self?.handle($0) }
-        backend.start()
+        startBackend()
         bindHotkeys()
     }
 
@@ -98,6 +98,25 @@ final class Controller {
     }
 
     // MARK: - бэкенд
+
+    /// Окружения нет (FlowLocal из .dmg, первый запуск) - сначала заводим его,
+    /// потом бэкенд. Собранному build.sh окружение уже готово.
+    func startBackend() {
+        guard PythonSetup.needed else { backend.start(); return }
+        state.backend = .starting
+        state.setupStep = .downloading(nil)
+        PythonSetup.run(progress: { [weak self] step in
+            self?.state.setupStep = step
+        }, done: { [weak self] error in
+            guard let self else { return }
+            self.state.setupStep = nil
+            if let error {
+                self.state.backend = .failed(error.localizedDescription)
+            } else {
+                self.backend.start()
+            }
+        })
+    }
 
     private func handle(_ event: Backend.Event) {
         switch event {

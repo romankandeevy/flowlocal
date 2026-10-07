@@ -15,6 +15,11 @@ import Foundation
 // чтобы правка бэкенда не требовала пересборки.
 enum Paths {
     static let support: URL = {
+        // FLOWLOCAL_SUPPORT_DIR - другая папка данных: проверка первого
+        // запуска (окружение с нуля) без трогания настоящей.
+        if let dir = ProcessInfo.processInfo.environment["FLOWLOCAL_SUPPORT_DIR"], !dir.isEmpty {
+            return URL(fileURLWithPath: dir, isDirectory: true)
+        }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("FlowLocal", isDirectory: true)
     }()

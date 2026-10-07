@@ -93,7 +93,7 @@ struct OnboardingView: View {
     private var modelsDetail: String {
         switch state.backend {
         case .ready: return "GigaAM для русского, Parakeet для английского."
-        case .starting: return "Загружаем GigaAM и Parakeet — в первый раз около 850 МБ."
+        case .starting: return state.setupStep == nil ? "Загружаем GigaAM и Parakeet — в первый раз около 850 МБ." : state.startingNote
         case let .failed(message): return message
         }
     }

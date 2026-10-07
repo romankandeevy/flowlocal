@@ -267,6 +267,19 @@ final class AppState: ObservableObject {
     @Published var searchFocusRequest = 0
     @Published var historySelection: Set<UUID> = []
     @Published var backend: BackendState = .starting
+    /// Первый запуск из .dmg: приложение заводит себе Python (PythonSetup).
+    @Published var setupStep: PythonSetup.Step?
+
+    /// Что сейчас делается до готовности распознавания - одной строкой.
+    var startingNote: String {
+        switch setupStep {
+        case .downloading(let f?): return "Скачиваю Python для распознавания — \(Int(f * 100))%. Один раз."
+        case .downloading(nil): return "Скачиваю Python для распознавания. Один раз."
+        case .unpacking: return "Распаковываю Python…"
+        case .installing: return "Ставлю библиотеки распознавания — минута-две, один раз."
+        case nil: return "Первый раз после запуска — около 20 секунд, при самом первом — докачка моделей (~850 МБ)."
+        }
+    }
     @Published var englishReady = false
     @Published var phase: Phase = .idle {
         didSet { if phase != oldValue { SuiteBroadcast.phase(phase) } }

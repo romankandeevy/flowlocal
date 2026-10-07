@@ -100,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rerecognize: { [weak self] entry in self?.controller.rerecognize(entry) },
             play: { [weak self] entry in self?.controller.play(entry) },
             openLog: { NSWorkspace.shared.open(Log.fileURL) },
+            retrySetup: { [weak self] in self?.controller.startBackend() },
             openRecordings: { NSWorkspace.shared.open(AudioStore.dir) },
             openSettings: { HubSync.openSettings() },
             showMain: { SceneBridge.showMain() },
