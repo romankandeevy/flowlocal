@@ -1,0 +1,1141 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlowLocal — диктовка для Mac</title>
+<meta name="description" content="Локальная диктовка для macOS: зажали клавишу, сказали, отпустили — текст уже там, где курсор. GigaAM v3 и Parakeet прямо на Маке. Без облака, аккаунта и подписки. Открытый код, MIT.">
+<meta name="theme-color" content="#0c0c0e">
+<meta property="og:title" content="FlowLocal — диктовка для Mac">
+<meta property="og:description" content="Зажали. Сказали. Отпустили. Звук и текст не покидают Мак.">
+<meta property="og:image" content="https://romankandeevy.github.io/flowlocal/icon.png">
+<meta property="og:type" content="website">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* Цвета - из Theme.swift приложения (тёмная тема): графит и яркий зелёный. */
+  :root {
+    --bg: #0c0c0e;
+    --canvas: #111113;
+    --surface: #1c1c1f;
+    --subtle: #26262a;
+    --text: #f4f4f5;
+    --muted: #b8b8be;
+    --faint: #8e8e95;
+    --line: rgba(255,255,255,.10);
+    --line-strong: rgba(255,255,255,.18);
+    --green: #3deb8c;
+    --green-deep: #0fa84f;
+    --green-soft: rgba(61,235,140,.12);
+    --ui: "Onest", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 17px/1.55 var(--ui);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  /* Фон отдельным слоем: линованная бумага (как строки на иконке) и зелёное свечение сверху. */
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+      radial-gradient(900px 520px at 50% -8%, rgba(61,235,140,.16) 0%, transparent 62%),
+      linear-gradient(180deg, #121214 0%, var(--bg) 100%);
+    background-size: 100% 34px, auto, auto;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+  ::selection { background: rgba(61,235,140,.35); }
+
+  /* ── шапка ── */
+  nav { position: sticky; top: 0; z-index: 30; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        background: rgba(12,12,14,.6); border-bottom: 1px solid rgba(255,255,255,.06); }
+  nav .wrap { display: flex; align-items: center; gap: 18px; height: 56px; }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font: 700 18px/1 var(--ui); letter-spacing: -.01em; }
+  .brand img { width: 28px; height: 28px; border-radius: 7px; }
+  nav .links { display: flex; gap: 20px; margin-left: auto; font-size: 14px; }
+  nav .links a { text-decoration: none; color: var(--muted); }
+  nav .links a:hover { color: #fff; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 13px 22px; border-radius: 14px; font: 600 16px/1.2 var(--ui);
+         text-decoration: none; color: #021409; background: var(--green); box-shadow: 0 8px 28px rgba(61,235,140,.25);
+         transition: transform .15s ease, box-shadow .15s ease, background .15s; white-space: nowrap; border: 0; cursor: pointer; }
+  .btn:hover { transform: translateY(-2px); background: #5ff0a1; box-shadow: 0 14px 34px rgba(61,235,140,.32); }
+  .btn.small { padding: 8px 14px; font-size: 14px; border-radius: 10px; box-shadow: none; }
+  .btn.ghost { background: rgba(255,255,255,.07); color: #fff; box-shadow: none; border: 1px solid var(--line-strong); }
+  .btn.ghost:hover { background: rgba(255,255,255,.12); }
+
+  /* ── первый экран ── */
+  .hero { text-align: center; padding: 60px 0 24px; }
+  .hero .icon { width: 108px; height: 108px; border-radius: 24px; box-shadow: 0 18px 50px rgba(0,0,0,.6), 0 0 60px rgba(61,235,140,.12);
+                animation: bob 6s ease-in-out infinite; }
+  @keyframes bob { 50% { transform: translateY(-6px); } }
+  h1 { font: 800 clamp(56px, 10vw, 112px)/1 var(--ui); letter-spacing: -.045em; margin: 18px 0 14px; }
+  h1 .local { color: var(--green); }
+  /* Слова подзаголовка проявляются по одному - как живые слова при диктовке. */
+  .lead { font-size: clamp(19px, 2.6vw, 25px); font-weight: 500; line-height: 1.35; margin: 0 auto 10px; max-width: 760px; min-height: 1.4em; letter-spacing: -.01em; }
+  .lead .w { display: inline-block; opacity: 0; filter: blur(8px); transform: translateY(6px); transition: opacity .45s ease, filter .45s ease, transform .45s ease; }
+  .lead .w.on { opacity: 1; filter: none; transform: none; }
+  .lead .w.g { color: var(--green); }
+  .sublead { color: var(--muted); max-width: 640px; margin: 0 auto 26px; font-size: 17px; }
+  .buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .note { font-size: 13px; color: var(--faint); margin: 14px 0 0; }
+
+  /* капсула - ровно как в приложении: чёрная плашка, белые полоски, волна бежит справа налево */
+  .pill { display: inline-flex; align-items: center; height: 36px; padding: 0 16px; border-radius: 999px; background: #000;
+          box-shadow: 0 0 0 .5px rgba(255,255,255,.12) inset, 0 5px 12px rgba(0,0,0,.25); }
+  .pill canvas { display: block; width: 77.5px; height: 18px; }
+
+  /* ── живая демка ── */
+  .try { position: relative; margin: 54px auto 0; max-width: 900px; }
+  .scribble { position: absolute; font: 500 15px/1.35 var(--ui); color: var(--green); pointer-events: none; width: 170px; }
+  .scribble svg { display: block; margin-top: 6px; }
+  .scribble.left { left: -190px; top: 120px; text-align: right; }
+  .scribble.left svg { margin-left: auto; }
+  .scribble.right { right: -190px; top: 300px; }
+  .window { position: relative; text-align: left; border-radius: 14px; overflow: hidden; background: var(--canvas);
+            box-shadow: 0 40px 100px rgba(0,0,0,.6), 0 0 0 1px var(--line) inset; }
+  .bar { display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 14px; background: #18181b; border-bottom: 1px solid var(--line); }
+  .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+  .apps { margin-left: 14px; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+  .apps::-webkit-scrollbar { display: none; }
+  .app-tab { all: unset; cursor: pointer; display: flex; align-items: center; gap: 7px; padding: 6px 11px; border-radius: 8px; font: 500 13px/1 var(--ui);
+             color: var(--faint); white-space: nowrap; transition: background .15s, color .15s; }
+  .app-tab[aria-selected="true"] { background: rgba(255,255,255,.08); color: #fff; }
+  .chip:focus-visible, .side button:focus-visible, .seg button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+  .app-tab .ico { width: 16px; height: 16px; border-radius: 4px; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff; }
+  .style-tag { margin-left: auto; font: 500 12px/1 var(--ui); color: var(--green); background: var(--green-soft); border-radius: 6px; padding: 6px 8px; white-space: nowrap; }
+
+  .stage { position: relative; height: 440px; }
+  .scene { position: absolute; inset: 0; padding: 22px 26px 120px; opacity: 0; pointer-events: none; transition: opacity .25s ease; overflow: hidden; }
+  .scene.on { opacity: 1; pointer-events: auto; }
+  /* мессенджер */
+  .msg { max-width: 72%; padding: 9px 13px; border-radius: 16px; font-size: 15px; line-height: 1.4; margin-bottom: 8px; width: fit-content; }
+  .msg.in { background: var(--subtle); border-bottom-left-radius: 5px; }
+  .msg.out { background: #1f6f45; margin-left: auto; border-bottom-right-radius: 5px; }
+  .msg small { display: block; font-size: 11px; opacity: .55; margin-top: 2px; text-align: right; }
+  .composer { position: absolute; left: 20px; right: 20px; bottom: 98px; min-height: 44px; border-radius: 22px; background: var(--subtle);
+              padding: 11px 18px; font-size: 15px; line-height: 1.45; }
+  /* почта */
+  .mail-head { font-size: 13.5px; color: var(--faint); border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 12px; display: grid; gap: 6px; }
+  .mail-head b { color: var(--text); font-weight: 500; }
+  .field { font-size: 15.5px; line-height: 1.6; white-space: pre-wrap; }
+  /* код */
+  .code { font: 14px/1.7 var(--mono); color: #c9c9cf; white-space: pre-wrap; }
+  .code .c { color: #6b6b73; }
+  .code .k { color: #ff8fb1; }
+  .code .s { color: var(--green); }
+  /* заметки */
+  .notes h3 { margin: 0 0 6px; font-size: 22px; letter-spacing: -.01em; }
+  .notes .date { font-size: 12.5px; color: var(--faint); margin-bottom: 12px; }
+
+  .placeholder { color: #6b6b73; }
+  .caret { display: inline-block; width: 2px; height: 1.15em; margin-left: 1px; vertical-align: -.2em; background: var(--green); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .typed .fresh { background: rgba(61,235,140,.22); border-radius: 3px; transition: background 1.6s ease; }
+  .typed .fresh.settled { background: transparent; }
+
+  /* капсула в окне и то, что «услышано» */
+  .demo-pill { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%) scale(.86); opacity: 0; filter: blur(6px);
+               transition: opacity .18s ease, transform .35s cubic-bezier(.3,1.5,.5,1), filter .2s ease; z-index: 3; }
+  .demo-pill.on { opacity: 1; transform: translateX(-50%) scale(1); filter: none; }
+  .thread { display: flex; flex-direction: column; justify-content: flex-end; position: absolute; left: 26px; right: 26px; bottom: 156px; top: 22px; overflow: hidden; }
+  .thread .msg { flex: none; }
+  .msg.new { animation: sent .45s cubic-bezier(.2,.9,.3,1.2); }
+  @keyframes sent { from { opacity: 0; transform: translateY(16px) scale(.96); } }
+
+  /* что «говорят» - субтитр над капсулой */
+  .said { position: absolute; left: 50%; bottom: 66px; transform: translateX(-50%); max-width: calc(100% - 32px); text-align: center; font-size: 14.5px;
+          color: var(--text); background: rgba(0,0,0,.55); border: 1px solid var(--line); border-radius: 12px; padding: 7px 12px; z-index: 2;
+          opacity: 0; transition: opacity .3s ease; pointer-events: none; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .said.on { opacity: 1; }
+  .said .mic-i { color: var(--green); margin-right: 6px; }
+  .said .w { display: none; }
+  .said .w.on { display: inline; animation: wordin .3s ease; }
+  @keyframes wordin { from { opacity: 0; filter: blur(4px); } }
+  .said .w.junk { transition: opacity .25s ease, color .3s ease; }
+  .said.clean .w.junk { color: #ff8f8f; text-decoration: line-through; opacity: .75; }
+  .said .q { color: var(--faint); }
+
+  /* какие клавиши сейчас зажаты */
+  .hud { position: absolute; bottom: 26px; left: 18px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--green); z-index: 3;
+         opacity: 0; transform: translateY(6px); transition: opacity .2s ease, transform .25s ease; }
+  .hud.on { opacity: 1; transform: none; }
+  .hud kbd i { background: linear-gradient(#45f09a, #2fd27a); color: #021409; box-shadow: 0 2px 0 #0c7a3d; height: 24px; min-width: 24px; font-size: 12px; }
+
+  .app-tab { cursor: default; }
+  .film-bar { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+  .play { all: unset; cursor: pointer; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none;
+          background: rgba(255,255,255,.07); border: 1px solid var(--line-strong); color: #fff; }
+  .play:hover { background: rgba(255,255,255,.12); }
+  .play:focus-visible, .segs button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+  .play svg { width: 14px; height: 14px; }
+  .play .i-play, .play[aria-pressed="true"] .i-pause { display: none; }
+  .play[aria-pressed="true"] .i-play { display: block; }
+  .segs { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .segs button { all: unset; cursor: pointer; display: block; padding: 6px 0; }
+  .segs button::before { content: ""; display: block; height: 4px; border-radius: 4px; background: rgba(255,255,255,.1); }
+  .segs .fill { display: block; height: 4px; border-radius: 4px; margin-top: -4px; background: var(--green); transform: scaleX(0); transform-origin: left; }
+  .segs em { display: block; font-style: normal; font-size: 12px; color: var(--faint); margin-top: 7px; text-align: left; transition: color .2s; }
+  .segs button.cur em { color: #fff; }
+  .demo-foot { margin-top: 10px; font-size: 13px; color: var(--faint); text-align: center; }
+
+  kbd { display: inline-flex; gap: 3px; vertical-align: middle; }
+  kbd i { font: 600 13px/1 var(--ui); font-style: normal; color: #fff; min-width: 26px; height: 26px; padding: 0 7px; display: grid; place-items: center;
+          border-radius: 7px; background: linear-gradient(#2c2c31, #1f1f23); box-shadow: 0 2px 0 #000, 0 0 0 1px rgba(255,255,255,.12) inset; }
+  kbd.lit i { background: linear-gradient(#45f09a, #2fd27a); color: #021409; box-shadow: 0 2px 0 #0c7a3d, 0 0 0 1px rgba(255,255,255,.3) inset; }
+
+  /* ── разделы ── */
+  section { padding: 100px 0 0; }
+  h2 { font: 800 clamp(36px, 5.4vw, 56px)/1.05 var(--ui); letter-spacing: -.035em; text-align: center; margin: 0 0 12px; }
+  h2 em { font-style: normal; color: var(--green); }
+  .sub { text-align: center; color: var(--muted); max-width: 640px; margin: 0 auto 44px; }
+  .reveal { opacity: 0; transform: translateY(28px); transition: opacity .7s ease, transform .7s cubic-bezier(.2,.8,.2,1); }
+  .reveal.seen { opacity: 1; transform: none; }
+
+  /* три движения */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .step { background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 20px; padding: 24px; position: relative; overflow: hidden; }
+  .step .n { font: 800 64px/1 var(--ui); letter-spacing: -.05em; color: rgba(255,255,255,.08); position: absolute; right: 18px; top: 12px; }
+  .step h3 { font: 700 26px/1.1 var(--ui); letter-spacing: -.02em; margin: 14px 0 8px; }
+  .step p { margin: 0; color: var(--muted); font-size: 15.5px; }
+  .step .vis { height: 54px; display: flex; align-items: center; }
+  .step .big { font: 800 44px/1 var(--ui); color: var(--green); letter-spacing: -.04em; }
+
+  /* ряды: текст + нарисованная картинка */
+  .row { display: grid; grid-template-columns: 1fr 1.25fr; gap: 48px; align-items: center; margin-bottom: 84px; }
+  .row > * { min-width: 0; }
+  .row:nth-child(even) .txt { order: 2; }
+  .row .txt h3 { font: 700 34px/1.08 var(--ui); letter-spacing: -.025em; margin: 0 0 12px; }
+  .row .txt p { color: var(--muted); margin: 0 0 10px; }
+  .row .txt b { color: var(--text); font-weight: 600; }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 22px; box-shadow: 0 24px 60px rgba(0,0,0,.45); min-height: 250px; }
+  .panel .cap { font: 600 11px/1 var(--ui); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin-bottom: 14px; }
+
+  /* стиль под приложение */
+  .seg { display: flex; gap: 4px; background: rgba(255,255,255,.05); padding: 4px; border-radius: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+  .seg button { all: unset; cursor: pointer; flex: 1; text-align: center; padding: 8px 10px; border-radius: 9px; font: 500 14px/1 var(--ui); color: var(--muted); }
+  .seg button[aria-selected="true"] { background: var(--subtle); color: #fff; box-shadow: 0 1px 0 rgba(255,255,255,.06) inset; }
+  .style-out { font-size: 26px; font-weight: 600; letter-spacing: -.015em; min-height: 1.4em; transition: opacity .2s; }
+  .style-out.code { font: 500 22px var(--mono); color: var(--green); }
+  .style-desc { color: var(--muted); font-size: 14.5px; margin-top: 10px; min-height: 3em; }
+  .style-apps { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+  .style-apps span { font-size: 12.5px; color: var(--faint); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; }
+
+  /* чистка */
+  .clean-line { font-size: 22px; line-height: 1.5; font-weight: 500; letter-spacing: -.01em; min-height: 3em; }
+  .clean-line .j { color: #ff8f8f; text-decoration: line-through; transition: opacity .5s ease, font-size .5s ease, margin .5s ease; }
+  .clean-line.done .j { opacity: 0; font-size: 0; }
+  .clean-line .fix { color: var(--green); }
+  .clean-meta { display: flex; gap: 18px; margin-top: 18px; font-size: 13.5px; color: var(--faint); flex-wrap: wrap; }
+  .clean-meta b { color: var(--text); font-weight: 600; }
+
+  /* словарь */
+  .dict { display: grid; gap: 8px; }
+  .dict-row { display: grid; grid-template-columns: 1fr 24px 1fr; align-items: center; gap: 8px; padding: 11px 14px; border-radius: 12px; background: rgba(255,255,255,.04);
+              font-size: 16px; }
+  .dict-row .from { color: var(--faint); }
+  .dict-row .arrow { color: var(--green); text-align: center; }
+  .dict-row .to { font-weight: 600; }
+  .dict-row.hl { background: var(--green-soft); }
+  .learn { margin-top: 16px; padding: 14px; border-radius: 12px; border: 1px dashed var(--line-strong); font-size: 15px; color: var(--muted); }
+  .learn .old { text-decoration: line-through; color: #ff8f8f; }
+  .learn .new { color: var(--green); font-weight: 600; }
+
+  /* шёпот */
+  .whisper { display: grid; gap: 14px; }
+  .wh-row { display: flex; align-items: center; gap: 14px; }
+  .wh-row .lbl { width: 92px; font-size: 13.5px; color: var(--faint); flex: none; }
+  .wh-row canvas { flex: 1; width: 100%; height: 54px; min-width: 0; border-radius: 10px; background: rgba(0,0,0,.25); }
+  .toggle { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 500; }
+  .toggle .sw { width: 42px; height: 26px; border-radius: 999px; background: var(--subtle); position: relative; transition: background .2s; }
+  .toggle .sw::after { content: ""; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .25s cubic-bezier(.3,1.4,.5,1); }
+  .toggle[aria-checked="true"] .sw { background: var(--green-deep); }
+  .toggle[aria-checked="true"] .sw::after { transform: translateX(16px); }
+  .toggle:focus-visible .sw { outline: 2px solid var(--green); outline-offset: 2px; }
+
+  /* окно приложения, нарисованное как в FlowLocal (светлая тема) */
+  .appwin { --c-canvas: #f6f6f4; --c-surface: #fff; --c-side: #eeeeec; --c-text: #16161a; --c-sec: #54555b; --c-ter: #727379; --c-line: rgba(0,0,0,.10);
+            --c-acc: #0fa84f; --c-acc-t: #0b8e42; --c-acc-soft: #e3f6ea; --c-bar: #e2e3e0; --c-hover: rgba(0,0,0,.05);
+            max-width: 980px; margin: 0 auto; border-radius: 14px; overflow: hidden; display: grid; grid-template-columns: 210px 1fr; height: 560px;
+            box-shadow: 0 40px 100px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.08); color: var(--c-text); background: var(--c-canvas); font-size: 14px; line-height: 1.55; }
+  .appwin.dark { --c-canvas: #111113; --c-surface: #1c1c1f; --c-side: #0c0c0e; --c-text: #f4f4f5; --c-sec: #b8b8be; --c-ter: #8e8e95; --c-line: rgba(255,255,255,.10);
+                 --c-acc: #3deb8c; --c-acc-t: #3deb8c; --c-acc-soft: #12281c; --c-bar: #2d2d31; --c-hover: rgba(255,255,255,.06); }
+  .appwin, .appwin * { transition: background-color .3s ease, color .3s ease, border-color .3s ease; }
+  .side { background: var(--c-side); border-right: 1px solid var(--c-line); padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; }
+  .side .lights { display: flex; gap: 8px; padding: 4px 6px 18px; }
+  .side button { all: unset; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: var(--c-sec); font-weight: 500; font-size: 13.5px; }
+  .side button:hover { background: var(--c-hover); }
+  .side button[aria-selected="true"] { background: var(--c-acc-soft); color: var(--c-acc-t); }
+  .side svg { width: 16px; height: 16px; flex: none; }
+  .side .spacer { flex: 1; }
+  .side .wh { display: flex; align-items: center; justify-content: space-between; padding: 10px; border-radius: 10px; background: var(--c-surface); border: 1px solid var(--c-line);
+              font-size: 13px; font-weight: 500; color: var(--c-sec); }
+  .side .week { padding: 10px; font-size: 12px; color: var(--c-ter); }
+  .side .week b { display: block; font-size: 15px; color: var(--c-text); font-weight: 600; }
+  .appwin main { padding: 26px 30px; overflow: hidden; position: relative; }
+  .pane { display: none; animation: fadein .3s ease; }
+  .pane.on { display: block; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(6px); } }
+  .pane h4 { font-size: 24px; letter-spacing: -.015em; margin: 0 0 4px; font-weight: 700; line-height: 1.2; }
+  .pane .hint { color: var(--c-sec); margin: 0 0 18px; font-size: 13.5px; }
+  .pane .hint kbd i { background: var(--c-surface); color: var(--c-text); box-shadow: 0 1px 0 var(--c-line), 0 0 0 1px var(--c-line) inset; height: 22px; min-width: 22px; font-size: 12px; }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+  .tile { background: var(--c-surface); border: 1px solid var(--c-line); border-radius: 12px; padding: 12px 14px; }
+  .tile b { display: block; font-size: 22px; letter-spacing: -.02em; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tile span { font-size: 12px; color: var(--c-ter); }
+  .list-h { display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 600; color: var(--c-ter); margin-bottom: 8px; }
+  .list-h a { color: var(--c-acc-t); text-decoration: none; font-weight: 500; }
+  .entry { display: grid; grid-template-columns: 44px 1fr auto; gap: 12px; align-items: baseline; padding: 10px 12px; border-radius: 10px; background: var(--c-surface);
+           border: 1px solid var(--c-line); margin-bottom: 6px; }
+  .entry time { font-size: 12px; color: var(--c-ter); font-variant-numeric: tabular-nums; }
+  .entry .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .entry .app { font-size: 11.5px; color: var(--c-ter); }
+  .search { background: var(--c-surface); border: 1px solid var(--c-line); border-radius: 10px; padding: 8px 12px; color: var(--c-ter); margin-bottom: 14px; font-size: 13.5px; }
+  .day { font-size: 12.5px; font-weight: 600; color: var(--c-ter); margin: 14px 0 6px; }
+  .play { width: 22px; height: 22px; border-radius: 50%; background: var(--c-acc-soft); color: var(--c-acc-t); display: grid; place-items: center; }
+  .chart { display: flex; align-items: flex-end; gap: 8px; height: 170px; padding: 14px; background: var(--c-surface); border: 1px solid var(--c-line); border-radius: 12px; }
+  .chart div { flex: 1; background: var(--c-bar); border-radius: 5px 5px 2px 2px; position: relative; transform-origin: bottom; }
+  .chart div.today { background: var(--c-acc); }
+  .chart-x { display: flex; gap: 8px; padding: 6px 14px 0; font-size: 11px; color: var(--c-ter); }
+  .chart-x span { flex: 1; text-align: center; }
+  .totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+  .styles-l { display: grid; gap: 8px; }
+  .style-item { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 12px; background: var(--c-surface); border: 1px solid var(--c-line); }
+  .style-item .ai { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 14px; }
+  .style-item .nm { font-weight: 600; }
+  .style-item .ex { font-size: 12.5px; color: var(--c-ter); }
+  .style-item .pick { font-size: 12.5px; padding: 5px 10px; border-radius: 8px; background: var(--c-acc-soft); color: var(--c-acc-t); font-weight: 500; }
+  .vocab { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 18px; }
+  .vocab span { padding: 7px 12px; border-radius: 999px; background: var(--c-surface); border: 1px solid var(--c-line); font-weight: 500; }
+  .vocab span i { font-style: normal; color: var(--c-ter); font-weight: 400; margin-right: 6px; }
+  .add { background: var(--c-surface); border: 1px dashed var(--c-line); border-radius: 10px; padding: 9px 12px; color: var(--c-ter); margin-bottom: 18px; }
+  .learned { display: grid; gap: 6px; }
+  .learned div { display: flex; justify-content: space-between; padding: 9px 12px; border-radius: 10px; background: var(--c-surface); border: 1px solid var(--c-line); }
+  .learned s { color: var(--c-ter); }
+  .learned em { font-style: normal; color: var(--c-ter); font-size: 12px; }
+  .win-under { display: flex; justify-content: center; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+
+  /* гонка: клавиатура против голоса */
+  .race { max-width: 860px; margin: 0 auto; display: grid; gap: 14px; }
+  .lane { background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; }
+  .lane-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; font-size: 14px; color: var(--muted); }
+  .lane-h b { font-size: 15px; color: var(--text); }
+  .lane-h .num { font-variant-numeric: tabular-nums; }
+  .lane-t { font-size: 17px; line-height: 1.55; min-height: 3.1em; color: var(--text); transition: opacity .5s ease; }
+  .lane-t.fade { opacity: 0; }
+  .lane-t .wd { white-space: nowrap; }
+  .lane-t .ch { opacity: 0; transition: opacity .12s linear; }
+  .lane-t .ch.on { opacity: 1; }
+  .lane-t .ch.last { position: relative; }
+  .lane-t .ch.last::after { content: ""; position: absolute; right: -2px; top: .12em; bottom: .08em; width: 2px; border-radius: 1px; background: var(--muted); animation: blink 1s steps(1) infinite; }
+  .lane.voice .lane-t .vw { display: inline-block; opacity: 0; filter: blur(6px); transform: translateY(5px); color: var(--green);
+                            transition: opacity .45s ease, filter .45s ease, transform .45s cubic-bezier(.2,.8,.2,1), color 1.2s ease .35s; }
+  .lane.voice .lane-t .vw.on { opacity: 1; filter: none; transform: none; color: var(--text); }
+  .lane.voice { transition: border-color .6s ease, box-shadow .6s ease; }
+  .lane.voice.done { border-color: rgba(61,235,140,.4); box-shadow: 0 0 40px rgba(61,235,140,.08); }
+  .lane .num { transition: color .3s; }
+  .lane.voice.done .num { color: var(--green); font-weight: 600; animation: pop .35s cubic-bezier(.3,1.6,.5,1); }
+  @keyframes pop { from { transform: scale(.7); opacity: 0; } }
+  .lane-bar { height: 4px; background: rgba(255,255,255,.06); border-radius: 4px; margin-top: 10px; overflow: hidden; }
+  .lane-bar div { height: 100%; width: 100%; background: var(--faint); border-radius: 4px; transform: scaleX(0); transform-origin: left; }
+  .lane.voice .lane-bar div { background: linear-gradient(90deg, #0fa84f, var(--green)); box-shadow: 0 0 12px rgba(61,235,140,.5); }
+  .facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; max-width: 980px; margin: 40px auto 0; }
+  .fact { text-align: center; padding: 18px 12px; border-radius: 16px; background: rgba(255,255,255,.03); border: 1px solid var(--line); }
+  .fact b { display: block; font: 800 34px/1.1 var(--ui); letter-spacing: -.03em; color: var(--green); }
+  .fact span { font-size: 13.5px; color: var(--muted); }
+
+  /* приватность: каждая карточка - выгода */
+  .perks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; max-width: 980px; margin: 0 auto; }
+  .perk { background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 18px; padding: 22px; transition: border-color .2s, background .2s; }
+  .perk:hover { border-color: rgba(61,235,140,.35); background: var(--green-soft); }
+  .perk .pi { width: 40px; height: 40px; border-radius: 12px; background: var(--green-soft); color: var(--green); display: grid; place-items: center; margin-bottom: 14px; }
+  .perk .pi svg { width: 21px; height: 21px; }
+  .perk h3 { font: 700 20px/1.2 var(--ui); letter-spacing: -.015em; margin: 0 0 6px; }
+  .perk p { margin: 0; color: var(--muted); font-size: 15px; }
+  .perk code { font: 12.5px var(--mono); color: var(--green); overflow-wrap: anywhere; }
+
+  /* клавиши */
+  .keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 28px; max-width: 900px; margin: 0 auto; }
+  .key { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px dashed rgba(255,255,255,.12); color: var(--muted); font-size: 15px; }
+
+  /* установка */
+  .term { max-width: 860px; margin: 0 auto; border-radius: 14px; overflow: hidden; background: #000; box-shadow: 0 30px 80px rgba(0,0,0,.5), 0 0 0 1px var(--line) inset; }
+  .term .bar { background: #141416; }
+  .term .bar .name { margin: 0 auto; font-size: 12.5px; color: var(--faint); padding-right: 52px; }
+  .term pre { margin: 0; padding: 20px 22px 22px; font: 14px/1.7 var(--mono); color: #e6e6e9; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .term .p { color: var(--green); user-select: none; }
+  .term .o { color: #7d7d85; }
+  .copy-row { display: flex; justify-content: center; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
+  .reqs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-width: 860px; margin: 26px auto 0; }
+  .req { padding: 16px 18px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255,255,255,.03); font-size: 14.5px; color: var(--muted); }
+  .req b { display: block; color: var(--text); font-size: 15.5px; margin-bottom: 4px; }
+
+  /* финал */
+  .final { text-align: center; padding: 120px 0 40px; }
+  .final h2 { font-size: clamp(44px, 8vw, 84px); }
+  .final .pill { margin-bottom: 26px; }
+  footer { text-align: center; color: var(--faint); font-size: 14px; padding: 40px 0 50px; }
+  footer a { color: #fff; }
+
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 20px); opacity: 0; background: #000; color: #fff; font-size: 14px; padding: 10px 16px;
+           border-radius: 999px; box-shadow: 0 0 0 .5px rgba(255,255,255,.15) inset, 0 10px 30px rgba(0,0,0,.4); transition: opacity .2s, transform .3s cubic-bezier(.3,1.4,.5,1); z-index: 50; pointer-events: none; }
+  .toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+  @media (max-width: 1260px) { .scribble.left, .scribble.right { display: none; } }
+  @media (max-width: 860px) {
+    nav .links { display: none; }
+    nav .btn { margin-left: auto; }
+    .row, .steps { grid-template-columns: 1fr; }
+    .perks { grid-template-columns: 1fr 1fr; }
+    .row:nth-child(even) .txt { order: 0; }
+    .row { gap: 22px; margin-bottom: 60px; }
+    .stage { height: 400px; }
+    .scene { padding: 18px 16px 110px; }
+    .msg { max-width: 88%; }
+    .style-tag { display: none; }
+    .hud span { display: none; }
+    .said { font-size: 13px; bottom: 62px; }
+    .composer { bottom: 128px; }
+    .thread { bottom: 186px; left: 16px; right: 16px; top: 18px; }
+    .hud kbd i { min-width: 20px; height: 20px; font-size: 10.5px; padding: 0 5px; }
+    .appwin { grid-template-columns: 1fr; height: auto; min-height: 520px; }
+    .side { flex-direction: row; overflow-x: auto; padding: 10px; border-right: 0; border-bottom: 1px solid var(--c-line); scrollbar-width: none; }
+    .side::-webkit-scrollbar { display: none; }
+    .side .lights, .side .spacer, .side .wh, .side .week { display: none; }
+    .side button { white-space: nowrap; }
+    .appwin main { padding: 20px 16px; }
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+    .facts, .reqs { grid-template-columns: 1fr 1fr; }
+    .totals { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 520px) {
+    .facts, .reqs, .perks { grid-template-columns: 1fr; }
+    .apps .app-tab .nm { display: none; }
+    .app-tab[aria-selected="true"] .nm { display: inline; }
+    .composer { left: 12px; right: 12px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .reveal { opacity: 1; transform: none; }
+    .lead .w { opacity: 1; filter: none; transform: none; }
+    html { scroll-behavior: auto; }
+  }
+</style>
+</head>
+<body>
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#"><img src="icon.png" alt="">FlowLocal</a>
+    <div class="links">
+      <a href="#try">Попробовать</a>
+      <a href="#features">Что умеет</a>
+      <a href="#app">Окно</a>
+      <a href="#speed">Скорость</a>
+      <a href="#keys">Клавиши</a>
+      <a href="https://github.com/romankandeevy/flowlocal">GitHub</a>
+    </div>
+    <a class="btn small" href="#install">Установить</a>
+  </div>
+</nav>
+
+<main class="wrap">
+  <header class="hero">
+    <img class="icon" src="icon.png" alt="Иконка FlowLocal" width="108" height="108">
+    <h1>Flow<span class="local">Local</span></h1>
+    <p class="lead" id="lead" aria-label="Зажали клавишу. Сказали. Отпустили. Слова уже там, где вы печатали.">Зажали клавишу. Сказали. Отпустили. Слова уже там, где вы печатали.</p>
+    <p class="sublead">Диктовка для Mac, которая работает без интернета. Русский и английский, знаки препинания, чистка «ну» и «э», стиль под каждое приложение. Звук и текст не покидают Мак.</p>
+    <div class="buttons">
+      <a class="btn" href="#install">
+        <svg width="16" height="18" viewBox="0 0 17 20" aria-hidden="true"><path fill="currentColor" d="M14.1 10.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9C3.6 4.8 2 5.8 1.1 7.4c-1.9 3.2-.5 8 1.3 10.6.9 1.3 1.9 2.7 3.3 2.6 1.3-.1 1.8-.8 3.4-.8 1.6 0 2 .8 3.4.8 1.4 0 2.3-1.3 3.2-2.6 1-1.5 1.4-2.9 1.4-3-.1 0-2.9-1.1-3-4.4zM11.5 3c.7-.9 1.2-2 1.1-3.2-1 0-2.3.7-3 1.6-.7.8-1.2 2-1.1 3.1 1.2.1 2.3-.6 3-1.5z"/></svg>
+        Установить на Mac
+      </a>
+      <a class="btn ghost" href="https://github.com/romankandeevy/flowlocal">
+        <svg width="17" height="17" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        Исходный код
+      </a>
+    </div>
+    <p class="note"><span data-version>Версия 3.0 · </span>Бесплатно · открытый код, MIT · macOS 14 и новее · Apple Silicon и Intel</p>
+
+    <div class="try" id="try">
+      <div class="scribble left">сама переходит из приложения в приложение — смотрите, как меняется стиль
+        <svg width="90" height="60" viewBox="0 0 90 60" aria-hidden="true"><path d="M4 50 C 30 46, 60 34, 80 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M66 10 L81 7 L80 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="scribble right">
+        <svg width="90" height="60" viewBox="0 0 90 60" aria-hidden="true"><path d="M86 8 C 60 12, 30 24, 10 50" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 35 L9 52 L24 47" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        та самая капсула: чёрная, белые полоски — и больше ничего
+      </div>
+
+      <div class="window" aria-label="Анимация: как выглядит диктовка в FlowLocal">
+        <div class="bar">
+          <span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span>
+          <div class="apps" aria-hidden="true">
+            <span class="app-tab" aria-selected="true" data-app="chat"><span class="ico" style="background:#2aabee">✈</span><span class="nm">Телеграм</span></span>
+            <span class="app-tab" aria-selected="false" data-app="mail"><span class="ico" style="background:#3b82f6">@</span><span class="nm">Почта</span></span>
+            <span class="app-tab" aria-selected="false" data-app="notes"><span class="ico" style="background:#e8b931">✎</span><span class="nm">Заметки</span></span>
+            <span class="app-tab" aria-selected="false" data-app="code"><span class="ico" style="background:#6d5bd0">&lt;/&gt;</span><span class="nm">Код</span></span>
+          </div>
+          <span class="style-tag" id="style-tag">Стиль: Переписка</span>
+        </div>
+        <div class="stage">
+          <div class="scene on" data-scene="chat">
+            <div class="thread" id="thread">
+              <div class="msg in">ты где? все уже собрались 👀<small>19:41</small></div>
+              <div class="msg in">а ссылку на репозиторий скинешь?<small>19:42</small></div>
+            </div>
+            <div class="composer"><span class="typed" data-field="chat"></span><span class="caret"></span></div>
+          </div>
+          <div class="scene" data-scene="mail">
+            <div class="mail-head"><div>Кому: <b>Анна Сергеевна</b></div><div>Тема: <b>Отчёт за неделю</b></div></div>
+            <div class="field"><span class="typed" data-field="mail"></span><span class="caret"></span></div>
+          </div>
+          <div class="scene notes" data-scene="notes">
+            <h3>Идеи на выходные</h3>
+            <div class="date">7 октября 2026</div>
+            <div class="field"><span class="typed" data-field="notes"></span><span class="caret"></span></div>
+          </div>
+          <div class="scene" data-scene="code">
+            <div class="code"><span class="c">// Profile.swift</span>
+<span class="k">func</span> loadProfile() {
+    <span class="c">// <span class="typed" data-field="code"></span><span class="caret"></span></span>
+}</div>
+          </div>
+          <div class="hud" id="hud" aria-hidden="true"><kbd><i>⌃</i><i>⇧</i><i>Space</i></kbd><span>зажато</span></div>
+          <div class="said" id="said" aria-hidden="true"></div>
+          <div class="demo-pill" id="demo-pill"><div class="pill"><canvas data-wave="live" width="155" height="36"></canvas></div></div>
+        </div>
+      </div>
+
+      <div class="film-bar">
+        <button class="play" id="play" aria-label="Пауза" aria-pressed="false">
+          <svg class="i-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+          <svg class="i-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>
+        </button>
+        <div class="segs" id="segs">
+          <button data-i="0"><span class="fill"></span><em>Телеграм</em></button>
+          <button data-i="1"><span class="fill"></span><em>Почта</em></button>
+          <button data-i="2"><span class="fill"></span><em>Заметки</em></button>
+          <button data-i="3"><span class="fill"></span><em>Код</em></button>
+        </div>
+      </div>
+      <p class="demo-foot">Так это выглядит на Маке: зажали <kbd><i>⌃</i><i>⇧</i><i>Space</i></kbd>, сказали, отпустили. Это анимация — сама диктовка работает только в приложении, прямо на компьютере.</p>
+    </div>
+  </header>
+
+  <section id="how">
+    <h2 class="reveal">Три движения</h2>
+    <p class="sub reveal">Никаких окон, кнопок «старт» и копирования. Курсор там, где вы печатали, — туда и придёт текст.</p>
+    <div class="steps">
+      <div class="step reveal"><span class="n">1</span><div class="vis"><kbd class="lit"><i>⌃</i><i>⇧</i><i>Space</i></kbd></div><h3>Зажали</h3><p>В мессенджере, почте, редакторе, браузере — в любом поле ввода. Или нажали <b>⌥Space</b> один раз, если говорить долго.</p></div>
+      <div class="step reveal"><span class="n">2</span><div class="vis"><div class="pill"><canvas data-wave="idle" width="155" height="36"></canvas></div></div><h3>Сказали</h3><p>Внизу экрана — чёрная капсула. Речь разбирается прямо пока вы говорите, кусками, на самом Маке.</p></div>
+      <div class="step reveal"><span class="n">3</span><div class="vis"><span class="big">0,1 с</span></div><h3>Отпустили</h3><p>Текст уже в поле — со знаками, цифрами и без «ну». Даже после минуты диктовки ждать нечего.</p></div>
+    </div>
+  </section>
+
+  <section id="features">
+    <h2 class="reveal">Что умеет</h2>
+    <p class="sub reveal">Не просто «звук в текст». Пишет так, как написали бы вы сами — в каждом месте по-своему.</p>
+
+    <div class="row reveal">
+      <div class="txt">
+        <h3>Стиль под приложение</h3>
+        <p>В мессенджере — <b>разговорно</b>, с маленькой буквы и без точки. В почте — <b>строго</b>. В коде — <b>как сказано</b>. Приложение узнаётся само, по тому, какое было впереди.</p>
+        <p>Для каждого приложения стиль выбирается во вкладке «Стиль».</p>
+      </div>
+      <div class="panel">
+        <div class="cap">Одна фраза — четыре стиля</div>
+        <div class="seg" role="tablist" id="style-seg">
+          <button role="tab" aria-selected="true" data-s="0">Обычный</button>
+          <button role="tab" aria-selected="false" data-s="1">Переписка</button>
+          <button role="tab" aria-selected="false" data-s="2">Письмо</button>
+          <button role="tab" aria-selected="false" data-s="3">Код</button>
+        </div>
+        <div class="style-out" id="style-out">Скину ссылку вечером.</div>
+        <div class="style-desc" id="style-desc">Как в общих настройках чистки.</div>
+        <div class="style-apps" id="style-apps"><span>Заметки</span><span>Pages</span><span>Safari</span></div>
+      </div>
+    </div>
+
+    <div class="row reveal">
+      <div class="txt">
+        <h3>Чисто, со знаками и цифрами</h3>
+        <p>Русский распознаёт <b>GigaAM v3</b> — он сам ставит запятые и точки и пишет числа цифрами. Английский — <b>Parakeet TDT 0.6b</b>. Смешанную речь язык определяет по кускам.</p>
+        <p>Слова-паразиты и повторы убираются до вставки.</p>
+      </div>
+      <div class="panel">
+        <div class="cap">Что сказали → что вставилось</div>
+        <div class="clean-line" id="clean-line"></div>
+        <div class="clean-meta"><span>убрано: <b id="clean-n">0</b></span><span>язык: <b id="clean-lang">ru</b></span><span>вставка: <b>~0,1 с</b></span></div>
+      </div>
+    </div>
+
+    <div class="row reveal">
+      <div class="txt">
+        <h3>Словарь и правки</h3>
+        <p>Имена коллег, названия проектов, термины — всё, что модель пишет по-своему. Похожее на слух слово заменится на ваше написание.</p>
+        <p>А если поправили слово руками прямо в поле — <b>FlowLocal запомнит</b>, и в следующий раз напишет верно.</p>
+      </div>
+      <div class="panel">
+        <div class="cap">Словарь</div>
+        <div class="dict" id="dict">
+          <div class="dict-row"><span class="from">«гитхаб»</span><span class="arrow">→</span><span class="to">GitHub</span></div>
+          <div class="dict-row"><span class="from">«клод»</span><span class="arrow">→</span><span class="to">Claude</span></div>
+          <div class="dict-row"><span class="from">«джира»</span><span class="arrow">→</span><span class="to">Jira</span></div>
+          <div class="dict-row"><span class="from">«кандеев»</span><span class="arrow">→</span><span class="to">Кандеев</span></div>
+        </div>
+        <div class="learn">Выучено на правке: <span class="old">флоу локал</span> → <span class="new">FlowLocal</span> · ×3</div>
+      </div>
+    </div>
+
+    <div class="row reveal">
+      <div class="txt">
+        <h3>Шёпотом</h3>
+        <p>В опенспейсе, ночью, в поезде. Режим шёпота поднимает чувствительность микрофона на время записи — и возвращает как было.</p>
+        <p>Включается в сайдбаре или <kbd><i>⌥</i><i>⌘</i><i>W</i></kbd>.</p>
+      </div>
+      <div class="panel whisper">
+        <button class="toggle" id="wh-toggle" role="switch" aria-checked="true"><span class="sw"></span>Режим шёпота</button>
+        <div class="wh-row"><span class="lbl">Микрофон</span><canvas id="wh-in" width="600" height="108"></canvas></div>
+        <div class="wh-row"><span class="lbl">В модель</span><canvas id="wh-out" width="600" height="108"></canvas></div>
+        <div class="style-desc" id="wh-note" style="min-height:0;margin:0">Тихий голос поднят до нормального — модель слышит каждое слово.</div>
+      </div>
+    </div>
+
+    <div class="row reveal">
+      <div class="txt">
+        <h3>Бережно</h3>
+        <p>Текст вставляется через буфер обмена — и <b>прежнее содержимое возвращается на место</b>. Музыка на время записи ставится на паузу.</p>
+        <p>Каждая диктовка сохраняется в истории: её можно прослушать, перераспознать или скопировать снова.</p>
+      </div>
+      <div class="panel">
+        <div class="cap">История · сегодня</div>
+        <div class="dict">
+          <div class="dict-row" style="grid-template-columns:48px 1fr 26px"><span class="from">19:42</span><span>пять минут, паркуюсь</span><span class="arrow">▶</span></div>
+          <div class="dict-row" style="grid-template-columns:48px 1fr 26px"><span class="from">18:05</span><span>Отправила отчёт, посмотрите, пожалуйста…</span><span class="arrow">▶</span></div>
+          <div class="dict-row" style="grid-template-columns:48px 1fr 26px"><span class="from">16:30</span><span>купить хлеб, молоко и батарейки</span><span class="arrow">▶</span></div>
+          <div class="dict-row" style="grid-template-columns:48px 1fr 26px"><span class="from">11:12</span><span>проверить, что профиль загружается до показа экрана</span><span class="arrow">▶</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="app">
+    <h2 class="reveal">Окно, в которое <em>почти не заходят</em></h2>
+    <p class="sub reveal">Вся работа — в чужих окнах. А здесь — статистика, история, стиль и словарь. Нажимайте вкладки слева.</p>
+    <div class="appwin reveal" id="appwin">
+      <div class="side" role="tablist" aria-label="Разделы FlowLocal">
+        <div class="lights"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span></div>
+        <button role="tab" aria-selected="true" data-p="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Главная</button>
+        <button role="tab" aria-selected="false" data-p="history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>История</button>
+        <button role="tab" aria-selected="false" data-p="stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Обзор</button>
+        <button role="tab" aria-selected="false" data-p="style"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>Стиль</button>
+        <button role="tab" aria-selected="false" data-p="dict"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>Словарь</button>
+        <div class="spacer"></div>
+        <div class="week">На этой неделе<b>2 418 слов</b>≈ 41 мин сэкономлено</div>
+        <div class="wh">Шёпот<span class="toggle" aria-hidden="true" style="pointer-events:none;transform:scale(.8);transform-origin:right"><span class="sw" style="background:var(--c-bar)"></span></span></div>
+      </div>
+      <main>
+        <div class="pane on" data-pane="home">
+          <h4 id="greet">Добрый вечер</h4>
+          <p class="hint">Удерживайте <kbd><i>⌃</i><i>⇧</i><i>Space</i></kbd> в любом окне и говорите — текст появится там, где курсор.</p>
+          <div class="tiles">
+            <div class="tile"><b>612</b><span>слов сегодня</span></div>
+            <div class="tile"><b>23</b><span>диктовки</span></div>
+            <div class="tile"><b>148</b><span>слов в минуту</span></div>
+            <div class="tile"><b>×3,7</b><span>быстрее клавиатуры</span></div>
+          </div>
+          <div class="list-h">Сегодня <a href="#" data-goto="history">Вся история →</a></div>
+          <div class="entry"><time>19:42</time><span class="t">пять минут, паркуюсь</span><span class="app">Телеграм</span></div>
+          <div class="entry"><time>18:05</time><span class="t">Отправила отчёт, посмотрите, пожалуйста, до пятницы.</span><span class="app">Почта</span></div>
+          <div class="entry"><time>16:30</time><span class="t">Купить хлеб, молоко и батарейки.</span><span class="app">Заметки</span></div>
+          <div class="entry"><time>11:12</time><span class="t">проверить, что профиль загружается до показа экрана</span><span class="app">Xcode</span></div>
+        </div>
+        <div class="pane" data-pane="history">
+          <h4>История</h4>
+          <div class="search">⌕ Найти по словам <span style="float:right">⌘F</span></div>
+          <div class="day">Сегодня · 23 · 612 слов</div>
+          <div class="entry" style="grid-template-columns:44px 1fr 22px"><time>19:42</time><span class="t">пять минут, паркуюсь</span><span class="play">▶</span></div>
+          <div class="entry" style="grid-template-columns:44px 1fr 22px"><time>18:05</time><span class="t">Отправила отчёт, посмотрите, пожалуйста, до пятницы.</span><span class="play">▶</span></div>
+          <div class="entry" style="grid-template-columns:44px 1fr 22px"><time>16:30</time><span class="t">Купить хлеб, молоко и батарейки.</span><span class="play">▶</span></div>
+          <div class="day">Вчера · 31 · 940 слов</div>
+          <div class="entry" style="grid-template-columns:44px 1fr 22px"><time>22:10</time><span class="t">Идея: сделать сайт для FlowLocal как у Заметочек.</span><span class="play">▶</span></div>
+          <div class="entry" style="grid-template-columns:44px 1fr 22px"><time>14:47</time><span class="t">созвон перенесли на четверг в 15:00</span><span class="play">▶</span></div>
+        </div>
+        <div class="pane" data-pane="stats">
+          <h4>Обзор</h4>
+          <p class="hint">За последние 7 дней</p>
+          <div class="chart" id="chart"><div style="height:38%"></div><div style="height:62%"></div><div style="height:45%"></div><div style="height:80%"></div><div style="height:55%"></div><div style="height:30%"></div><div class="today" style="height:70%"></div></div>
+          <div class="chart-x"><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span><span>Пн</span><span>Вт</span><span>Сегодня</span></div>
+          <div class="totals">
+            <div class="tile"><b>148 сл/мин</b><span>скорость речи</span></div>
+            <div class="tile"><b>×3,7</b><span>быстрее клавиатуры</span></div>
+            <div class="tile"><b>27 слов</b><span>средняя диктовка</span></div>
+          </div>
+          <p class="hint" style="margin-top:12px">Сравнение — со скоростью набора 40 слов в минуту.</p>
+        </div>
+        <div class="pane" data-pane="style">
+          <h4>Стиль</h4>
+          <p class="hint">Как писать текст там, куда вы диктуете. Приложение узнаётся по тому, какое было впереди в начале записи.</p>
+          <div class="styles-l">
+            <div class="style-item"><span class="ai" style="background:#2aabee">✈</span><span><span class="nm">Телеграм</span><br><span class="ex">скину ссылку вечером</span></span><span class="pick">Переписка</span></div>
+            <div class="style-item"><span class="ai" style="background:#3b82f6">@</span><span><span class="nm">Почта</span><br><span class="ex">Скину ссылку вечером.</span></span><span class="pick">Письмо</span></div>
+            <div class="style-item"><span class="ai" style="background:#6d5bd0">⌘</span><span><span class="nm">Xcode</span><br><span class="ex">скину ссылку вечером</span></span><span class="pick">Код</span></div>
+            <div class="style-item"><span class="ai" style="background:#8e8e95">•</span><span><span class="nm">Все остальные</span><br><span class="ex">Скину ссылку вечером.</span></span><span class="pick">Обычный</span></div>
+          </div>
+        </div>
+        <div class="pane" data-pane="dict">
+          <h4>Словарь</h4>
+          <p class="hint">Имена, названия и термины, которые модель пишет неправильно. Похожее на слух слово заменится на то, как оно записано здесь.</p>
+          <div class="add">+ Добавить слово или название</div>
+          <div class="vocab"><span>GitHub</span><span>Claude</span><span>Jira</span><span>Кандеев</span><span>Figma</span><span>Notion</span><span>TestFlight</span></div>
+          <div class="list-h">Выучено на правках</div>
+          <div class="learned"><div><span><s>флоу локал</s> → FlowLocal</span><em>×3</em></div><div><span><s>свифт ю ай</s> → SwiftUI</span><em>×2</em></div></div>
+        </div>
+      </main>
+    </div>
+    <div class="win-under reveal"><button class="chip" id="theme-chip" aria-pressed="false">◐ тёмная тема</button></div>
+  </section>
+
+  <section id="speed">
+    <h2 class="reveal">В <em>три-четыре раза</em> быстрее клавиатуры</h2>
+    <p class="sub reveal">Обычно печатают около 40 слов в минуту, а говорят — 130–160. Вот как это выглядит рядом.</p>
+    <div class="race reveal" id="race">
+      <div class="lane"><div class="lane-h"><b>⌨︎ Клавиатура</b><span class="num" id="r-k">0 слов</span></div><div class="lane-t" id="t-k"></div><div class="lane-bar"><div id="b-k"></div></div></div>
+      <div class="lane voice"><div class="lane-h"><b>🎙 FlowLocal</b><span class="num" id="r-v">0 слов</span></div><div class="lane-t" id="t-v"></div><div class="lane-bar"><div id="b-v"></div></div></div>
+    </div>
+    <div class="facts">
+      <div class="fact reveal"><b>~0,1 с</b><span>от отпускания до текста</span></div>
+      <div class="fact reveal"><b>0</b><span>серверов: звук остаётся на Маке</span></div>
+      <div class="fact reveal"><b>2</b><span>языка: русский и английский</span></div>
+      <div class="fact reveal"><b>~850 МБ</b><span>модели, один раз</span></div>
+    </div>
+  </section>
+
+  <section id="private">
+    <h2 class="reveal">Всё остаётся <em>у вас</em></h2>
+    <p class="sub reveal">Ваш голос — только ваш. Речь распознаётся прямо на Маке, поэтому FlowLocal быстрый, бесплатный и работает где угодно.</p>
+    <div class="perks">
+      <div class="perk reveal"><span class="pi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span><h3>Установил — и говоришь</h3><p>Без регистрации, почты и паролей. Открыли приложение — и можно диктовать.</p></div>
+      <div class="perk reveal"><span class="pi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></span><h3>Голос остаётся на Маке</h3><p>Распознают GigaAM v3 и Parakeet прямо на вашем компьютере. Сказанное слышите только вы.</p></div>
+      <div class="perk reveal"><span class="pi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1"/></svg></span><h3>Работает и без интернета</h3><p>В самолёте, в метро, на даче. Модели скачиваются один раз — дальше Wi-Fi не нужен.</p></div>
+      <div class="perk reveal"><span class="pi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span><h3>Бесплатно и без лимитов</h3><p>Диктуйте сколько угодно: никаких минут в месяц и тарифов «Про».</p></div>
+      <div class="perk reveal"><span class="pi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><h3>История — в вашей папке</h3><p>История диктовок и словарь лежат в обычной папке: <code>~/Library/Application Support/FlowLocal</code></p></div>
+      <div class="perk reveal"><span class="pi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg></span><h3>Код открыт</h3><p>Каждую строчку можно прочитать и проверить на GitHub. Лицензия MIT.</p></div>
+    </div>
+  </section>
+
+  <section id="keys">
+    <h2 class="reveal">Руки на клавиатуре</h2>
+    <p class="sub reveal">Сочетания меняются в настройках (<b>⌘,</b>).</p>
+    <div class="keys reveal">
+      <div class="key">Держать и говорить<kbd><i>⌃</i><i>⇧</i><i>Space</i></kbd></div>
+      <div class="key">Начать / закончить<kbd><i>⌥</i><i>Space</i></kbd></div>
+      <div class="key">Отменить запись<kbd><i>Esc</i></kbd></div>
+      <div class="key">Режим шёпота<kbd><i>⌥</i><i>⌘</i><i>W</i></kbd></div>
+      <div class="key">Поиск по истории<kbd><i>⌘</i><i>F</i></kbd></div>
+      <div class="key">Настройки<kbd><i>⌘</i><i>,</i></kbd></div>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2 class="reveal">Установка — одна строка</h2>
+    <p class="sub reveal">Откройте Терминал, вставьте и нажмите Enter. Скрипт соберёт приложение, положит его в «Программы» и запустит.</p>
+    <div class="term reveal">
+      <div class="bar"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span><span class="name">Терминал — zsh</span></div>
+      <pre><span class="p">~ % </span><span id="cmd">curl -fsSL https://raw.githubusercontent.com/romankandeevy/flowlocal/main/mac/install.sh | bash</span>
+<span class="o">== FlowLocal: установка ==
+== скачиваю код в ~/FlowLocal ==
+== собираю (несколько минут при первом разе) ==</span></pre>
+    </div>
+    <div class="copy-row reveal">
+      <button class="btn" id="copy">Скопировать команду</button>
+      <a class="btn ghost" href="https://github.com/romankandeevy/flowlocal#установка">Другие способы</a>
+    </div>
+    <div class="reqs">
+      <div class="req reveal"><b>macOS 14+</b>Apple Silicon или Intel. Нужны Command Line Tools — macOS предложит поставить сама.</div>
+      <div class="req reveal"><b>Python 3.11–3.13</b>Если его нет, скрипт поставит через Homebrew. Модели (~850 МБ) скачаются при первом запуске.</div>
+      <div class="req reveal"><b>Два разрешения</b>Микрофон — слышать. Универсальный доступ — вставлять ⌘V в чужое окно.</div>
+    </div>
+  </section>
+
+  <section class="final">
+    <div class="pill reveal"><canvas data-wave="idle" width="155" height="36"></canvas></div>
+    <h2 class="reveal">Хватит печатать.<br><em>Говорите.</em></h2>
+    <p class="sub reveal">Бесплатно, без облака и без аккаунта. Попробуйте один день — клавиатура покажется медленной.</p>
+    <div class="buttons reveal">
+      <a class="btn" href="#install">Установить на Mac</a>
+      <a class="btn ghost" href="https://github.com/romankandeevy/flowlocal">Звезда на GitHub ★</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Сделал <a href="https://github.com/romankandeevy">Роман Кандеев</a> · <a href="https://github.com/romankandeevy/flowlocal">GitHub</a> · <a href="https://github.com/romankandeevy/flowlocal/releases">Релизы</a> · MIT · шрифт Onest — SIL OFL
+</footer>
+<div class="toast" id="toast">Скопировано — вставьте в Терминал</div>
+
+<script>
+  // Номер версии - из последнего релиза на GitHub. Не ответил - остаётся вписанный.
+  (async () => {
+    try {
+      const res = await fetch('https://api.github.com/repos/romankandeevy/flowlocal/releases/latest', { headers: { Accept: 'application/vnd.github+json' } });
+      if (!res.ok) return;
+      const v = ((await res.json()).tag_name || '').replace(/^v/, '');
+      if (v) document.querySelector('[data-version]').textContent = 'Версия ' + v + ' · ';
+    } catch {}
+  })();
+</script>
+<script>
+(() => {
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  // Подзаголовок проявляется по словам - как живые слова в FlowLocal.
+  const lead = $('#lead');
+  if (!reduce) {
+    const words = lead.textContent.split(' ');
+    lead.innerHTML = words.map(w => `<span class="w${/Отпустили/.test(w) ? ' g' : ''}" aria-hidden="true">${w}</span>`).join(' ');
+    lead.querySelectorAll('.w').forEach((el, i) => setTimeout(() => el.classList.add('on'), 350 + i * 140 + (i > 1 ? 180 : 0) + (i > 2 ? 180 : 0) + (i > 3 ? 260 : 0)));
+  }
+
+  // Появление разделов при прокрутке.
+  const io = new IntersectionObserver(entries => {
+    for (const e of entries) if (e.isIntersecting) { e.target.classList.add('seen'); io.unobserve(e.target); }
+  }, { rootMargin: '0px 0px -8% 0px' });
+  $$('.reveal').forEach(el => io.observe(el));
+
+  // ───────── волна капсулы ─────────
+  // Как LiveWaveform в приложении: 14 полосок 2.5 pt через 2.5 pt, высота 18, минимум 12%.
+  // Свежий уровень входит справа и уезжает влево.
+  let level = 0, target = 0;
+  const waves = $$('canvas[data-wave]').map(c => ({ c, ctx: c.getContext('2d'), kind: c.dataset.wave, bars: Array(14).fill(.12), visible: true }));
+  const wio = new IntersectionObserver(es => es.forEach(e => { const w = waves.find(w => w.c === e.target); if (w) w.visible = e.isIntersecting; }));
+  waves.forEach(w => wio.observe(w.c));
+  let recording = false, tick = 0;
+  function speechLevel(t) {
+    // Похоже на речь: слоги ~5 Гц, паузы между словами.
+    const syl = Math.max(0, Math.sin(t * 31) * .5 + .5), word = Math.sin(t * 5.3) > -.35 ? 1 : .15;
+    return Math.min(1, (.25 + .75 * syl * word) * (.55 + Math.random() * .45));
+  }
+  function drawBars(w) {
+    const { ctx, c, bars } = w, dpr = c.width / 77.5, bw = 2.5 * dpr, gap = 2.5 * dpr, H = c.height;
+    ctx.clearRect(0, 0, c.width, H);
+    ctx.fillStyle = '#fff';
+    bars.forEach((v, i) => {
+      const h = Math.max(.12, v) * H, x = i * (bw + gap), y = (H - h) / 2;
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, bw, h, bw / 2) : ctx.rect(x, y, bw, h); ctx.fill();
+    });
+  }
+  let last = 0;
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (now - last < 66) return; // ~15 шагов в секунду, как бегущая полоса
+    last = now; tick++;
+    const t = now / 1000;
+    target = recording ? speechLevel(t) : 0;
+    level += (target - level) * .6;
+    for (const w of waves) {
+      if (!w.visible) continue;
+      let v;
+      if (w.kind === 'live') v = recording ? level : .12;
+      else v = speechLevel(t + (w.c.getBoundingClientRect().top % 7)) * .9;
+      w.bars.push(v); w.bars.shift();
+      drawBars(w);
+    }
+    drawWhisper(t);
+  }
+  requestAnimationFrame(frame);
+
+  // ───────── демо-анимация ─────────
+  // Сама проигрывается по кругу: Телеграм → Почта → Заметки → Код. Каждая фраза - зажали клавиши,
+  // капсула, субтитр со сказанным (с «ну» и «э»), отпустили - паразиты зачёркнуты, чистый текст в поле.
+  const film = [
+    { app: 'chat', style: 'Переписка', items: [
+      { raw: 'ну да скину ссылку на гитхаб э вечером', junk: [0, 6], out: 'да, скину ссылку на GitHub вечером', send: true },
+      { raw: 'короче я уже еду еду буду минут через десять', junk: [0, 4], out: 'я уже еду, буду минут через 10', send: true },
+    ]},
+    { app: 'mail', style: 'Письмо', items: [
+      { raw: 'добрый день анна сергеевна ну отчёт за неделю во вложении', junk: [4], out: 'Добрый день, Анна Сергеевна! Отчёт за неделю во вложении.' },
+      { raw: 'продажи выросли на двенадцать процентов как бы в основном за счёт новых клиентов', junk: [5, 6], out: ' Продажи выросли на 12%, в основном за счёт новых клиентов.' },
+    ]},
+    { app: 'notes', style: 'Обычный', items: [
+      { raw: 'съездить на дачу в субботу взять ну удочки и мангал', junk: [7], out: 'Съездить на дачу в субботу, взять удочки и мангал.' },
+      { raw: 'в воскресенье кино в семь тридцать', junk: [], out: ' В воскресенье кино в 19:30.' },
+    ]},
+    { app: 'code', style: 'Код', items: [
+      { raw: 'ну проверить что профиль загружается до показа экрана', junk: [0], out: 'проверить, что профиль загружается до показа экрана' },
+    ]},
+  ];
+  const pill = $('#demo-pill'), said = $('#said'), hud = $('#hud'), thread = $('#thread');
+  const fieldOf = a => document.querySelector(`.typed[data-field="${a}"]`);
+  const segs = $$('#segs button'), playBtn = $('#play');
+  let paused = false, filmVisible = false, gen = 0, jumpTo = null;
+  const segDur = film.map(f => f.items.reduce((n, it) => n + 2600 + it.raw.split(' ').length * 230, 1200));
+
+  // Пауза, уход с экрана и переход по сегменту учитываются в каждом ожидании.
+  class Jump extends Error {}
+  async function wait(ms) {
+    const my = gen;
+    let left = ms;
+    while (left > 0) {
+      await sleep(40);
+      if (my !== gen) throw new Jump();
+      if (!paused && filmVisible && !document.hidden) { left -= 40; tickSeg(40); }
+    }
+  }
+  let segIdx = 0, segT = 0;
+  function tickSeg(dt) { segT += dt; segs[segIdx].querySelector('.fill').style.transform = `scaleX(${Math.min(1, segT / segDur[segIdx])})`; }
+  function markSegs(i) {
+    segIdx = i; segT = 0;
+    segs.forEach((b, j) => { b.classList.toggle('cur', i === j); b.querySelector('.fill').style.transform = `scaleX(${j < i ? 1 : 0})`; });
+  }
+  function resetFields() {
+    for (const f of film) fieldOf(f.app).textContent = '';
+    fieldOf('chat').innerHTML = '<span class="placeholder">Сообщение</span>';
+    thread.querySelectorAll('.msg.new').forEach(m => m.remove());
+  }
+  function showApp(f) {
+    $$('.app-tab').forEach(x => x.setAttribute('aria-selected', x.dataset.app === f.app));
+    $$('.scene').forEach(x => x.classList.toggle('on', x.dataset.scene === f.app));
+    $('#style-tag').textContent = 'Стиль: ' + f.style;
+  }
+  async function phrase(f, it) {
+    const words = it.raw.split(' ');
+    hud.classList.add('on');
+    await wait(250);
+    recording = true; pill.classList.add('on');
+    said.classList.remove('clean');
+    said.innerHTML = '<span class="mic-i">●</span><span class="q">«</span>' + words.map((w, i) => `<span class="w${it.junk.includes(i) ? ' junk' : ''}">${w} </span>`).join('') + '<span class="q">»</span>';
+    said.classList.add('on');
+    const ws = said.querySelectorAll('.w');
+    for (const w of ws) { await wait(230); w.classList.add('on'); }
+    await wait(450);
+    recording = false; pill.classList.remove('on'); hud.classList.remove('on');
+    said.classList.add('clean');
+    await wait(120);
+    const field = fieldOf(f.app);
+    if (field.querySelector('.placeholder')) field.textContent = '';
+    const span = document.createElement('span');
+    span.className = 'fresh'; span.textContent = it.out;
+    field.appendChild(span);
+    setTimeout(() => span.classList.add('settled'), 60);
+    await wait(700);
+    said.classList.remove('on');
+    await wait(800);
+    if (it.send) {
+      // В мессенджере - Enter: сообщение уходит в переписку.
+      await wait(250);
+      const m = document.createElement('div');
+      m.className = 'msg out new';
+      m.innerHTML = `${field.textContent}<small>19:4${3 + thread.children.length % 6}</small>`;
+      thread.appendChild(m);
+      while (thread.children.length > 5) thread.firstElementChild.remove();
+      field.innerHTML = '<span class="placeholder">Сообщение</span>';
+    }
+    await wait(500);
+  }
+  async function runFilm() {
+    let i = 0;
+    resetFields();
+    for (;;) {
+      try {
+        if (jumpTo !== null) { i = jumpTo; jumpTo = null; resetFields(); }
+        if (i === 0) resetFields();
+        const f = film[i];
+        markSegs(i); showApp(f);
+        await wait(700);
+        for (const it of f.items) await phrase(f, it);
+        await wait(500);
+        i = (i + 1) % film.length;
+      } catch (e) {
+        if (!(e instanceof Jump)) throw e;
+        recording = false; pill.classList.remove('on'); hud.classList.remove('on'); said.classList.remove('on');
+      }
+    }
+  }
+  segs.forEach(b => b.addEventListener('click', () => { jumpTo = +b.dataset.i; gen++; }));
+  playBtn.addEventListener('click', () => {
+    paused = !paused;
+    playBtn.setAttribute('aria-pressed', paused);
+    playBtn.setAttribute('aria-label', paused ? 'Продолжить' : 'Пауза');
+  });
+  new IntersectionObserver(([e]) => { filmVisible = e.isIntersecting; }, { threshold: .25 }).observe($('.window'));
+  if (reduce) {
+    // Без движения: показываем готовый результат для каждого приложения.
+    for (const f of film) fieldOf(f.app).textContent = f.items.map(it => it.out).join('');
+    playBtn.hidden = true;
+  } else runFilm();
+
+  // ───────── стиль под приложение ─────────
+  const styles = [
+    ['Скину ссылку вечером.', 'Как в общих настройках чистки.', ['Заметки', 'Pages', 'Safari']],
+    ['скину ссылку вечером', 'С маленькой буквы, без точки в конце — как пишут в мессенджерах.', ['Телеграм', 'WhatsApp', 'Slack']],
+    ['Скину ссылку вечером.', 'С заглавной и точкой, строгая чистка паразитов и оборотов.', ['Почта', 'Outlook', 'Spark']],
+    ['скину ссылку вечером', 'Как сказано: без заглавной, точки и лишнего пробела.', ['Xcode', 'VS Code', 'Терминал']],
+  ];
+  const segBtns = $$('#style-seg button');
+  let styleAuto = true, styleIdx = 0;
+  function setStyle(i) {
+    styleIdx = i;
+    segBtns.forEach((b, j) => b.setAttribute('aria-selected', i === j));
+    const out = $('#style-out');
+    out.style.opacity = 0;
+    setTimeout(() => {
+      out.textContent = styles[i][0]; out.classList.toggle('code', i === 3); out.style.opacity = 1;
+      $('#style-desc').textContent = styles[i][1];
+      $('#style-apps').innerHTML = styles[i][2].map(a => `<span>${a}</span>`).join('');
+    }, 180);
+  }
+  segBtns.forEach((b, i) => b.addEventListener('click', () => { styleAuto = false; setStyle(i); }));
+  setInterval(() => { if (styleAuto && !document.hidden) setStyle((styleIdx + 1) % 4); }, 2600);
+
+  // ───────── чистка ─────────
+  const cleanSamples = [
+    { lang: 'ru', parts: [['j', 'Ну '], ['', 'встреча '], ['j', 'э-э '], ['', 'переносится на '], ['j', 'это самое '], ['fix', '15:30'], ['', ', '], ['j', 'короче, '], ['', 'всех предупредил'], ['fix', '.']] },
+    { lang: 'en', parts: [['j', 'Um, '], ['', 'let\'s ship '], ['j', 'like '], ['', 'the build on '], ['fix', 'Friday'], ['', ', '], ['j', 'you know, '], ['', 'after '], ['fix', 'QA'], ['fix', '.']] },
+    { lang: 'ru', parts: [['j', 'Так, '], ['', 'купить '], ['fix', '2'], ['', ' батона'], ['', ', '], ['j', 'ну '], ['', 'молоко и '], ['j', 'э-э '], ['', 'батарейки'], ['fix', '.']] },
+  ];
+  let ci = 0;
+  async function cleanLoop() {
+    const el = $('#clean-line');
+    for (;;) {
+      const s = cleanSamples[ci++ % cleanSamples.length];
+      el.classList.remove('done');
+      el.innerHTML = s.parts.map(([c, t]) => `<span class="${c}">${t}</span>`).join('');
+      $('#clean-lang').textContent = s.lang;
+      $('#clean-n').textContent = '0';
+      await sleep(1900);
+      el.classList.add('done');
+      $('#clean-n').textContent = s.parts.filter(p => p[0] === 'j').length;
+      await sleep(3200);
+    }
+  }
+  if (!reduce) cleanLoop(); else { const s = cleanSamples[0]; $('#clean-line').innerHTML = s.parts.map(([c, t]) => `<span class="${c}">${t}</span>`).join(''); $('#clean-line').classList.add('done'); }
+
+  // Словарь: строки по очереди подсвечиваются.
+  const drows = $$('#dict .dict-row'); let di = 0;
+  setInterval(() => { if (document.hidden) return; drows.forEach((r, i) => r.classList.toggle('hl', i === di % drows.length)); di++; }, 1400);
+
+  // ───────── шёпот ─────────
+  const whIn = $('#wh-in'), whOut = $('#wh-out'), whT = $('#wh-toggle');
+  let whOn = true, whVisible = false;
+  new IntersectionObserver(([e]) => whVisible = e.isIntersecting).observe(whIn);
+  whT.addEventListener('click', () => {
+    whOn = !whOn; whT.setAttribute('aria-checked', whOn);
+    $('#wh-note').textContent = whOn ? 'Тихий голос поднят до нормального — модель слышит каждое слово.' : 'Без режима шёпота тихая речь почти не слышна — слова теряются.';
+  });
+  const wIn = Array(60).fill(0), wOut = Array(60).fill(0);
+  function drawLine(c, arr, color) {
+    const ctx = c.getContext('2d'), W = c.width, H = c.height, n = arr.length, bw = W / n;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = color;
+    arr.forEach((v, i) => { const h = Math.max(3, v * (H - 12)); ctx.beginPath(); ctx.roundRect ? ctx.roundRect(i * bw + bw * .25, (H - h) / 2, bw * .5, h, 3) : ctx.rect(i * bw + bw * .25, (H - h) / 2, bw * .5, h); ctx.fill(); });
+  }
+  function drawWhisper(t) {
+    if (!whVisible) return;
+    const quiet = speechLevel(t) * .22;
+    wIn.push(quiet); wIn.shift();
+    wOut.push(whOn ? Math.min(1, quiet * 4) : quiet); wOut.shift();
+    drawLine(whIn, wIn, 'rgba(255,255,255,.45)');
+    drawLine(whOut, wOut, whOn ? '#3deb8c' : 'rgba(255,255,255,.45)');
+  }
+
+  // ───────── окно приложения ─────────
+  const h = new Date().getHours();
+  $('#greet').textContent = h >= 5 && h < 12 ? 'Доброе утро' : h < 18 && h >= 12 ? 'Добрый день' : h >= 18 && h < 23 ? 'Добрый вечер' : 'Доброй ночи';
+  const sideBtns = $$('.side button');
+  function openPane(p) {
+    sideBtns.forEach(b => b.setAttribute('aria-selected', b.dataset.p === p));
+    $$('.pane').forEach(x => x.classList.toggle('on', x.dataset.pane === p));
+    if (p === 'stats' && !reduce) $$('#chart div').forEach((d, i) => d.animate([{ transform: 'scaleY(0)' }, { transform: 'scaleY(1)' }], { duration: 500, delay: i * 45, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'backwards' }));
+  }
+  sideBtns.forEach(b => b.addEventListener('click', () => openPane(b.dataset.p)));
+  $('[data-goto="history"]').addEventListener('click', e => { e.preventDefault(); openPane('history'); });
+  $('#theme-chip').addEventListener('click', e => {
+    const on = !$('#appwin').classList.contains('dark');
+    $('#appwin').classList.toggle('dark', on);
+    e.currentTarget.setAttribute('aria-pressed', on);
+    e.currentTarget.textContent = on ? '◑ светлая тема' : '◐ тёмная тема';
+  });
+
+  // ───────── гонка ─────────
+  // Текст разложен заранее (буквы и слова в span) - строки не прыгают, проявляется только прозрачность.
+  // Клавиатура печатает по буквам с курсором, голос - словами с размытием, полоски растут плавно на rAF.
+  const raceText = 'Привет! Встречу переносим на четверг в 15:00. Захвати, пожалуйста, ноутбук и распечатку договора — обсудим правки и сразу отправим клиенту.';
+  const raceWords = raceText.split(' ');
+  const tk = $('#t-k'), tv = $('#t-v'), laneV = $('.lane.voice');
+  tk.innerHTML = raceWords.map(w => `<span class="wd">${[...w].map(c => `<span class="ch">${c}</span>`).join('')}</span>`).join('<span class="ch"> </span>');
+  tv.innerHTML = raceWords.map(w => `<span class="vw">${w}</span>`).join(' ');
+  const chars = [...tk.querySelectorAll('.ch')], vws = [...tv.querySelectorAll('.vw')];
+  // Время ускорено вчетверо: 40 сл/мин против 150 сл/мин.
+  const kTotal = raceWords.length * 60000 / 40 / 4, vTotal = raceWords.length * 60000 / 150 / 4;
+  const ease = x => 1 - Math.pow(1 - x, 2);
+  let raceVisible = false, raceT = 0, raceLast = 0, kShown = 0, vShown = 0, phase = 'pause', phaseT = 0;
+  const wordsAt = n => n >= chars.length ? raceWords.length : chars.slice(0, n).filter(c => c.textContent === ' ').length;
+  function raceReset() {
+    chars.forEach(c => c.classList.remove('on', 'last')); vws.forEach(w => w.classList.remove('on'));
+    kShown = vShown = 0; raceT = 0; laneV.classList.remove('done');
+    $('#b-k').style.transform = $('#b-v').style.transform = 'scaleX(0)';
+    $('#r-k').textContent = $('#r-v').textContent = '0 слов';
+  }
+  function raceFrame(now) {
+    requestAnimationFrame(raceFrame);
+    const dt = raceLast ? Math.min(64, now - raceLast) : 0; raceLast = now;
+    if (!raceVisible) return;
+    if (phase === 'run') {
+      raceT += dt;
+      const kf = Math.min(1, raceT / kTotal), vf = Math.min(1, raceT / vTotal);
+      const kn = Math.round(kf * chars.length);
+      if (kn !== kShown) {
+        for (let i = kShown; i < kn; i++) chars[i].classList.add('on');
+        chars.forEach(c => c.classList.remove('last'));
+        if (kn < chars.length) chars[Math.max(0, kn - 1)].classList.add('last');
+        kShown = kn;
+        $('#r-k').textContent = kf >= 1 ? 'готово' : wordsAt(kn) + ' слов';
+      }
+      const vn = Math.ceil(vf * vws.length);
+      if (vn !== vShown) {
+        for (let i = vShown; i < vn; i++) vws[i].classList.add('on');
+        vShown = vn;
+        $('#r-v').textContent = vn + ' слов';
+      }
+      if (vf >= 1 && !laneV.classList.contains('done')) { laneV.classList.add('done'); $('#r-v').textContent = 'готово ✓'; }
+      $('#b-k').style.transform = `scaleX(${kf})`;
+      $('#b-v').style.transform = `scaleX(${ease(vf)})`;
+      if (kf >= 1) { phase = 'hold'; phaseT = 0; }
+    } else if (phase === 'hold') {
+      phaseT += dt;
+      if (phaseT > 3200) { tk.classList.add('fade'); tv.classList.add('fade'); phase = 'fade'; phaseT = 0; }
+    } else if (phase === 'fade') {
+      phaseT += dt;
+      if (phaseT > 550) { raceReset(); tk.classList.remove('fade'); tv.classList.remove('fade'); phase = 'pause'; phaseT = 0; }
+    } else if (phase === 'pause') {
+      phaseT += dt;
+      if (phaseT > 700) phase = 'run';
+    }
+  }
+  if (reduce) { chars.forEach(c => c.classList.add('on')); vws.forEach(w => w.classList.add('on')); }
+  else {
+    new IntersectionObserver(([e]) => { raceVisible = e.isIntersecting; }, { threshold: .4 }).observe($('#race'));
+    requestAnimationFrame(raceFrame);
+  }
+
+  // ───────── копировать команду ─────────
+  const toast = $('#toast');
+  $('#copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($('#cmd').textContent); toast.textContent = 'Скопировано — вставьте в Терминал'; }
+    catch { getSelection().selectAllChildren($('#cmd')); toast.textContent = 'Выделено — нажмите ⌘C'; }
+    toast.classList.add('on'); setTimeout(() => toast.classList.remove('on'), 2000);
+  });
+})();
+</script>
+</body>
+</html>
