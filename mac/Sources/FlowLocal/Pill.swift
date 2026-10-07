@@ -94,8 +94,8 @@ final class PillPanel: NSPanel {
     }
 }
 
-// Капсула - чёрная плашка и белые полоски, и больше ничего: ни времени, ни
-// точки, ни слов, ни надписей. Не настраивается. Полоски - прежняя бегущая
+// Капсула - чёрная плашка, время записи слева и белые полоски; ни точки,
+// ни слов, ни надписей. Не настраивается. Полоски - прежняя бегущая
 // волна (LiveWaveform): свежий звук справа, уходит влево; после записи
 // капсула гаснет. Появляется пружиной из чуть меньшего размера, гаснет
 // обратно.
@@ -107,16 +107,48 @@ struct PillView: View {
         // Та же бегущая полоса, что и раньше: свежий звук справа, уходит
         // влево, тот же шаг и плавность - только белая на чёрном.
         PillCapsule {
-            LiveWaveform(color: Pill.text, count: 14, barWidth: 2.5,
-                         spacing: 2.5, height: 18, floor: 0.12)
+            HStack(spacing: 10) {
+                // Сколько уже диктуется - слева от полосок. Пока идёт
+                // распознавание - застывает на последнем значении.
+                if let since = recordingSince ?? lastSince {
+                    TimelineView(.periodic(from: since, by: 1)) { context in
+                        Text(Self.clock(recordingSince == nil ? frozen : context.date.timeIntervalSince(since)))
+                            .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(Pill.text)
+                    }
+                }
+                LiveWaveform(color: Pill.text, count: 14, barWidth: 2.5,
+                             spacing: 2.5, height: 18, floor: 0.12)
+            }
         }
         .opacity(visible ? 1 : 0)
         .scaleEffect(visible || reduceMotion ? 1 : 0.86, anchor: state.pillPosition == .top ? .top : .bottom)
         .blur(radius: visible || reduceMotion ? 0 : 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(reduceMotion ? nil : Motion.pop, value: visible)
+        .onChange(of: state.phase) { old, new in
+            // Запомнить начало и итог записи: на распознавании время стоит.
+            if case let .recording(since, _) = new { lastSince = since }
+            if case let .recording(since, _) = old, recordingSince == nil {
+                frozen = Date().timeIntervalSince(since)
+            }
+            if case .idle = new { lastSince = nil }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(state.phase == .processing ? "Распознавание" : "Идёт запись")
+    }
+
+    @State private var lastSince: Date?
+    @State private var frozen: TimeInterval = 0
+
+    private var recordingSince: Date? {
+        if case let .recording(since, _) = state.phase { return since }
+        return nil
+    }
+
+    static func clock(_ t: TimeInterval) -> String {
+        let s = max(0, Int(t))
+        return String(format: "%d:%02d", s / 60, s % 60)
     }
 
     /// Только запись и распознавание - остальное капсула не показывает.
