@@ -2,35 +2,35 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleIdentifier</key>
-    <string>com.flowlocal.mac</string>
-    <key>CFBundleExecutable</key>
-    <string>FlowLocal</string>
-    <key>CFBundleName</key>
-    <string>Flow Local</string>
-    <key>CFBundleDisplayName</key>
-    <string>Flow Local</string>
-    <key>CFBundleDevelopmentRegion</key>
-    <string>ru</string>
-    <key>CFBundleLocalizations</key>
-    <array>
-        <string>ru</string>
-    </array>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>0.2.0</string>
-    <key>CFBundleVersion</key>
-    <string>2</string>
-    <key>LSApplicationCategoryType</key>
-    <string>public.app-category.productivity</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>NSHumanReadableCopyright</key>
-    <string>© 2026 Roman Kandeev</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>Flow Local слушает микрофон, только пока идёт диктовка. Звук не покидает этот Mac.</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>ru</string>
+	<key>CFBundleDisplayName</key>
+	<string>Flow Local</string>
+	<key>CFBundleExecutable</key>
+	<string>FlowLocal</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.flowlocal.mac</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>ru</string>
+	</array>
+	<key>CFBundleName</key>
+	<string>Flow Local</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>3.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>3</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 Roman Kandeev</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Flow Local слушает микрофон, только пока идёт диктовка. Звук не покидает этот Mac.</string>
 </dict>
 </plist>

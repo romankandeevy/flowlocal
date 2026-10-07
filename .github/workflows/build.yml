@@ -23,6 +23,10 @@ jobs:
             Sources/FlowLocal/*.swift -o FlowLocal \
             -framework AppKit -framework AVFoundation -framework Carbon -framework ApplicationServices
 
+      - name: самопроверка логики
+        working-directory: mac
+        run: tools/selftest.sh
+
       - name: бэкенд
         working-directory: mac/backend
         run: python3 -m py_compile server.py langdetect.py
