@@ -1,13 +1,12 @@
-"""Иконка FlowLocal по сетке иконок macOS: «сквиркл» 824 из 1024 цвета
-бумаги с тенью в самом рисунке, на нём - зелёная капсула записи с волной из
-семи полосок. Тот же язык, что у окна и капсулы: тёплая бумага, один
-зелёный акцент, сама капсула - и есть продукт.
+"""Иконка FlowLocal по сетке иконок macOS: тёмный «сквиркл» 824 из 1024 с
+зелёным светом изнутри и бликом по кромке; на нём - светящиеся «буквы»,
+которые набегают на текстовый курсор: сказанное ложится туда, где курсор.
+Дух - Raycast / Linear: тёмная основа, один смелый символ со свечением.
 
     backend/.venv/bin/python tools/make_icon.py     ->  Resources/AppIcon.icns
 
-Рисуем через поля расстояний (SDF): край сглаживается сам, без суперсэмплинга.
-Нужен только numpy (он уже есть в окружении бэкенда); PNG пишется вручную,
-.icns собирают системные sips и iconutil.
+Рисуем через поля расстояний (SDF) и размытие для свечения. Нужен только
+numpy; PNG пишется вручную, .icns собирают системные sips и iconutil.
 """
 import os
 import shutil
@@ -18,90 +17,81 @@ import zlib
 
 import numpy as np
 
-N = 1024
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "Resources", "AppIcon.icns")
 
-y, x = np.mgrid[0:N, 0:N].astype(np.float32) + 0.5
+N=1024
+y,x=np.mgrid[0:N,0:N].astype(np.float32)+0.5
+C,HALF=N/2,412.0
+def H(h): return np.array([(h>>16)&255,(h>>8)&255,h&255],np.float32)/255
+def sq(cx,cy,half,n=5.0):
+    u=np.abs(x-cx)/half; v=np.abs(y-cy)/half; f=u**n+v**n-1
+    return f/np.maximum(np.hypot(n*u**(n-1)/half,n*v**(n-1)/half),1e-6)
+def rr(cx,cy,hw,hh,r):
+    qx=np.abs(x-cx)-hw+r; qy=np.abs(y-cy)-hh+r
+    return np.hypot(np.maximum(qx,0),np.maximum(qy,0))+np.minimum(np.maximum(qx,qy),0)-r
+def seg(ax,ay,bx,by,r):
+    px,py=x-ax,y-ay; dx,dy=bx-ax,by-ay; L=dx*dx+dy*dy
+    h=np.clip((px*dx+py*dy)/max(L,1e-6),0,1)
+    return np.hypot(px-dx*h,py-dy*h)-r
+def cover(sd,w=1.0): return np.clip(0.5-sd/w,0,1)
+def box(a,r):
+    r=int(r)
+    if r<1: return a
+    for ax in (0,1):
+        c=np.cumsum(np.pad(a,[(r+1,r) if i==ax else (0,0) for i in range(2)],mode='edge'),axis=ax)
+        if ax==0: a=(c[2*r+1:]-c[:-2*r-1])/(2*r+1)
+        else: a=(c[:,2*r+1:]-c[:,:-2*r-1])/(2*r+1)
+    return a
+def blur(a,r):
+    for _ in range(3): a=box(a,r/1.7)
+    return a
+class Img:
+    def __init__(s): s.rgb=np.zeros((N,N,3),np.float32); s.a=np.zeros((N,N),np.float32)
+    def over(s,col,m):
+        col=np.asarray(col,np.float32)
+        if col.ndim==1: col=col[None,None,:]
+        m=m[...,None]; s.rgb=col*m+s.rgb*(1-m); s.a=m[...,0]+s.a*(1-m[...,0])
+    def add(s,col,m,mask):
+        col=np.asarray(col,np.float32)
+        if col.ndim==1: col=col[None,None,:]
+        s.rgb=np.clip(s.rgb+col*(m*mask)[...,None],0,1)
+def lin(c1,c2,t): t=np.clip(t,0,1)[...,None]; return H(c1)*(1-t)+H(c2)*t
+def body(img,top=0x1C2622,bot=0x0A0C0B):
+    sh=sq(C,C+16,HALF)
+    img.over((0,0,0),0.45*np.clip(1-sh/40,0,1)**2*(sh>-1))
+    b=sq(C,C,HALF); m=cover(b)
+    t=(y-(C-HALF))/(2*HALF)
+    col=lin(top,bot,t)
+    # мягкое пятно света сверху
+    r=np.hypot(x-C,(y-(C-260))*1.2)/520
+    col=col+H(0x1F3A2E)[None,None,:]*np.clip(1-r,0,1)[...,None]**2*0.9
+    img.over(np.clip(col,0,1),m)
+    # кромка: светлая сверху, тёмная снизу
+    edge=np.clip(1-np.abs(b+2)/2,0,1)
+    img.add((1,1,1),edge*np.clip((C-y)/HALF+0.15,0,1)*0.30,m)
+    img.add((1,1,1),np.clip(1-np.abs(b+5)/3,0,1)*0.05,m)
+    return m
+def glow(img,shape,col,radius,strength,mask):
+    g=blur(shape,radius); img.add(H(col),g*strength,mask)
+MINT,EM,DEEP,HI=0x8EF0C0,0x2FBF86,0x0E6B4A,0xEFFFF7
 
+def caret():
+    img=Img(); m=body(img)
+    cx=C+170
+    # «буквы» набегают на курсор: тусклые слева, яркие у курсора
+    for i,(lx,w,h) in enumerate([(C-300,40,40),(C-215,58,72),(C-112,50,96),(C+2,70,120)]):
+        k=0.25+0.25*i
+        lm=cover(rr(lx,C+ (60-h/2) ,w/2,h/2,18))
+        glow(img,lm,EM,40,0.6*k,m); img.over(H(MINT),lm*m*k)
+    caretm=np.maximum(cover(rr(cx,C,30,250,30)),0)
+    glow(img,caretm,EM,110,1.4,m); glow(img,caretm,MINT,36,0.9,m)
+    img.over(lin(HI,MINT,(y-(C-250))/500),caretm*m)
+    img.add((1,1,1),cover(rr(cx-10,C-120,8,110,8))*0.35,m)
+    return img
 
-def squircle_sd(cx, cy, half, n=5.0):
-    """Приближённое расстояние до суперэллипса |x|^n + |y|^n = half^n."""
-    u = np.abs(x - cx) / half
-    v = np.abs(y - cy) / half
-    f = u ** n + v ** n - 1.0
-    gx = n * u ** (n - 1) / half
-    gy = n * v ** (n - 1) / half
-    return f / np.maximum(np.hypot(gx, gy), 1e-6)
-
-
-def capsule_sd(cx, top, bottom, r):
-    """Расстояние до вертикальной капсулы радиуса r от top до bottom."""
-    cy = np.clip(y, top + r, bottom - r)
-    return np.hypot(x - cx, y - cy) - r
-
-
-def cover(sd):
-    """Доля пикселя внутри фигуры: сглаженный край шириной в пиксель."""
-    return np.clip(0.5 - sd, 0.0, 1.0)
-
-
-def over(dst, rgb, a):
-    """Наложение слоя rgb с альфой a поверх dst (премультиплицированный RGBA)."""
-    a = a[..., None]
-    dst[..., :3] = np.asarray(rgb, np.float32) * a + dst[..., :3] * (1 - a)
-    dst[..., 3:] = a + dst[..., 3:] * (1 - a)
-
-
-def hexrgb(h):
-    return np.array([(h >> 16) & 255, (h >> 8) & 255, h & 255], np.float32) / 255
-
-
-img = np.zeros((N, N, 4), np.float32)
-C, HALF = N / 2, 412.0          # сквиркл 824 x 824 в поле 1024
-
-# Тень в рисунке, как у системных иконок: мягкая, чуть ниже.
-shadow = squircle_sd(C, C + 14, HALF)
-over(img, (0, 0, 0), 0.32 * np.clip(1 - shadow / 34, 0, 1) ** 2 * (shadow > -1))
-over(img, (0, 0, 0), 0.18 * np.clip(1 - np.maximum(shadow, 0) / 10, 0, 1))
-
-# Основание: бумага, чуть теплее и темнее книзу - объём без яркого градиента.
-body = squircle_sd(C, C, HALF)
-t = ((y - (C - HALF)) / (2 * HALF)).clip(0, 1)[..., None]
-base = hexrgb(0xFCFAF5) * (1 - t) + hexrgb(0xEAE3D5) * t
-over(img, base, cover(body))
-
-# Тонкая тёплая кромка по краю - чтобы бумага не растворялась на светлом Доке.
-edge = np.clip(1 - np.abs(body + 1.5) / 1.5, 0, 1)
-over(img, hexrgb(0x8A7B62), 0.22 * edge)
-
-
-def pill_sd(cx, cy, half_w, r):
-    """Расстояние до горизонтальной капсулы: полуширина half_w, радиус r."""
-    px = np.clip(x, cx - half_w + r, cx + half_w - r)
-    return np.hypot(x - px, y - cy) - r
-
-
-# Капсула записи: мягкая тень под ней, затем зелёное тело.
-PW, PR = 300.0, 128.0          # полуширина и радиус капсулы
-pill_shadow = pill_sd(C, C + 22, PW, PR)
-over(img, hexrgb(0x3C301E), 0.30 * np.clip(1 - pill_shadow / 46, 0, 1) ** 2 * (pill_shadow > -1))
-pill = pill_sd(C, C, PW, PR)
-tp = ((y - (C - PR)) / (2 * PR)).clip(0, 1)[..., None]
-green = hexrgb(0x3E8462) * (1 - tp) + hexrgb(0x245841) * tp
-over(img, green, cover(pill))
-# Блик по верхнему краю капсулы.
-hl = np.clip(1 - np.abs(pill + 2.5) / 2.5, 0, 1) * np.clip((C - y) / PR, 0, 1)
-over(img, (1, 1, 1), 0.28 * hl * cover(pill))
-
-# Волна: семь полосок цвета бумаги, выше к центру - голос, который становится текстом.
-heights = [0.34, 0.60, 0.86, 1.0, 0.74, 0.50, 0.30]
-bar_w, gap, full = 30.0, 26.0, 170.0
-x0 = C - (len(heights) * bar_w + (len(heights) - 1) * gap) / 2 + bar_w / 2
-for i, k in enumerate(heights):
-    h = full * k
-    sd = capsule_sd(x0 + i * (bar_w + gap), C - h / 2, C + h / 2, bar_w / 2)
-    over(img, hexrgb(0xF7F5F0), cover(sd))
+art = caret()
+img = np.concatenate([art.rgb * art.a[..., None], art.a[..., None]], axis=2)
 
 
 def write_png(path, rgba):
