@@ -1,8 +1,8 @@
 """Иконка FlowLocal по сетке иконок macOS: «сквиркл» 824 из 1024 цвета
-тёплого угля (тёмная тема окна), на нём - две строки текста, который
-набирается: слова цвета бумаги, последнее ещё проявляется зелёным, в конце -
+нейтрального графита (тёмная тема окна), на нём - две строки текста, который
+набирается: белые слова, последнее ещё проявляется зелёным, в конце -
 зелёный курсор с мягким свечением. Сказанное ложится туда, где курсор.
-Цвета - токены окна: бумага, уголь, зелёный акцент.
+Цвета - токены окна: белый, графит, яркий зелёный акцент.
 
     backend/.venv/bin/python tools/make_icon.py     ->  Resources/AppIcon.icns
 
@@ -98,15 +98,15 @@ def typing():
     img.over((0, 0, 0), 0.42 * np.clip(1 - sh / 40, 0, 1) ** 2 * (sh > -1))
     b = sq(C, C, HALF)
     m = cover(b)
-    col = lin(0x2E2A24, 0x13110E, (y - (C - HALF)) / (2 * HALF))
+    col = lin(0x2C2C30, 0x101012, (y - (C - HALF)) / (2 * HALF))
     r = np.hypot(x - (C - 60), (y - (C - 300)) * 1.15) / 560
-    col = col + H(0x3B342A)[None, None, :] * (np.clip(1 - r, 0, 1) ** 2)[..., None] * 0.55
+    col = col + H(0x3A3A40)[None, None, :] * (np.clip(1 - r, 0, 1) ** 2)[..., None] * 0.55
     img.over(np.clip(col, 0, 1), m)
     edge = np.clip(1 - np.abs(b + 2) / 2, 0, 1)
     img.add((1, 1, 1), edge * np.clip((C - y) / HALF + 0.1, 0, 1) * 0.26, m)
     img.add(H(0x000000), edge * 0, m)
 
-    PAPER, GREEN, MINT = 0xEFE8DA, 0x6CC196, 0xA6E3C4
+    PAPER, GREEN, MINT = 0xF4F4F5, 0x3DEB8C, 0xA4F7CB
     H_W = 76  # высота «слова»
 
     def word(x0, w, cy):
@@ -135,7 +135,7 @@ def typing():
     cm = cover(rr(cx, C + 80, 15, 106, 15))
     glow(img, cm, GREEN, 90, 1.0, m)
     glow(img, cm, MINT, 26, 0.6, m)
-    img.over(lin(0xD8F7E6, GREEN, (y - (C - 26)) / 212), cm * m)
+    img.over(lin(0xDDFCEB, GREEN, (y - (C - 26)) / 212), cm * m)
     return img
 
 

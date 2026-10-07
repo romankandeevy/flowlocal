@@ -55,7 +55,7 @@ struct HistoryView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text("История")
-                    .font(NLFont.ui(30, .semibold))
+                    .font(NLFont.ui(30, .bold))
                     .tracking(-0.75)
                     .foregroundStyle(NL.textPrimary)
                 Spacer()
@@ -121,7 +121,7 @@ private struct DaySection: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text(HistoryFormat.sectionTitle(day.date))
-                    .font(NLFont.ui(15, .semibold))
+                    .font(NLFont.ui(15, .bold))
                     .foregroundStyle(NL.textPrimary)
                 Spacer()
                 Text("\(day.entries.count) · \(wordsLabel(day.entries.reduce(0) { $0 + $1.words }))")

@@ -126,7 +126,7 @@ private struct TermChip: View {
         .padding(.trailing, 10)
         .frame(height: 30)
         .background(NL.surface, in: Capsule())
-        .overlay { Capsule().strokeBorder(hover ? NL.borderStrong : NL.border, lineWidth: 0.5) }
+        .overlay { Capsule().strokeBorder(hover ? NL.borderStrong : NL.border, lineWidth: 1) }
         .onHover { hover = $0 }
         .animation(Motion.fast, value: hover)
     }

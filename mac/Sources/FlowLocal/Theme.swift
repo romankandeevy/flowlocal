@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-// Тёплая тема FlowLocal (мокап C, 2026-10): бумажный фон, тёплые чернила,
-// один зелёный акцент, шрифт Onest. Имена токенов прежние (NL), поэтому
+// Тема FlowLocal (2026-10): почти белый фон и нейтральный графит, контрастный
+// текст, яркий зелёный акцент, шрифт Onest. Имена токенов прежние (NL), поэтому
 // экраны и компоненты меняются вместе. В коде экранов - только эти имена,
 // никаких «сырых» цветов и размеров шрифта.
 
@@ -24,53 +24,55 @@ private func hex(_ value: UInt32, _ alpha: CGFloat = 1) -> NSColor {
 private func black(_ a: CGFloat) -> NSColor { NSColor(srgbRed: 0, green: 0, blue: 0, alpha: a) }
 private func white(_ a: CGFloat) -> NSColor { NSColor(srgbRed: 1, green: 1, blue: 1, alpha: a) }
 
-private func warm(_ a: CGFloat) -> NSColor { NSColor(srgbRed: 60 / 255, green: 48 / 255, blue: 30 / 255, alpha: a) }
-private func paper(_ a: CGFloat) -> NSColor { NSColor(srgbRed: 1, green: 240 / 255, blue: 215 / 255, alpha: a) }
+private func ink(_ a: CGFloat) -> NSColor { NSColor(srgbRed: 0, green: 0, blue: 0, alpha: a) }
+private func glow(_ a: CGFloat) -> NSColor { NSColor(srgbRed: 1, green: 1, blue: 1, alpha: a) }
 
-/// Семантические цвета. Светлая тема - бумага, тёмная - тёплый уголь.
+/// Семантические цвета. Светлая тема - почти белая, без желтизны; тёмная -
+/// нейтральный графит. Акцент - яркий зелёный.
 enum NL {
     // Фоны: canvas - страница, surface - карточки, sidebar - левая колонка
-    static let canvas = dynamic(hex(0xF7F5F0), hex(0x1B1916))
-    static let surface = dynamic(hex(0xFFFDF9), hex(0x23201C))
-    static let sidebar = dynamic(hex(0xEFEBE3), hex(0x151310))
-    static let subtle = dynamic(hex(0xEFEBE3), hex(0x2B2823))
-    static let hover = dynamic(warm(0.06), paper(0.05))
-    static let active = dynamic(warm(0.10), paper(0.09))
-    static let rowHover = dynamic(hex(0xFAF8F3), hex(0x29261F))
-    static let selected = dynamic(hex(0xE6EFE9), hex(0x1F2A23))
-    static let disabled = dynamic(hex(0xEFEBE3), hex(0x2B2823))
-    static let popover = dynamic(hex(0xFFFDF9), hex(0x2C2823))
-    static let chartBar = dynamic(hex(0xE4DDCF), hex(0x36312A))
-    static let chartBarHover = dynamic(hex(0xD3CAB8), hex(0x4A443A))
+    static let canvas = dynamic(hex(0xF6F6F4), hex(0x111113))
+    static let surface = dynamic(hex(0xFFFFFF), hex(0x1C1C1F))
+    static let sidebar = dynamic(hex(0xEEEEEC), hex(0x0C0C0E))
+    static let subtle = dynamic(hex(0xEEEEEC), hex(0x26262A))
+    static let hover = dynamic(ink(0.05), glow(0.06))
+    static let active = dynamic(ink(0.09), glow(0.10))
+    static let rowHover = dynamic(hex(0xFAFAF9), hex(0x222225))
+    static let selected = dynamic(hex(0xE3F6EA), hex(0x12281C))
+    static let disabled = dynamic(hex(0xEEEEEC), hex(0x26262A))
+    static let popover = dynamic(hex(0xFFFFFF), hex(0x26262A))
+    static let chartBar = dynamic(hex(0xE2E3E0), hex(0x2D2D31))
+    static let chartBarHover = dynamic(hex(0xCBCDC9), hex(0x424247))
 
-    static let accent = dynamic(hex(0x2F6B4F), hex(0x6CC196))
-    static let accentHover = dynamic(hex(0x3A7A5B), hex(0x7DCCA4))
-    static let accentActive = dynamic(hex(0x255A42), hex(0x5AA982))
-    static let accentSubtle = dynamic(hex(0xE6EFE9), hex(0x1F2A23))
+    static let accent = dynamic(hex(0x0FA84F), hex(0x3DEB8C))
+    static let accentHover = dynamic(hex(0x12B957), hex(0x5FF0A1))
+    static let accentActive = dynamic(hex(0x0C9045), hex(0x2FD27A))
+    static let accentSubtle = dynamic(hex(0xE3F6EA), hex(0x12281C))
 
     static let success = accent
     static let successSubtle = accentSubtle
-    static let warning = dynamic(hex(0xC98A2E), hex(0xE0A94F))
-    static let warningSubtle = dynamic(hex(0xF8EEDF), hex(0x2A2218))
-    static let danger = dynamic(hex(0xB4572E), hex(0xE48A62))
-    static let dangerSubtle = dynamic(hex(0xF8E8E0), hex(0x2C1D16))
-    static let dangerHover = dynamic(hex(0xA24C26), hex(0xEC9C78))
-    static let dangerActive = dynamic(hex(0x8F4120), hex(0xD47851))
+    static let warning = dynamic(hex(0xD18A16), hex(0xEBB55A))
+    static let warningSubtle = dynamic(hex(0xFBF1DF), hex(0x2A2216))
+    static let danger = dynamic(hex(0xC2410C), hex(0xF59A6B))
+    static let dangerSubtle = dynamic(hex(0xFCEBE3), hex(0x2C1C15))
+    static let dangerHover = dynamic(hex(0xAD3A0B), hex(0xF8AE87))
+    static let dangerActive = dynamic(hex(0x96320A), hex(0xE88A5C))
     static let infoSubtle = accentSubtle
 
     // Текст
-    static let textPrimary = dynamic(hex(0x231F19), hex(0xF1ECE3))
-    static let textSecondary = dynamic(hex(0x6F685B), hex(0xB3AB9C))
-    static let textTertiary = dynamic(hex(0x8A8273), hex(0x948B7B))
-    static let textQuaternary = dynamic(hex(0x9D9587), hex(0x857D6C))
-    static let textDisabled = dynamic(hex(0xB9B2A5), hex(0x5A544A))
+    static let textPrimary = dynamic(hex(0x16161A), hex(0xF4F4F5))
+    static let textSecondary = dynamic(hex(0x54555B), hex(0xB8B8BE))
+    static let textTertiary = dynamic(hex(0x727379), hex(0x8E8E95))
+    static let textQuaternary = dynamic(hex(0x8C8D92), hex(0x76767D))
+    static let textDisabled = dynamic(hex(0xB9BABD), hex(0x55555B))
     static let textPlaceholder = textQuaternary
-    static let textOnAccent = dynamic(hex(0xFFFFFF), hex(0x0F2219))
-    static let textAccent = accent
-    static let textSuccess = accent
-    static let textWarning = dynamic(hex(0x8F5A12), hex(0xE0A94F))
+    static let textOnAccent = dynamic(hex(0xFFFFFF), hex(0x021409))
+    /// Зелёный текстом - на белом чуть темнее заливки, чтобы читался.
+    static let textAccent = dynamic(hex(0x0B8E42), hex(0x3DEB8C))
+    static let textSuccess = textAccent
+    static let textWarning = dynamic(hex(0x9A5B0B), hex(0xEBB55A))
     static let textDanger = danger
-    static let textInfo = accent
+    static let textInfo = textAccent
 
     // Иконки - те же ступени, что у текста
     static let iconPrimary = textPrimary
@@ -78,15 +80,15 @@ enum NL {
     static let iconTertiary = textTertiary
     static let iconAccent = textAccent
 
-    // Границы: полупрозрачные тёплые - кроме фокуса и ошибки
-    static let border = dynamic(warm(0.12), paper(0.09))
-    static let borderSubtle = dynamic(hex(0xEFE9DE), hex(0x2E2A24))
-    static let borderStrong = dynamic(warm(0.20), paper(0.16))
-    static let borderHover = dynamic(warm(0.18), paper(0.14))
+    // Границы: полупрозрачные нейтральные - кроме фокуса и ошибки
+    static let border = dynamic(ink(0.10), glow(0.10))
+    static let borderSubtle = dynamic(hex(0xEDEDEB), hex(0x27272B))
+    static let borderStrong = dynamic(ink(0.18), glow(0.18))
+    static let borderHover = dynamic(ink(0.15), glow(0.15))
     static let borderFocus = accent
     static let borderDanger = danger
-    static let ringFocus = dynamic(hex(0x2F6B4F, 0.30), hex(0x6CC196, 0.35))
-    static let sidebarBorder = dynamic(hex(0xE3DDD1), hex(0x2A2620))
+    static let ringFocus = dynamic(hex(0x0FA84F, 0.28), hex(0x3DEB8C, 0.32))
+    static let sidebarBorder = dynamic(hex(0xE2E2DF), hex(0x232326))
 
     /// Тонкий верхний блик поднятых поверхностей - только в тёмной теме.
     static let raisedHighlight = dynamic(white(0), white(0.04))
@@ -275,7 +277,7 @@ extension View {
                 shape.fill(NL.surface)
                     .shadow(color: .black.opacity(0.05), radius: 1.5, y: 1)
             }
-            .overlay { shape.strokeBorder(NL.border, lineWidth: 0.5) }
+            .overlay { shape.strokeBorder(NL.border, lineWidth: 1) }
     }
 
     /// Всплывающее: surface + граница + тень уровня и блик сверху в тёмной теме.

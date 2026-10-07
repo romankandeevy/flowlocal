@@ -282,7 +282,7 @@ struct KeyCaps: View {
                     .background(NL.surface, in: RoundedRectangle(cornerRadius: size > 13 ? 8 : 6, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: size > 13 ? 8 : 6, style: .continuous)
-                            .strokeBorder(NL.borderStrong, lineWidth: 0.5)
+                            .strokeBorder(NL.borderStrong, lineWidth: 1)
                     }
                     .shadow(color: .black.opacity(0.08), radius: 0, y: 1)
             }

@@ -160,7 +160,7 @@ private struct NavItem: View {
                     .font(.system(size: 13, weight: .medium))
                     .frame(width: 18)
                 Text(tab.title)
-                    .font(NLFont.ui(13.5, .medium))
+                    .font(NLFont.ui(13.5, selected ? .semibold : .medium))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(selected || hover ? NL.textPrimary : NL.textSecondary)
@@ -173,7 +173,7 @@ private struct NavItem: View {
                         .shadow(color: .black.opacity(0.06), radius: 1, y: 1)
                         .overlay {
                             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .strokeBorder(NL.border, lineWidth: 0.5)
+                                .strokeBorder(NL.border, lineWidth: 1)
                         }
                         .matchedGeometryEffect(id: "thumb", in: namespace)
                 } else if hover {
@@ -201,7 +201,7 @@ private struct WeekCard: View {
                 .nlType(.caption)
                 .foregroundStyle(NL.textTertiary)
             Text(wordsLabel(state.wordsWeek))
-                .font(NLFont.ui(22, .semibold))
+                .font(NLFont.ui(22, .bold))
                 .tracking(-0.4)
                 .monospacedDigit()
                 .foregroundStyle(NL.textPrimary)
@@ -334,7 +334,7 @@ private struct EditEntrySheet: View {
                 .background(NL.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(NL.border, lineWidth: 0.5)
+                        .strokeBorder(NL.border, lineWidth: 1)
                 }
             HStack {
                 Spacer()
@@ -414,7 +414,7 @@ struct SearchField: View {
                     .padding(.vertical, 1)
                     .overlay {
                         RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .strokeBorder(NL.border, lineWidth: 0.5)
+                            .strokeBorder(NL.border, lineWidth: 1)
                     }
                     .transition(.opacity)
             }

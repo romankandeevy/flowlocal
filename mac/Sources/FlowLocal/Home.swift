@@ -37,7 +37,7 @@ struct HomeView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
             Text(greeting)
-                .font(NLFont.ui(30, .semibold))
+                .font(NLFont.ui(30, .bold))
                 .tracking(-0.75)
                 .foregroundStyle(NL.textPrimary)
             HStack(spacing: 6) {
@@ -90,7 +90,7 @@ struct HomeView: View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text(today.isEmpty ? "Недавние" : "Сегодня")
-                    .font(NLFont.ui(15, .semibold))
+                    .font(NLFont.ui(15, .bold))
                     .foregroundStyle(NL.textPrimary)
                 Spacer()
                 Button {
@@ -116,7 +116,7 @@ struct StatTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
-                .font(NLFont.ui(22, .semibold))
+                .font(NLFont.ui(22, .bold))
                 .tracking(-0.4)
                 .monospacedDigit()
                 .foregroundStyle(NL.textPrimary)

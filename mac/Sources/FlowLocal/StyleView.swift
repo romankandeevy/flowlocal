@@ -264,7 +264,7 @@ struct PageTitle: View {
 
     var body: some View {
         Text(text)
-            .font(NLFont.ui(30, .semibold))
+            .font(NLFont.ui(30, .bold))
             .tracking(-0.75)
             .foregroundStyle(NL.textPrimary)
     }
@@ -277,7 +277,7 @@ struct SectionHeading: View {
 
     var body: some View {
         Text(text)
-            .font(NLFont.ui(15, .semibold))
+            .font(NLFont.ui(15, .bold))
             .foregroundStyle(NL.textPrimary)
     }
 }

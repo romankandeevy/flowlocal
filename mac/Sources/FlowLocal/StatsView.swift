@@ -45,7 +45,7 @@ struct StatsView: View {
                 .contentTransition(.opacity)
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(grouped(words))
-                    .font(NLFont.ui(52, .semibold))
+                    .font(NLFont.ui(52, .bold))
                     .tracking(-1.8)
                     .monospacedDigit()
                     .foregroundStyle(NL.textPrimary)
@@ -92,7 +92,7 @@ struct StatsView: View {
         ]
         return VStack(alignment: .leading, spacing: 10) {
             Text("За всё время")
-                .font(NLFont.ui(15, .semibold))
+                .font(NLFont.ui(15, .bold))
                 .foregroundStyle(NL.textPrimary)
             VStack(spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { index, row in

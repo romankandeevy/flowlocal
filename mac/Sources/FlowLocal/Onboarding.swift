@@ -14,7 +14,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 28) {
                 VStack(alignment: .leading, spacing: Space.s2) {
                     Text("Три шага — и можно говорить")
-                        .font(NLFont.ui(30, .semibold))
+                        .font(NLFont.ui(30, .bold))
                         .tracking(-0.75)
                         .foregroundStyle(NL.textPrimary)
                     Text("Диктуйте в любом приложении. Звук и текст не покидают этот Mac — без аккаунта и облака.")
@@ -44,7 +44,7 @@ struct OnboardingView: View {
 
                 VStack(alignment: .leading, spacing: 14) {
                     Text(allDone ? "Всё готово — попробуйте" : "Потом — первая диктовка")
-                        .font(NLFont.ui(15, .semibold))
+                        .font(NLFont.ui(15, .bold))
                         .foregroundStyle(NL.textPrimary)
                         .contentTransition(.opacity)
                     HStack(spacing: 8) {
