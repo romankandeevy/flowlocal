@@ -94,240 +94,95 @@ final class PillPanel: NSPanel {
     }
 }
 
-// Капсула - в тон окну: тёплая бумага в светлой теме, тёплый уголь в
-// тёмной, шрифт Onest, зелёный акцент. Над чужими окнами её держат
-// стекло под заливкой, тонкая кромка и мягкая тень. Появляется пружиной из
-// чуть меньшего размера с размытием, гаснет обратно; ширина под содержимое
-// меняется той же пружиной.
+// Капсула - чёрная плашка и белые полоски, и больше ничего: ни времени, ни
+// точки, ни слов, ни надписей. Не настраивается. Пока идёт запись, полоски
+// живут от голоса; пока распознаётся - по ним бежит мягкая волна; дальше
+// капсула гаснет. Появляется пружиной из чуть меньшего размера, гаснет
+// обратно.
 struct PillView: View {
     @EnvironmentObject var state: AppState
-    @ObservedObject private var meter = LevelStore.shared
-    @ObservedObject private var live = LiveWords.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Последнее видимое состояние: пока индикатор гаснет, он показывает
-    /// его, а не схлопывается в пустую капсулу.
-    @State private var shown: Phase = .idle
 
     var body: some View {
-        PillCapsule { content }
-            .opacity(visible ? 1 : 0)
-            .scaleEffect(visible || reduceMotion ? 1 : 0.86, anchor: state.pillPosition == .top ? .top : .bottom)
-            .blur(radius: visible || reduceMotion ? 0 : 6)
-            .scaleEffect(state.pillSize.scale)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(reduceMotion ? nil : Motion.pop, value: visible)
-            .animation(reduceMotion ? nil : Motion.moderate, value: shown)
-            .onAppear { if state.phase != .idle { shown = state.phase } }
-            .onChange(of: state.phase) { _, phase in
-                if phase != .idle { shown = phase }
-            }
+        PillCapsule {
+            PillBars(thinking: state.phase == .processing)
+        }
+        .opacity(visible ? 1 : 0)
+        .scaleEffect(visible || reduceMotion ? 1 : 0.86, anchor: state.pillPosition == .top ? .top : .bottom)
+        .blur(radius: visible || reduceMotion ? 0 : 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(reduceMotion ? nil : Motion.pop, value: visible)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(state.phase == .processing ? "Распознавание" : "Идёт запись")
     }
 
-    /// «Распознаю…» и «Готово» можно спрятать; запись, ошибки и «скопировано,
-    /// нажмите ⌘V» видны всегда.
+    /// Только запись и распознавание - остальное капсула не показывает.
     private var visible: Bool {
         switch state.phase {
-        case .idle: return false
-        case .processing, .done: return state.pillShowStatus
-        default: return true
-        }
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        switch shown {
-        case .idle:
-            EmptyView()
-        case .loading:
-            PillSpinner()
-            Text("Загрузка моделей…")
-        case let .recording(since, _):
-            TimelineView(.periodic(from: since, by: 0.25)) { context in
-                let t = context.date.timeIntervalSince(since)
-                PillRecordingRow(elapsed: t, levels: meter.levels,
-                                 silent: t > 1.5 && meter.peak < 0.05,
-                                 hasWords: !live.words.isEmpty) {
-                    LiveWordsTicker(width: state.pillTextWidth.points)
-                }
-            }
-            .transition(.opacity)
-        case .processing:
-            PillSpinner()
-            Text("Распознаю…")
-                .transition(.opacity)
-        case let .done(message):
-            PillIcon(symbol: "checkmark", tint: Pill.green)
-            Text(message)
-        case let .copied(message):
-            PillIcon(symbol: "doc.on.clipboard.fill", tint: Pill.amber)
-            Text(message)
-        case let .failed(message):
-            PillIcon(symbol: "exclamationmark", tint: Pill.red)
-            Text(message)
+        case .recording, .processing: return true
+        default: return false
         }
     }
 }
 
-/// Цвета капсулы - токены окна: светлая и тёмная тема по системе.
+/// Цвета капсулы: чёрная плашка, белые полоски. Text/secondary - для
+/// бегущей строки (LiveWordsTicker), в капсуле её больше нет.
 enum Pill {
-    /// Запись - тёплый красный, видно на бумаге и на угле.
-    static let red = Color(nsColor: NSColor(name: nil) { a in
-        (a.bestMatch(from: [.aqua, .darkAqua]) ?? .aqua) == .darkAqua
-            ? NSColor(srgbRed: 0.93, green: 0.42, blue: 0.33, alpha: 1)
-            : NSColor(srgbRed: 0.84, green: 0.29, blue: 0.20, alpha: 1)
-    })
-    static let green = NL.accent
-    static let amber = NL.warning
-    static let text = NL.textPrimary
-    static let secondary = NL.textTertiary
-    static let divider = NL.border
+    static let text = Color.white
+    static let secondary = Color.white.opacity(0.55)
 }
 
-/// Значок статуса - в цветном кружке, появляется пружиной.
-private struct PillIcon: View {
-    let symbol: String
-    let tint: Color
-    @State private var shown = false
-
-    var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(NL.textOnAccent)
-            .frame(width: 20, height: 20)
-            .background(tint, in: Circle())
-            .scaleEffect(shown ? 1 : 0.4)
-            .opacity(shown ? 1 : 0)
-            .onAppear { withMotion(Motion.pop) { shown = true } }
-    }
-}
-
-/// Крутилка «Распознаю» - дуга, а не системный ProgressView: тот на тёмном
-/// стекле серый и мелкий.
-private struct PillSpinner: View {
-    @State private var spin = false
+/// Девять белых полосок. Запись - высота от уровня голоса, выше к центру;
+/// распознавание - по ним бежит волна.
+private struct PillBars: View {
+    var thinking: Bool
+    @ObservedObject private var meter = LevelStore.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private let count = 9
+    private let shape: [CGFloat] = [0.45, 0.6, 0.78, 0.92, 1.0, 0.92, 0.78, 0.6, 0.45]
+
     var body: some View {
-        Circle()
-            .trim(from: 0.15, to: 0.85)
-            .stroke(Pill.text, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-            .frame(width: 14, height: 14)
-            .rotationEffect(.degrees(spin ? 360 : 0))
-            .padding(3)
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) { spin = true }
+        TimelineView(.animation(minimumInterval: reduceMotion ? 0.25 : 1.0 / 30)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 3) {
+                ForEach(0..<count, id: \.self) { i in
+                    Capsule()
+                        .fill(Color.white)
+                        .frame(width: 3, height: 4 + 14 * height(i, t))
+                }
             }
+            .frame(height: 18)
+            .animation(.easeOut(duration: 0.12), value: meter.levels.last ?? 0)
+        }
+    }
+
+    private func height(_ i: Int, _ t: Double) -> CGFloat {
+        if thinking {
+            let phase = t * 6 - Double(i) * 0.7
+            return 0.2 + 0.55 * CGFloat((sin(phase) + 1) / 2)
+        }
+        // Последние уровни - с разных моментов, чтобы полоски не прыгали разом.
+        let levels = meter.levels
+        let v = CGFloat(levels[max(0, levels.count - 1 - abs(i - count / 2))])
+        let jitter = 0.85 + 0.15 * CGFloat(sin(t * 9 + Double(i) * 1.9))
+        return max(0.12, min(1, v * shape[i] * jitter * 1.15))
     }
 }
 
-/// Сама капсула: стекло под заливкой surface, тонкая тёплая кромка,
-/// двуслойная мягкая тень - как карточки окна, только парит.
+/// Сама капсула: чёрная плашка с едва заметной кромкой и мягкой тенью.
 struct PillCapsule<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        HStack(spacing: 10) {
-            content()
-        }
-        .font(NLFont.ui(13.5, .medium))
-        .foregroundStyle(Pill.text)
-        .lineLimit(1)
-        .padding(.leading, 12)
-        .padding(.trailing, 16)
-        .frame(height: 42)
-        .fixedSize()
-        .background {
-            Capsule(style: .continuous)
-                .fill(.regularMaterial)
-                .overlay(Capsule(style: .continuous).fill(NL.surface.opacity(0.86)))
-        }
-        .overlay {
-            Capsule(style: .continuous)
-                .strokeBorder(NL.borderStrong, lineWidth: 0.5)
-        }
-        .overlay(alignment: .top) {
-            // Блик кромки сверху - в тёмной теме.
-            Capsule(style: .continuous)
-                .strokeBorder(NL.raisedHighlight, lineWidth: 1)
-        }
-        .clipShape(Capsule(style: .continuous))
-        .shadow(color: .black.opacity(0.10), radius: 2, y: 1)
-        .shadow(color: .black.opacity(0.16), radius: 16, y: 8)
-    }
-}
-
-/// Красная точка записи - мягко дышит, пока идёт запись.
-private struct RecordingDot: View {
-    var silent = false
-    @State private var breathe = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        ZStack {
-            Circle().fill(Pill.red.opacity(0.35))
-                .frame(width: 16, height: 16)
-                .scaleEffect(breathe ? 1 : 0.5)
-                .opacity(breathe ? 0 : 1)
-            Circle().fill(Pill.red)
-                .frame(width: 8, height: 8)
-        }
-        .frame(width: 16, height: 16)
-        .opacity(silent ? 0.5 : 1)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) { breathe = true }
-        }
-    }
-}
-
-/// Строка записи в капсуле. Какие части видны - настройки «Капсулы»;
-/// выключено всё - остаётся красная точка, чтобы запись было видно.
-struct PillRecordingRow<Words: View>: View {
-    @EnvironmentObject var state: AppState
-    let elapsed: TimeInterval
-    let levels: [Float]
-    var silent = false
-    var hasWords = true
-    @ViewBuilder var words: () -> Words
-
-    var body: some View {
-        let showWords = state.pillLiveText && hasWords
-        let showDot = state.pillShowDot
-            || !(state.pillShowTimer || state.pillShowWave || showWords)
-        HStack(spacing: 10) {
-            if showDot {
-                RecordingDot(silent: silent)
+        content()
+            .padding(.horizontal, 16)
+            .frame(height: 36)
+            .fixedSize()
+            .background(Capsule(style: .continuous).fill(Color.black))
+            .overlay {
+                Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
             }
-            if state.pillShowTimer {
-                Text(MainView.clock(elapsed))
-                    .font(NLFont.ui(13.5, .semibold).monospacedDigit())
-                    .foregroundStyle(Pill.text)
-                    .contentTransition(.numericText())
-            }
-            if state.pillShowWave {
-                LiveWaveform(color: Pill.green, count: 14, barWidth: 2.5,
-                             spacing: 2.5, height: 18, floor: 0.12)
-                    .opacity(silent ? 0.35 : 1)
-            }
-            if state.whisperMode {
-                Text("шёпот")
-                    .font(NLFont.ui(11, .semibold))
-                    .foregroundStyle(Pill.green)
-                    .padding(.horizontal, 7)
-                    .frame(height: 18)
-                    .background(NL.accentSubtle, in: Capsule())
-            }
-            // Бегущая строка расшифровки: видно каждое слово, не глядя в окно.
-            if showWords {
-                if showDot || state.pillShowTimer || state.pillShowWave {
-                    Pill.divider.frame(width: 1, height: 16)
-                }
-                words()
-                    .transition(.opacity)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Идёт запись, \(MainView.clock(elapsed))")
+            .shadow(color: .black.opacity(0.25), radius: 12, y: 5)
     }
 }
