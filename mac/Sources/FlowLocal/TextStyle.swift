@@ -24,7 +24,7 @@ enum TextStyle: String, Codable, CaseIterable, Identifiable {
         case .standard: return "Как в общих настройках чистки."
         case .chat: return "С маленькой буквы, без точки в конце — как пишут в мессенджерах."
         case .formal: return "С заглавной и точкой, строгая чистка паразитов и оборотов."
-        case .code: return "Как сказано: без заглавной, точки и лишнего пробела."
+        case .code: return "Диктовка кода: «равно», «точка», «скобки» — знаками, английские слова — в имя camelCase. «Комментарий …» — строка после //."
         }
     }
 
@@ -34,7 +34,7 @@ enum TextStyle: String, Codable, CaseIterable, Identifiable {
         case .standard: return "Скину ссылку вечером."
         case .chat: return "скину ссылку вечером"
         case .formal: return "Скину ссылку вечером."
-        case .code: return "скину ссылку вечером"
+        case .code: return "let userName = \"Роман\""
         }
     }
 
@@ -55,6 +55,8 @@ enum TextStyle: String, Codable, CaseIterable, Identifiable {
         case .code:
             o.capitalize = false
             o.trailingPeriod = false
+            // «равно равно» - это ==, а не повтор.
+            o.removeRepeats = false
         }
         return o
     }
@@ -65,7 +67,8 @@ enum TextStyle: String, Codable, CaseIterable, Identifiable {
     /// Убрать точку с конца и заглавную с начала уже готового текста -
     /// GigaAM ставит точку сам, чистка её только не дописывает.
     func finish(_ text: String) -> String {
-        guard self == .chat || self == .code else { return text }
+        if self == .code { return CodeSpeech.render(text) }
+        guard self == .chat else { return text }
         var s = text
         if s.hasSuffix("."), !s.hasSuffix("..") { s.removeLast() }
         if let first = s.first, first.isUppercase {

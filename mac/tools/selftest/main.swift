@@ -51,6 +51,30 @@ check(!TextStyle.code.addsSpace && TextStyle.chat.addsSpace, "код - без п
 check(AppStyleRule.style(for: "ru.keepcoder.Telegram", in: AppStyleRule.suggestions) == .chat, "Telegram - переписка")
 check(AppStyleRule.style(for: "com.unknown", in: AppStyleRule.suggestions) == .standard, "неизвестное - обычный")
 
+print("Диктовка кода")
+func code(_ raw: String) -> String { styled(raw, .code) }
+eq(code("Let greeting равно привет."), "let greeting = привет", "присваивание, знаки модели убраны")
+eq(code("let greeting равно кавычки привет кавычки"), "let greeting = \"привет\"", "строка в кавычках")
+eq(code("Return greeting."), "return greeting", "ключевое слово отдельно")
+eq(code("func load profile скобки открыть фигурную скобку"), "func loadProfile() {", "функция: имя camelCase, скобки")
+eq(code("Fetch user profile."), "fetchUserProfile", "три слова - одно имя")
+eq(code("snake case user id равно 42"), "user_id = 42", "snake case")
+eq(code("Camel Keys fetch user profile"), "fetchUserProfile", "кривое «camel keys» - тоже команда")
+eq(code("паскаль кейс user profile view"), "UserProfileView", "паскаль кейс")
+eq(code("капс max retries равно 3"), "MAX_RETRIES = 3", "капс - константа")
+eq(code("user точка name"), "user.name", "точка без пробелов")
+eq(code("if count больше или равно 10 открыть фигурную"), "if count >= 10 {", "сравнение")
+eq(code("a равно равно b"), "a == b", "равно равно - это ==, не повтор")
+eq(code("print открыть скобку user точка name закрыть скобку"), "print(user.name)", "вызов с аргументом")
+eq(code("items open bracket 0 close bracket"), "items[0]", "индекс по-английски")
+eq(code("return a плюс b"), "return a + b", "сложение")
+eq(code("let url равно URL"), "let url = URL", "аббревиатура остаётся")
+eq(code("Комментарий проверить, что профиль загружается до показа экрана."), "// проверить, что профиль загружается до показа экрана", "комментарий - обычным текстом")
+eq(code("ну let x равно 5"), "let x = 5", "паразиты убираются")
+eq(code("Сделай, чтобы функция возвращала пустой массив, если пользователя нет."), "сделай, чтобы функция возвращала пустой массив, если пользователя нет", "просьба словами - как сказана")
+eq(code("Кавычки. Привет, мир, кавычки."), "\"привет мир\"", "строка по-русски")
+eq(code("Let Gritchen равно, привет."), "let gritchen = привет", "вывод склейки двух моделей")
+
 print("Режим шёпота")
 func rms(_ x: ArraySlice<Float>) -> Float { sqrt(x.reduce(0) { $0 + $1 * $1 } / Float(max(1, x.count))) }
 func tone(_ amp: Float, seconds: Double) -> [Float] {
