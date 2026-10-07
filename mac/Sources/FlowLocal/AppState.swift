@@ -269,6 +269,8 @@ final class AppState: ObservableObject {
     @Published var backend: BackendState = .starting
     /// Первый запуск из .dmg: приложение заводит себе Python (PythonSetup).
     @Published var setupStep: PythonSetup.Step?
+    /// Открыт шаг «Первая диктовка» в обучении: диктовка не вставляется.
+    @Published var tutorialPractice = false
 
     /// Что сейчас делается до готовности распознавания - одной строкой.
     var startingNote: String {

@@ -66,6 +66,13 @@ final class Controller {
         bindHotkeys()
     }
 
+    /// Снять свои сочетания - пока обучение ждёт нового: иначе нажатое
+    /// сработало бы диктовкой. Вернёт bindHotkeys.
+    func unbindHotkeys() {
+        HotkeyCenter.shared.unregister(id: holdID)
+        HotkeyCenter.shared.unregister(id: toggleID)
+    }
+
     /// Сочетания задаются в Hub Settings. Занятое, системное или совпадающее с другим сочетание не
     /// регистрируется - причина пишется в журнал.
     func bindHotkeys() {
@@ -473,6 +480,11 @@ final class Controller {
             return
         }
         state.add(entry)
+        // Проба в обучении: текст показывает само окно обучения, вставлять некуда.
+        guard !state.tutorialPractice else {
+            flash(.done("\(wordsLabel(entry.words))"), hideAfter: 1)
+            return
+        }
         guard state.insertAutomatically else {
             flash(.done("\(wordsLabel(entry.words)) в истории"), hideAfter: 1.5)
             return

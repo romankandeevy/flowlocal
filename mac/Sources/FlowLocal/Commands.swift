@@ -57,6 +57,7 @@ struct AppCommands: Commands {
         }
 
         CommandGroup(replacing: .help) {
+            Button("Обучение…", action: actions.showTutorial)
             Button("Справка Flow Local") { NSWorkspace.shared.open(AppInfo.helpURL) }
         }
     }

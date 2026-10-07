@@ -76,6 +76,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 DispatchQueue.main.async { self?.controller.bindHotkeys() }
             }.store(in: &bag)
         Log.write("FlowLocal запущен, «Универсальный доступ»: \(Inserter.trusted ? "есть" : "нет")")
+        // Первый запуск - обучение поверх окна.
+        if TutorialWindow.shouldShowOnLaunch(state) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.showTutorial() }
+        }
     }
 
     // Щелчок по значку в Доке, когда окон не видно, - открыть главное окно.
@@ -105,11 +109,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             openRecordings: { NSWorkspace.shared.open(AudioStore.dir) },
             openSettings: { HubSync.openSettings() },
             showMain: { SceneBridge.showMain() },
+            showTutorial: { [weak self] in self?.showTutorial() },
             find: { [weak self] in
                 self?.state.tab = .history
                 SceneBridge.showMain()
                 self?.state.searchFocusRequest += 1
             })
+    }
+
+    func showTutorial() {
+        TutorialWindow.show(state: state, hooks: TutorialHooks(
+            bindHotkeys: { [weak self] in self?.controller.bindHotkeys() },
+            unbindHotkeys: { [weak self] in self?.controller.unbindHotkeys() },
+            cancelDictation: { [weak self] in self?.controller.cancelDictation() },
+            setLaunchAtLogin: { [weak self] on in self?.setLaunchAtLogin(on) },
+            finished: { SceneBridge.showMain() }))
     }
 
     private func applyAppearance() {
@@ -179,6 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(item("Открыть Flow Local", #selector(openMain)))
         menu.addItem(item("Настройки…", #selector(openSettings), key: ","))
+        menu.addItem(item("Обучение…", #selector(openTutorial)))
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Завершить Flow Local", action: #selector(NSApplication.terminate(_:)),
                               keyEquivalent: "q")
@@ -194,6 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleDictation() { controller.toggleDictation() }
     @objc private func openMain() { SceneBridge.showMain() }
     @objc private func openSettings() { HubSync.openSettings() }
+    @objc private func openTutorial() { showTutorial() }
 
     private func updateStatusIcon(_ phase: Phase) {
         let name: String

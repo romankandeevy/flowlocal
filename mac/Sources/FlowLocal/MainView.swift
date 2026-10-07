@@ -16,6 +16,7 @@ struct AppActions {
     /// Настройки - в Hub Settings.
     var openSettings: () -> Void = {}
     var showMain: () -> Void = {}
+    var showTutorial: () -> Void = {}
     var find: () -> Void = {}
 }
 
