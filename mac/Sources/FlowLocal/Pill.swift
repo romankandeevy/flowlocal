@@ -95,8 +95,8 @@ final class PillPanel: NSPanel {
 }
 
 // Капсула - чёрная плашка и белые полоски, и больше ничего: ни времени, ни
-// точки, ни слов, ни надписей. Не настраивается. Пока идёт запись, полоски
-// живут от голоса; пока распознаётся - по ним бежит мягкая волна; дальше
+// точки, ни слов, ни надписей. Не настраивается. Полоски - прежняя бегущая
+// волна (LiveWaveform): свежий звук справа, уходит влево; после записи
 // капсула гаснет. Появляется пружиной из чуть меньшего размера, гаснет
 // обратно.
 struct PillView: View {
@@ -104,8 +104,11 @@ struct PillView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        // Та же бегущая полоса, что и раньше: свежий звук справа, уходит
+        // влево, тот же шаг и плавность - только белая на чёрном.
         PillCapsule {
-            PillBars(thinking: state.phase == .processing)
+            LiveWaveform(color: Pill.text, count: 14, barWidth: 2.5,
+                         spacing: 2.5, height: 18, floor: 0.12)
         }
         .opacity(visible ? 1 : 0)
         .scaleEffect(visible || reduceMotion ? 1 : 0.86, anchor: state.pillPosition == .top ? .top : .bottom)
@@ -130,44 +133,6 @@ struct PillView: View {
 enum Pill {
     static let text = Color.white
     static let secondary = Color.white.opacity(0.55)
-}
-
-/// Девять белых полосок. Запись - высота от уровня голоса, выше к центру;
-/// распознавание - по ним бежит волна.
-private struct PillBars: View {
-    var thinking: Bool
-    @ObservedObject private var meter = LevelStore.shared
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private let count = 9
-    private let shape: [CGFloat] = [0.45, 0.6, 0.78, 0.92, 1.0, 0.92, 0.78, 0.6, 0.45]
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: reduceMotion ? 0.25 : 1.0 / 30)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            HStack(spacing: 3) {
-                ForEach(0..<count, id: \.self) { i in
-                    Capsule()
-                        .fill(Color.white)
-                        .frame(width: 3, height: 4 + 14 * height(i, t))
-                }
-            }
-            .frame(height: 18)
-            .animation(.easeOut(duration: 0.12), value: meter.levels.last ?? 0)
-        }
-    }
-
-    private func height(_ i: Int, _ t: Double) -> CGFloat {
-        if thinking {
-            let phase = t * 6 - Double(i) * 0.7
-            return 0.2 + 0.55 * CGFloat((sin(phase) + 1) / 2)
-        }
-        // Последние уровни - с разных моментов, чтобы полоски не прыгали разом.
-        let levels = meter.levels
-        let v = CGFloat(levels[max(0, levels.count - 1 - abs(i - count / 2))])
-        let jitter = 0.85 + 0.15 * CGFloat(sin(t * 9 + Double(i) * 1.9))
-        return max(0.12, min(1, v * shape[i] * jitter * 1.15))
-    }
 }
 
 /// Сама капсула: чёрная плашка с едва заметной кромкой и мягкой тенью.
