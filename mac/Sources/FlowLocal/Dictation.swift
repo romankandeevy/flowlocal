@@ -13,7 +13,18 @@ func openMicrophoneAccess(_ state: AppState) {
     }
 }
 
+/// «Разрешить» универсальный доступ. Первое нажатие за запуск сначала
+/// стирает старую запись (после обновления она есть, но не работает - см.
+/// Inserter.resetTrust), потом macOS спрашивает заново и открываются
+/// настройки с одной свежей строкой FlowLocal.
+private var axResetDone = false
+
 func openAccessibilityAccess() {
+    guard !Inserter.trusted else { return }
+    if !axResetDone {
+        axResetDone = true
+        Inserter.resetTrust()
+    }
     Inserter.requestTrust()
     Inserter.openAccessibilitySettings()
 }

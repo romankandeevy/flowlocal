@@ -17,6 +17,28 @@ enum Inserter {
         _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
     }
 
+    /// Стереть свои записи «Универсального доступа». macOS привязывает право
+    /// к подписи приложения: после обновления в настройках остаётся старая
+    /// запись FlowLocal - тумблер включён, а к этой сборке он не относится, и
+    /// сколько его ни щёлкай, доступа нет. Без старой записи macOS заводит
+    /// свежую под эту подпись - и тумблер срабатывает с первого раза.
+    /// tccutil трогает только записи этого приложения и прав админа не просит.
+    static func resetTrust() {
+        guard let id = Bundle.main.bundleIdentifier else { return }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        p.arguments = ["reset", "Accessibility", id]
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        do {
+            try p.run()
+            p.waitUntilExit()
+            Log.write("универсальный доступ: старые записи стёрты (tccutil, код \(p.terminationStatus))")
+        } catch {
+            Log.write("универсальный доступ: tccutil не запустился - \(error.localizedDescription)")
+        }
+    }
+
     static func openAccessibilitySettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)

@@ -37,14 +37,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if Recorder.permission == .notDetermined {
             Recorder.requestPermission { [weak self] _ in self?.state.refreshPermissions() }
         }
-        if !Inserter.trusted {
-            Inserter.requestTrust()
-        }
+        // Право не спрашиваем сами при каждом запуске: системное окно
+        // поверх всего и тут же наша кнопка «Разрешить» путали - два окна про
+        // одно и то же. Права нет - об этом скажут первые шаги и плашка на
+        // Главной, кнопка там всё сделает (openAccessibilityAccess).
         // Права - опросом (уведомлений об их смене нет), и только пока
         // какого-то не хватает: выдали оба - опрашивать нечего. Отозвать
         // можно, но это видно при следующей вставке и при активации окна.
         // Микрофоны - по уведомлению CoreAudio, а не опросом раз в 2 с.
-        permissionTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+        permissionTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let state = self?.state, !(state.micGranted && state.axTrusted) else { return }
                 state.refreshPermissions()

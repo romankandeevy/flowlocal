@@ -536,11 +536,24 @@ final class AppState: ObservableObject {
         refreshDevices()
     }
 
+    /// Первая проверка прав - при запуске: из неё окно вперёд не выводим.
+    private var permissionsChecked = false
+
     func refreshPermissions() {
         let mic = Recorder.permission == .authorized
         let ax = Inserter.trusted
+        let wasChecked = permissionsChecked
+        permissionsChecked = true
         if mic != micGranted { micGranted = mic }
-        if ax != axTrusted { axTrusted = ax }
+        if ax != axTrusted {
+            axTrusted = ax
+            // Только что выдали в настройках - возвращаем человека в окно:
+            // видно галочку, и не надо искать, сработало ли.
+            if ax && wasChecked {
+                Log.write("универсальный доступ: выдан")
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
     }
 
     func refreshDevices() {

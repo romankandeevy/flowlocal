@@ -202,9 +202,11 @@ fi
 # Годится и общий сертификат разработки «Local Dev Signing», если он уже
 # есть в связке: право тоже привязывается к нему, а не к хэшу.
 SIGN_ID="-"
-# В .dmg - ad-hoc: самоподписанный сертификат на чужом Маке не доверенный,
-# и Gatekeeper отнёсся бы к нему строже, чем к ad-hoc.
-[ "$MODE" = dmg ] || for CERT in "FlowLocal Dev" "Local Dev Signing"; do
+# .dmg - тем же постоянным сертификатом: «Универсальный доступ» macOS
+# привязывает к подписи, и с ad-hoc он слетал бы после каждого обновления.
+# Gatekeeper к самоподписанному относится как к ad-hoc: один раз «Всё равно
+# открыть». Сертификат - в связке этого Мака: релизы собираются здесь.
+for CERT in "FlowLocal Dev" "Local Dev Signing"; do
     if security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$CERT\""; then
         SIGN_ID="$CERT"
         break
