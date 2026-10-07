@@ -261,6 +261,35 @@
   .toggle[aria-checked="true"] .sw::after { transform: translateX(16px); }
   .toggle:focus-visible .sw { outline: 2px solid var(--green); outline-offset: 2px; }
 
+  /* календарь диктовок, как на GitHub */
+  .hm-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 13.5px; margin-bottom: 12px; }
+  .hm-head span { display: none; }
+  .hm { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; grid-template-rows: repeat(7, auto); gap: 3px; }
+  .hm button { all: unset; aspect-ratio: 1; border-radius: 3px; background: var(--subtle); cursor: pointer; transition: transform .12s ease, box-shadow .12s ease; }
+  .hm button:hover { transform: scale(1.25); }
+  .hm button:focus-visible, .hm button.sel { box-shadow: 0 0 0 1.5px #fff; }
+  .hm button.empty { cursor: default; }
+  .hm button.future { visibility: hidden; }
+  .hm.mini { margin: 6px 0 14px; padding: 12px; border-radius: 12px; background: var(--c-surface); border: 1px solid var(--c-line); }
+  .hm.mini span { aspect-ratio: 1; border-radius: 2px; background: var(--c-bar); }
+  .hm.mini span.l1 { background: color-mix(in srgb, var(--c-acc) 30%, transparent); }
+  .hm.mini span.l2 { background: color-mix(in srgb, var(--c-acc) 52%, transparent); }
+  .hm.mini span.l3 { background: color-mix(in srgb, var(--c-acc) 76%, transparent); }
+  .hm.mini span.l4 { background: var(--c-acc); }
+  .hm .l1, .hm-legend .l1 { background: rgba(61,235,140,.28); }
+  .hm .l2, .hm-legend .l2 { background: rgba(61,235,140,.5); }
+  .hm .l3, .hm-legend .l3 { background: rgba(61,235,140,.75); }
+  .hm .l4, .hm-legend .l4 { background: var(--green); }
+  .hm-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 12px; font-size: 12.5px; color: var(--faint); flex-wrap: wrap; }
+  .hm-legend { display: inline-flex; align-items: center; gap: 3px; }
+  .hm-legend i { width: 10px; height: 10px; border-radius: 2px; background: var(--subtle); display: inline-block; }
+  .hm-day { margin-top: 14px; display: grid; gap: 6px; min-height: 120px; }
+  .hm-day .dh { font-size: 13px; font-weight: 600; display: flex; justify-content: space-between; }
+  .hm-day .dh span { color: var(--faint); font-weight: 400; }
+  .hm-day .de { display: grid; grid-template-columns: 44px 1fr; gap: 8px; padding: 8px 12px; border-radius: 10px; background: rgba(255,255,255,.04); font-size: 14px;
+                animation: fadein .3s ease both; }
+  .hm-day .de time { color: var(--faint); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+
   /* окно приложения, нарисованное как в FlowLocal (светлая тема) */
   .appwin { --c-canvas: #f6f6f4; --c-surface: #fff; --c-side: #eeeeec; --c-text: #16161a; --c-sec: #54555b; --c-ter: #727379; --c-line: rgba(0,0,0,.10);
             --c-acc: #0fa84f; --c-acc-t: #0b8e42; --c-acc-soft: #e3f6ea; --c-bar: #e2e3e0; --c-hover: rgba(0,0,0,.05);
@@ -623,12 +652,24 @@
           <div class="dict-row" style="grid-template-columns:48px 1fr 26px"><span class="from">11:12</span><span>проверить, что профиль загружается до показа экрана</span><span class="arrow">▶</span></div>
         </div>
       </div>
+    <div class="row reveal">
+      <div class="txt">
+        <h3>Вся история — календарём</h3>
+        <p>Каждая диктовка остаётся в истории — <b>весь текст, без лимита</b>. Сверху год квадратиками, как на GitHub: чем зеленее день, тем больше наговорили.</p>
+        <p>Нажали на день — ниже только его диктовки. Столбик на графике «Обзора» тоже открывает свой день.</p>
+      </div>
+      <div class="panel">
+        <div class="hm-head"><b id="hm-total"></b><span>Пн · Ср · Пт</span></div>
+        <div class="hm" id="hm" role="grid" aria-label="Календарь диктовок"></div>
+        <div class="hm-foot"><span id="hm-tip">Нажмите на день</span><span class="hm-legend">Меньше <i class="l0"></i><i class="l1"></i><i class="l2"></i><i class="l3"></i><i class="l4"></i> Больше</span></div>
+        <div class="hm-day" id="hm-day"></div>
+      </div>
     </div>
   </section>
 
   <section id="app">
     <h2 class="reveal">Окно, в которое <em>почти не заходят</em></h2>
-    <p class="sub reveal">Вся работа — в чужих окнах. А здесь — статистика, история, стиль и словарь. Нажимайте вкладки слева.</p>
+    <p class="sub reveal">Вся работа — в чужих окнах. А здесь — статистика, история с календарём, стиль и словарь. Нажимайте вкладки слева.</p>
     <div class="appwin reveal" id="appwin">
       <div class="side" role="tablist" aria-label="Разделы FlowLocal">
         <div class="lights"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span></div>
@@ -659,6 +700,7 @@
         </div>
         <div class="pane" data-pane="history">
           <h4>История</h4>
+          <div class="hm mini" id="hm-mini" aria-hidden="true"></div>
           <div class="search">⌕ Найти по словам <span style="float:right">⌘F</span></div>
           <div class="day">Сегодня · 23 · 612 слов</div>
           <div class="entry" style="grid-template-columns:44px 1fr 22px"><time>19:42</time><span class="t">пять минут, паркуюсь</span><span class="play">▶</span></div>
@@ -1047,6 +1089,58 @@
     drawLine(whIn, wIn, 'rgba(255,255,255,.45)');
     drawLine(whOut, wOut, whOn ? '#3deb8c' : 'rgba(255,255,255,.45)');
   }
+
+  // ───────── календарь диктовок ─────────
+  // Данные выдуманные, но устойчивые (одно и то же зерно): 26 недель до сегодня.
+  (() => {
+    const hm = $('#hm'); if (!hm) return;
+    let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const pool = [
+      ['пять минут, паркуюсь'], ['Отправила отчёт, посмотрите, пожалуйста, до пятницы.'], ['купить хлеб, молоко и батарейки'],
+      ['созвон перенесли на четверг в 15:00'], ['Идея: сделать сайт для FlowLocal как у Заметочек.'], ['да, скину ссылку на GitHub вечером'],
+      ['проверить, что профиль загружается до показа экрана'], ['В воскресенье кино в 19:30.'], ['слушай, а давай в 8 встретимся'],
+      ['Спасибо за встречу! Резюме и следующие шаги — ниже.'], ['записаться к стоматологу на следующей неделе'], ['я уже еду, буду минут через 10'],
+    ];
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const weeks = 26, dow = (today.getDay() + 6) % 7;            // пн = 0
+    const start = new Date(today); start.setDate(today.getDate() - dow - (weeks - 1) * 7);
+    const fmt = new Intl.DateTimeFormat('ru', { day: 'numeric', month: 'long' });
+    const days = [];
+    for (let i = 0; i < weeks * 7; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i);
+      const weekend = ((d.getDay() + 6) % 7) > 4, recent = i / (weeks * 7);
+      const active = rnd() < (weekend ? .35 : .55) + recent * .35;
+      const n = active ? Math.ceil(rnd() * (3 + recent * 14)) : 0;
+      days.push({ d, n, words: n * Math.round(14 + rnd() * 30), future: d > today });
+    }
+    const top = Math.max(...days.map(x => x.words));
+    const lvl = w => !w ? 0 : w / top > .75 ? 4 : w / top > .4 ? 3 : w / top > .15 ? 2 : 1;
+    const plural = (n, a, b, c) => { const x = n % 100, y = n % 10; return x > 10 && x < 15 ? c : y === 1 ? a : y > 1 && y < 5 ? b : c; };
+    const tip = x => x.n ? `${fmt.format(x.d)} — ${x.n} ${plural(x.n, 'диктовка', 'диктовки', 'диктовок')}, ${x.words} ${plural(x.words, 'слово', 'слова', 'слов')}` : `${fmt.format(x.d)} — диктовок нет`;
+    const total = days.reduce((a, x) => a + x.words, 0), active = days.filter(x => x.n).length;
+    $('#hm-total').textContent = `${total.toLocaleString('ru')} слов за полгода · ${active} ${plural(active, 'день', 'дня', 'дней')}`;
+    hm.innerHTML = days.map((x, i) => `<button class="l${lvl(x.words)}${x.n ? '' : ' empty'}${x.future ? ' future' : ''}" data-i="${i}" title="${tip(x)}" aria-label="${tip(x)}"></button>`).join('');
+    const out = $('#hm-day'), tipEl = $('#hm-tip');
+    function show(i) {
+      const x = days[i]; if (!x.n) return;
+      hm.querySelectorAll('.sel').forEach(b => b.classList.remove('sel'));
+      hm.children[i].classList.add('sel');
+      let s2 = i * 31 + 3; const r2 = () => (s2 = (s2 * 16807) % 2147483647) / 2147483647;
+      const shown = Math.min(3, x.n), items = [];
+      let h = 9 + Math.floor(r2() * 3);
+      for (let k = 0; k < shown; k++) { h += 1 + Math.floor(r2() * 4); items.push([`${String(Math.min(h, 23)).padStart(2, '0')}:${String(Math.floor(r2() * 60)).padStart(2, '0')}`, pool[Math.floor(r2() * pool.length)][0]]); }
+      out.innerHTML = `<div class="dh">${fmt.format(x.d)}<span>${x.n} · ${x.words} ${plural(x.words, 'слово', 'слова', 'слов')}</span></div>` +
+        items.reverse().map((e, k) => `<div class="de" style="animation-delay:${k * 60}ms"><time>${e[0]}</time><span>${e[1]}</span></div>`).join('');
+    }
+    hm.addEventListener('click', e => { const b = e.target.closest('button'); if (b) show(+b.dataset.i); });
+    hm.addEventListener('mouseover', e => { const b = e.target.closest('button'); if (b) tipEl.textContent = tip(days[+b.dataset.i]); });
+    hm.addEventListener('mouseleave', () => tipEl.textContent = 'Нажмите на день');
+    let last = days.length - 1; while (last > 0 && (!days[last].n || days[last].future)) last--;
+    show(last);
+    // То же самое мелко - в нарисованном окне приложения, на вкладке «История».
+    const mini = $('#hm-mini');
+    if (mini) mini.innerHTML = days.slice(-20 * 7).map(x => `<span class="l${lvl(x.words)}"${x.future ? ' style="visibility:hidden"' : ''}></span>`).join('');
+  })();
 
   // ───────── окно приложения ─────────
   const h = new Date().getHours();
