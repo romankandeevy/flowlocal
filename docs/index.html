@@ -245,6 +245,9 @@
   .dict-row .arrow { color: var(--green); text-align: center; }
   .dict-row .to { font-weight: 600; }
   .dict-row.hl { background: var(--green-soft); }
+  .code-ex .dict-row { grid-template-columns: 1fr 18px 1fr; font-size: 13.5px; }
+  .code-ex .to { font: 500 13px var(--mono); color: var(--green); overflow-wrap: anywhere; }
+  .code-ex .from { overflow-wrap: anywhere; }
   .learn { margin-top: 16px; padding: 14px; border-radius: 12px; border: 1px dashed var(--line-strong); font-size: 15px; color: var(--muted); }
   .learn .old { text-decoration: line-through; color: #ff8f8f; }
   .learn .new { color: var(--green); font-weight: 600; }
@@ -532,9 +535,7 @@
           </div>
           <div class="scene" data-scene="code">
             <div class="code"><span class="c">// Profile.swift</span>
-<span class="k">func</span> loadProfile() {
-    <span class="c">// <span class="typed" data-field="code"></span><span class="caret"></span></span>
-}</div>
+<span class="typed" data-field="code"></span><span class="caret"></span></div>
           </div>
           <div class="hud" id="hud" aria-hidden="true"><kbd><i>⌃</i><i>⇧</i><i>Space</i></kbd><span>зажато</span></div>
           <div class="said" id="said" aria-hidden="true"></div>
@@ -579,7 +580,7 @@
         <p>Для каждого приложения стиль выбирается во вкладке «Стиль».</p>
       </div>
       <div class="panel">
-        <div class="cap">Одна фраза — четыре стиля</div>
+        <div class="cap">Один и тот же голос — четыре стиля</div>
         <div class="seg" role="tablist" id="style-seg">
           <button role="tab" aria-selected="true" data-s="0">Обычный</button>
           <button role="tab" aria-selected="false" data-s="1">Переписка</button>
@@ -589,6 +590,24 @@
         <div class="style-out" id="style-out">Скину ссылку вечером.</div>
         <div class="style-desc" id="style-desc">Как в общих настройках чистки.</div>
         <div class="style-apps" id="style-apps"><span>Заметки</span><span>Pages</span><span>Safari</span></div>
+      </div>
+    </div>
+
+    <div class="row reveal">
+      <div class="txt">
+        <h3>Код — голосом</h3>
+        <p>В Xcode, VS Code и Терминале слушают <b>сразу две модели</b>: русские слова берутся у GigaAM, английские — у Parakeet, и всё склеивается по словам. Можно говорить вперемешку, как говорят программисты.</p>
+        <p>«Равно», «точка», «скобки», «кавычки» становятся знаками, английские слова — одним именем в camelCase. Другой регистр — командой: «снейк кейс», «паскаль кейс», «капс». Начали с «комментарий» — получится строка после <code>//</code>.</p>
+      </div>
+      <div class="panel">
+        <div class="cap">Сказали → получилось</div>
+        <div class="dict code-ex">
+          <div class="dict-row"><span class="from">let greeting равно кавычки привет кавычки</span><span class="arrow">→</span><span class="to">let greeting = "привет"</span></div>
+          <div class="dict-row"><span class="from">func load profile скобки открыть фигурную</span><span class="arrow">→</span><span class="to">func loadProfile() {</span></div>
+          <div class="dict-row"><span class="from">snake case user id равно 42</span><span class="arrow">→</span><span class="to">user_id = 42</span></div>
+          <div class="dict-row"><span class="from">print открыть скобку user точка name закрыть скобку</span><span class="arrow">→</span><span class="to">print(user.name)</span></div>
+          <div class="dict-row"><span class="from">комментарий проверить, что профиль загружен</span><span class="arrow">→</span><span class="to">// проверить, что профиль загружен</span></div>
+        </div>
       </div>
     </div>
 
@@ -728,7 +747,7 @@
           <div class="styles-l">
             <div class="style-item"><span class="ai" style="background:#2aabee">✈</span><span><span class="nm">Телеграм</span><br><span class="ex">скину ссылку вечером</span></span><span class="pick">Переписка</span></div>
             <div class="style-item"><span class="ai" style="background:#3b82f6">@</span><span><span class="nm">Почта</span><br><span class="ex">Скину ссылку вечером.</span></span><span class="pick">Письмо</span></div>
-            <div class="style-item"><span class="ai" style="background:#6d5bd0">⌘</span><span><span class="nm">Xcode</span><br><span class="ex">скину ссылку вечером</span></span><span class="pick">Код</span></div>
+            <div class="style-item"><span class="ai" style="background:#6d5bd0">⌘</span><span><span class="nm">Xcode</span><br><span class="ex">let userName = "Роман"</span></span><span class="pick">Код</span></div>
             <div class="style-item"><span class="ai" style="background:#8e8e95">•</span><span><span class="nm">Все остальные</span><br><span class="ex">Скину ссылку вечером.</span></span><span class="pick">Обычный</span></div>
           </div>
         </div>
@@ -913,7 +932,9 @@
       { raw: 'в воскресенье кино в семь тридцать', junk: [], out: ' В воскресенье кино в 19:30.' },
     ]},
     { app: 'code', style: 'Код', items: [
-      { raw: 'ну проверить что профиль загружается до показа экрана', junk: [0], out: 'проверить, что профиль загружается до показа экрана' },
+      { raw: 'let greeting равно кавычки привет кавычки', junk: [], out: 'let greeting = "привет"' },
+      { raw: 'func load profile скобки открыть фигурную', junk: [], out: '\nfunc loadProfile() {' },
+      { raw: 'ну return greeting новая строка закрыть фигурную', junk: [0], out: '\n    return greeting\n}' },
     ]},
   ];
   const pill = $('#demo-pill'), said = $('#said'), hud = $('#hud'), thread = $('#thread');
@@ -1021,7 +1042,7 @@
     ['Скину ссылку вечером.', 'Как в общих настройках чистки.', ['Заметки', 'Pages', 'Safari']],
     ['скину ссылку вечером', 'С маленькой буквы, без точки в конце — как пишут в мессенджерах.', ['Телеграм', 'WhatsApp', 'Slack']],
     ['Скину ссылку вечером.', 'С заглавной и точкой, строгая чистка паразитов и оборотов.', ['Почта', 'Outlook', 'Spark']],
-    ['скину ссылку вечером', 'Как сказано: без заглавной, точки и лишнего пробела.', ['Xcode', 'VS Code', 'Терминал']],
+    ['let userName = "Роман"', 'Код голосом: «равно», «точка», «скобки» — знаками, английские слова — в одно имя.', ['Xcode', 'VS Code', 'Терминал']],
   ];
   const segBtns = $$('#style-seg button');
   let styleAuto = true, styleIdx = 0;

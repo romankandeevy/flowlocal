@@ -197,6 +197,7 @@ Mac, и она старше замедления int8 из 1.25.
 | `Sources/FlowLocal/Commands.swift` | Строка меню: «Вид» (⌘1…⌘3), «Диктовка», «Найти…», «Справка» |
 | `Sources/FlowLocal/MainView.swift` | Окно: сайдбар, разделы, поле поиска; мост AppKit → сцены |
 | `Sources/FlowLocal/Home.swift`, `History.swift`, `ActivityCalendar.swift`, `Onboarding.swift` | Главная, История и её календарь, первые шаги |
+| `Sources/FlowLocal/CodeSpeech.swift`, `backend/codemerge.py` | диктовка кода: слова-знаки и имена; склейка GigaAM + Parakeet по словам и времени (`lang: code`) |
 | `Sources/FlowLocal/Dictation.swift` | Строка диктовки, клавиатура в списках, живая запись |
 | `Sources/FlowLocal/StyleView.swift`, `DictionaryView.swift` | Вкладки «Стиль» и «Словарь» |
 | `Sources/FlowLocal/StatsView.swift` | «Обзор»: цифры, график по дням |
