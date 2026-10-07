@@ -12,7 +12,7 @@ Parakeet TDT 0.6b v2 для английского переспроса.
 Протокол - строки JSON; звук идёт сразу после заголовка сырыми байтами
 (float32 little-endian, 16 кГц, моно):
 
-    -> {"cmd": "begin", "id": 7, "lang": "auto"}
+    -> {"cmd": "begin", "id": 7, "lang": "auto"}         auto | ru | en | code
     -> {"cmd": "audio", "id": 7, "samples": 4000} + байты      каждые ~0.25 с
     -> {"cmd": "finish", "id": 7}
     <- {"id": 7, "text": "...", "lang": "ru", "sec": 0.31, "audio_sec": 60.2,
@@ -41,6 +41,7 @@ import wave
 
 import numpy as np
 
+import codemerge
 import langdetect
 
 SR = 16000
@@ -281,6 +282,18 @@ def recognize(model, audio: np.ndarray) -> str:
     return join_parts(parts)
 
 
+def recognize_words(model, audio: np.ndarray) -> list:
+    """Как recognize, но слова со временем - для склейки в режиме кода."""
+    if audio.size < SR // 20:
+        return []
+    bounds = [0, *cut_points(audio), audio.size]
+    out = []
+    ts = model.with_timestamps()
+    for a, b in zip(bounds, bounds[1:]):
+        out += codemerge.words(ts.recognize(audio[a:b], sample_rate=SR), a / SR)
+    return out
+
+
 # --- паузы -------------------------------------------------------------------
 
 def find_pause(audio: np.ndarray, allow_short: bool) -> tuple[int, float] | None:
@@ -465,6 +478,14 @@ class Engine:
         ждём: пока грузится, лучше русский текст сейчас, чем очередь на минуту."""
         if lang == "en" and self.en is not None:
             return recognize(self.en, audio), "en"
+        if lang == "code" and self.en is not None:
+            # Код диктуют вперемешку: русское - от GigaAM, английское - от
+            # Parakeet, по словам и по времени (codemerge.py). Две модели на
+            # кусок - вдвое дольше, но только в приложениях со стилем «Код».
+            ru = recognize_words(self.ru, audio)
+            en = recognize_words(self.en, audio)
+            text = codemerge.merge(ru, en)
+            return text, codemerge.lang_of(text)
         text = recognize(self.ru, audio)
         if lang == "auto" and self.en is not None and is_english(text):
             en_text = recognize(self.en, audio)
@@ -733,6 +754,11 @@ def read_wav(path: str) -> np.ndarray:
 
 
 def main() -> None:
+    lang = "auto"
+    if "--lang" in sys.argv:
+        i = sys.argv.index("--lang")
+        lang = sys.argv[i + 1]
+        del sys.argv[i:i + 2]
     if len(sys.argv) >= 3 and sys.argv[1] in ("--file", "--stream-file"):
         eng = Engine()
         eng.ru = load(RU_MODEL)
@@ -740,13 +766,13 @@ def main() -> None:
         audio = read_wav(sys.argv[2])
         if sys.argv[1] == "--file":
             t0 = time.time()
-            text, lang = eng.segmented(audio, "auto")
+            text, lang = eng.segmented(audio, lang)
             print(json.dumps({"text": text, "lang": lang, "sec": round(time.time() - t0, 3),
                               "audio_sec": round(audio.size / SR, 2)}, ensure_ascii=False))
             return
         # Как при диктовке: порции по 0.25 с в реальном времени, потом finish.
         threading.Thread(target=eng.worker, daemon=True).start()
-        eng.begin(1, "auto")
+        eng.begin(1, lang)
         step = int(0.25 * SR)
         for i in range(0, audio.size, step):
             eng.add_audio(1, audio[i:i + step])

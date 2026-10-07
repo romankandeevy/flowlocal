@@ -160,7 +160,7 @@ cp "$HERE/build/FlowLocal" "$APP/Contents/MacOS/FlowLocal"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 # Бэкенд едет внутри приложения - .app самодостаточен, репозиторий можно
 # двигать и удалять.
-cp backend/server.py backend/langdetect.py backend/requirements.txt "$APP/Contents/Resources/backend/"
+cp backend/server.py backend/langdetect.py backend/codemerge.py backend/requirements.txt "$APP/Contents/Resources/backend/"
 # Локализация ru: меню «Правка», «Окно», «Службы», «Завершить», поле поиска и
 # «Отменить удаление…» macOS подписывает по-русски, в тон нашим строкам.
 mkdir -p "$APP/Contents/Resources/ru.lproj"

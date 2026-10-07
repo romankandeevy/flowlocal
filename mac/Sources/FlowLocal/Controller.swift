@@ -238,7 +238,7 @@ final class Controller {
         // Выключается: defaults write com.flowlocal.mac pauseMedia -bool false
         if UserDefaults.standard.object(forKey: "pauseMedia") as? Bool ?? true { MediaPause.begin() }
         if state.sounds { Sounds.start?.play() }
-        backend.begin(id, lang: state.langMode.rawValue)
+        backend.begin(id, lang: recognitionLang(for: target.id))
 
     }
 
@@ -319,6 +319,12 @@ final class Controller {
         }
     }
 
+    /// В приложениях со стилем «Код» - две модели вперемешку (backend
+    /// codemerge.py): английские имена и русские слова-знаки в одной фразе.
+    private func recognitionLang(for appID: String?) -> String {
+        state.style(for: appID) == .code ? "code" : state.langMode.rawValue
+    }
+
     private func finish() {
         guard case .recording = state.phase else { return }
         let (all, rest) = stopRecording()
@@ -360,7 +366,7 @@ final class Controller {
     private func fallback(_ audio: [Float], draft: Entry) {
         let id = backend.newID()
         session = id
-        backend.transcribe(id, audio, lang: state.langMode.rawValue, timeout: 20 + draft.seconds * 0.5) { [weak self] result in
+        backend.transcribe(id, audio, lang: recognitionLang(for: draft.appID), timeout: 20 + draft.seconds * 0.5) { [weak self] result in
             guard let self, id == self.session else { return }
             switch result {
             case let .success(r):
@@ -379,7 +385,7 @@ final class Controller {
         // рестарт бэкенда мог совпасть с новой записью.
         guard case .idle = state.phase else { return }
         orphan = nil
-        backend.transcribe(backend.newID(), audio, lang: state.langMode.rawValue,
+        backend.transcribe(backend.newID(), audio, lang: recognitionLang(for: draft.appID),
                            timeout: 30 + draft.seconds) { [weak self] result in
             guard let self else { return }
             var entry = draft
@@ -454,7 +460,7 @@ final class Controller {
                     Log.write("перераспознать: нет файла \(name)")
                     return
                 }
-                self.backend.transcribe(self.backend.newID(), samples, lang: self.state.langMode.rawValue,
+                self.backend.transcribe(self.backend.newID(), samples, lang: self.recognitionLang(for: entry.appID),
                                         timeout: 30 + entry.seconds) { result in
                     self.state.rerecognizing.remove(entry.id)
                     guard case let .success(r) = result else {
