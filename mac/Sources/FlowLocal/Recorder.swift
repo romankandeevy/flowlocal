@@ -20,6 +20,14 @@ final class Recorder {
     private var lastBuffer = Date()
     // Только главный поток.
     private var engine: AVAudioEngine?
+    // Выбранный микрофон, который не системный, читаем отдельной сессией
+    // захвата: у AVAudioEngine вход и выход - один аудиоюнит на одно
+    // устройство, и встроенный микрофон при наушниках на выходе даёт -10868.
+    private var capture: AVCaptureSession?
+    private var sink: CaptureSink?
+    /// Микрофон, который не поднялся, и системный вход на тот момент: пока
+    /// вход тот же, заново не пробуем (иначе каждая диктовка платит за провал).
+    private static var bad: (uid: String, systemInput: AudioDeviceID?)?
     private var observer: NSObjectProtocol?
     private var format: AVAudioFormat?
     private var restartPending = false
@@ -58,16 +66,7 @@ final class Recorder {
         gainer = WhisperGain()
         lock.unlock()
         restarts = 0
-        do {
-            try startEngine()
-        } catch where deviceUID != nil {
-            // Выбранный микрофон не запускается (встроенный при подключённых
-            // наушниках даёт -10868) - запись важнее выбора: берём системный.
-            Log.write("выбранный микрофон не открылся (\(error.localizedDescription)) - беру системный")
-            teardown()
-            deviceUID = nil
-            try startEngine()
-        }
+        try startEngine()
         if whisper { boostInput() }
         // Отсчёт сторожа - от поднятого движка: на Bluetooth открытие идёт
         // до нескольких секунд, и это не тишина.
@@ -81,16 +80,23 @@ final class Recorder {
     // прежнего устройства: подключили AirPods между диктовками - и installTap
     // с устаревшим форматом бросает исключение Objective-C, то есть падение.
     private func startEngine() throws {
+        if let uid = deviceUID {
+            let system = AudioDevices.defaultInput()?.id
+            if let device = AudioDevices.device(uid: uid), device.id != system, !Recorder.isBad(uid) {
+                do {
+                    try startCapture(uid)
+                    return
+                } catch {
+                    Log.write("выбранный микрофон не открылся (\(error.localizedDescription)) - беру системный")
+                    Recorder.bad = (uid, system)
+                    deviceUID = nil
+                }
+            } else if Recorder.isBad(uid) {
+                deviceUID = nil
+            }
+        }
         let engine = AVAudioEngine()
         let input = engine.inputNode
-        // Выбранный микрофон - свойством аудиоюнита входа, до чтения формата:
-        // формат у каждого устройства свой.
-        if let uid = deviceUID, let device = AudioDevices.device(uid: uid), let unit = input.audioUnit {
-            var id = device.id
-            let st = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global,
-                                          0, &id, UInt32(MemoryLayout<AudioDeviceID>.size))
-            if st != noErr { Log.write("микрофон \(device.name) не выбрался (\(st)) - беру системный") }
-        }
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw Recorder.error("Микрофон не найден")
@@ -126,7 +132,46 @@ final class Recorder {
         self.format = format
     }
 
+    private static func isBad(_ uid: String) -> Bool {
+        guard let bad, bad.uid == uid else { return false }
+        if bad.systemInput == AudioDevices.defaultInput()?.id { return true }
+        Recorder.bad = nil
+        return false
+    }
+
+    private func startCapture(_ uid: String) throws {
+        guard let device = AVCaptureDevice(uniqueID: uid) else { throw Recorder.error("Микрофон не найден") }
+        let session = AVCaptureSession()
+        let input = try AVCaptureDeviceInput(device: device)
+        let output = AVCaptureAudioDataOutput()
+        guard session.canAddInput(input), session.canAddOutput(output) else {
+            throw Recorder.error("Микрофон не подключается к записи")
+        }
+        session.addInput(input)
+        session.addOutput(output)
+        let sink = CaptureSink { [weak self] buf in self?.consume(buf) }
+        output.setSampleBufferDelegate(sink, queue: DispatchQueue(label: "flowlocal.capture"))
+        lock.lock()
+        converter = AVAudioConverter(from: target, to: target)
+        lock.unlock()
+        session.startRunning()
+        guard session.isRunning else {
+            lock.lock()
+            converter = nil
+            lock.unlock()
+            throw Recorder.error("Сессия захвата не запустилась")
+        }
+        self.capture = session
+        self.sink = sink
+    }
+
     private func teardown() {
+        if let capture {
+            capture.stopRunning()
+            for output in capture.outputs { (output as? AVCaptureAudioDataOutput)?.setSampleBufferDelegate(nil, queue: nil) }
+        }
+        capture = nil
+        sink = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
         engine?.inputNode.removeTap(onBus: 0)
@@ -254,6 +299,7 @@ final class Recorder {
         // отдаёт. До конца записи берём системный.
         if deviceUID != nil {
             Log.write("выбранный микрофон молчит - переключаюсь на системный")
+            Recorder.bad = (deviceUID!, AudioDevices.defaultInput()?.id)
             deviceUID = nil
         }
         Log.write(String(format: "микрофон молчит %.1f с - перезапускаю движок", silent))
@@ -315,5 +361,23 @@ final class Recorder {
 
     private static func error(_ msg: String) -> NSError {
         NSError(domain: "FlowLocal", code: 1, userInfo: [NSLocalizedDescriptionKey: msg])
+    }
+}
+
+private final class CaptureSink: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
+    private let handler: (AVAudioPCMBuffer) -> Void
+    init(_ handler: @escaping (AVAudioPCMBuffer) -> Void) { self.handler = handler }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer,
+                       from connection: AVCaptureConnection) {
+        guard let desc = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
+        let n = CMSampleBufferGetNumSamples(sampleBuffer)
+        guard n > 0 else { return }
+        let format = AVAudioFormat(cmAudioFormatDescription: desc)
+        guard let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(n)) else { return }
+        buf.frameLength = AVAudioFrameCount(n)
+        guard CMSampleBufferCopyPCMDataIntoAudioBufferList(sampleBuffer, at: 0, frameCount: Int32(n),
+                                                           into: buf.mutableAudioBufferList) == noErr else { return }
+        handler(buf)
     }
 }

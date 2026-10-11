@@ -74,7 +74,7 @@ struct HotkeyPreset: Identifiable, Equatable, Codable {
     }
 
     /// Сочетание убрали в Hub Settings (крестик в поле) - хоткея нет.
-    var isEnabled: Bool { modifiers != 0 }
+    var isEnabled: Bool { modifiers != 0 || id == "bare" }
 
     private static let modifierTable: [(name: String, carbon: Int, key: String)] = [
         ("control", controlKey, "CTRL"), ("option", optionKey, "OPTION"),
@@ -83,7 +83,8 @@ struct HotkeyPreset: Identifiable, Equatable, Codable {
 
     /// Модификаторы словами, как их хранит Hub Settings: control, option, shift, command.
     var modifierNames: [String] {
-        Self.modifierTable.filter { modifiers & UInt32($0.carbon) != 0 }.map(\.name)
+        if id == "bare" { return ["none"] }
+        return Self.modifierTable.filter { modifiers & UInt32($0.carbon) != 0 }.map(\.name)
     }
 
     /// Комбо, которые ломают систему, если их перехватить глобально.
@@ -110,7 +111,7 @@ struct HotkeyPreset: Identifiable, Equatable, Codable {
         kVK_PageDown: "PGDN", kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑",
         kVK_DownArrow: "↓", kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4",
         kVK_F5: "F5", kVK_F6: "F6", kVK_F7: "F7", kVK_F8: "F8", kVK_F9: "F9",
-        kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12",
+        kVK_F13: "F13", kVK_F14: "F14", kVK_F15: "F15", kVK_F16: "F16", kVK_F17: "F17", kVK_F18: "F18", kVK_F19: "F19", kVK_F20: "F20", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12",
     ]
 
     /// Имя клавиши по коду: буквы - по латинской раскладке, какая бы ни была включена.
@@ -136,6 +137,11 @@ struct HotkeyPreset: Identifiable, Equatable, Codable {
 extension HotkeyPreset {
     /// Сочетание из Hub Settings: код клавиши и модификаторы словами. Без модификаторов - сочетания нет.
     init(keyCode: Int, modifierNames names: [String]) {
+        // «none» - функциональная клавиша без модификаторов (F5): Hub Settings пишет её так.
+        if names.contains("none") {
+            self.init(id: "bare", keyCode: UInt32(keyCode), modifiers: 0, keys: [Self.keyName(keyCode)])
+            return
+        }
         let used = Self.modifierTable.filter { names.contains($0.name) }
         let mods = used.reduce(UInt32(0)) { $0 | UInt32($1.carbon) }
         self.init(id: "custom", keyCode: UInt32(keyCode), modifiers: mods,
