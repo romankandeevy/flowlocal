@@ -84,19 +84,26 @@ SEEK_SEC = 8.0
 # --- разбор на ходу (old/streaming.py) --------------------------------------
 WIN = int(0.2 * SR)          # окно громкости
 QUIET_RATIO = 0.18           # пауза - заметно тише среднего по куску
-MIN_TAIL_SEC = 2.5           # с какой длины берёмся резать (~5 слов): чаще окончательные куски
+# Модели нужен контекст: пунктуацию и слова она решает по всей фразе. Замер
+# 2026-10-11 на 80 записях владельца, эталон - каждая запись одним куском:
+# куски от 2.5 с с резом по вдоху расходились с эталоном на 8.7% слов и 14.5%
+# слов со знаками («И решил. Как лошара слиться.», «ебанский кот» вместо
+# «ебаный код»). Куски от 6 с с резом только по настоящей паузе - 4.8% и 7.1%
+# при ожидании после отпускания ~0.1 с: хвост почти всегда разобран заранее.
+MIN_TAIL_SEC = 6.0           # с какой длины берёмся резать окончательный кусок
 KEEP_TAIL_SEC = 1.8          # последние 1.8 с не трогаем: человек ещё говорит
-MAX_FEED_SEC = 10.0          # кусок не длиннее: отпускание не ждёт долгий кусок
+MAX_FEED_SEC = 12.0          # кусок не длиннее: отпускание не ждёт долгий кусок
 LONG_PAUSE_WINS = 3          # пауза от 0.6 с - граница фразы, режем по ней
-SHORT_PAUSE_OK_SEC = 4.0     # 200 мс паузы хватает, только если накопилось столько
+SHORT_PAUSE_OK_SEC = 12.0    # 200 мс паузы хватает, только если накопилось столько
+FORCE_CUT_SEC = 14.0         # монолог без пауз: дальше режем по самому тихому месту
 # Упреждение начинаем рано: живой замер - человек отпускает клавишу сразу за
 # последним словом, и при 0.35 с тишины и раз в 2 с заготовка не успевала
 # начаться вовсе (46 с речи, хвост 2.6 с, ожидание 1.4 с). Начатая заранее,
 # она к отпусканию уже наполовину посчитана - finish её дождётся.
 SPEC_SILENCE_SEC = 0.3       # тишина в конце - «договорил», разбираем заранее
 SPEC_MIN_GAP_SEC = 1.0
-MIN_PIECE_SEC = 1.0          # куски короче - лишний прогон модели и риск разрезать слово
-SPEC_MAX_TAIL_SEC = 10.0
+MIN_PIECE_SEC = 4.0          # куски короче - мало контекста, модель ставит лишние точки
+SPEC_MAX_TAIL_SEC = 16.0
 TICK = 0.2
 # Черновик хвоста - то, что сказано после последнего окончательного куска,
 # чтобы слова в окне появлялись сразу, а не после паузы и 5 с речи. Хвост
@@ -140,29 +147,52 @@ def claim_stdout() -> None:
 # --- стыки кусков -------------------------------------------------------------
 
 _SENT_END = ("." , "!", "?", "…", ":", ";")
-_CAP_WORD = re.compile(r"^([А-ЯЁ])([а-яё])")
+_CAP_WORD = re.compile(r"^([А-ЯЁ])([а-яё]|\s)")
 
 
-def join_parts(texts) -> str:
+_LONG_GAP_SEC = LONG_PAUSE_WINS * WIN / SR
+# Слова, перед которыми по-русски почти всегда запятая: «…, потому что».
+_COMMA_BEFORE = {"что", "чтобы", "потому", "поэтому", "но", "однако", "зато", "который", "которая",
+                 "которые", "которое", "которого", "которой", "если", "когда", "пока", "хотя",
+                 "как", "где", "куда", "откуда", "почему", "зачем", "чем", "либо", "иначе", "тогда"}
+
+
+def join_parts(items) -> str:
     """Склейка кусков разбора на ходу.
 
-    Каждый кусок модель пишет как отдельную фразу - с заглавной. Кусок режется
-    и по короткой паузе посреди предложения, и тогда на стыке выходило «я
-    Хочу» (89 таких на 80 диктовок владельца). Если предыдущий кусок не
-    закончил предложение, у обычного русского слова заглавную убираем. «Я»,
-    аббревиатуры (второй символ заглавный) и латиницу не трогаем: там
-    заглавная чаще к месту.
+    items - тексты или пары (текст, пауза после куска в секундах).
+
+    Каждый кусок модель пишет как отдельную фразу: с заглавной и точкой в
+    конце. Но кусок режется и по короткой паузе посреди предложения - вдох,
+    запинка - и тогда выходило «Я, тут получил двойку. И решил. Как лошара
+    слиться.». Поэтому на стыке после короткой паузы (меньше 0.6 с) точку
+    предыдущего куска снимаем, а у обычного русского слова убираем заглавную;
+    перед «что», «потому», «но» и им подобными ставим запятую. Длинная пауза -
+    граница фразы, там точка модели остаётся. «Я», аббревиатуры (второй символ
+    заглавный) и латиницу не трогаем: там заглавная чаще к месту.
     """
     out: list[str] = []
-    for t in texts:
+    gap = 0.0
+    for item in items:
+        t, after = item if isinstance(item, tuple) else (item, 0.0)
         t = (t or "").strip()
         if not t:
             continue
-        if out and not out[-1].endswith(_SENT_END):
-            m = _CAP_WORD.match(t)
-            if m and not t.startswith("Я "):
-                t = m.group(1).lower() + t[1:]
+        if out:
+            prev = out[-1]
+            if gap < _LONG_GAP_SEC and prev.endswith(".") and not prev.endswith(".."):
+                prev = prev[:-1]
+            if not prev.endswith(_SENT_END):
+                m = _CAP_WORD.match(t)
+                if m and not t.startswith("Я "):
+                    t = m.group(1).lower() + t[1:]
+                first = re.match(r"[\w-]+", t)
+                if (first and first.group(0).lower() in _COMMA_BEFORE
+                        and not prev.endswith((",", "—", "-"))):
+                    prev += ","
+            out[-1] = prev
         out.append(t)
+        gap = after
     return " ".join(out).strip()
 
 
@@ -191,9 +221,9 @@ def is_english(text: str) -> bool:
             or (lat >= 4 and lat >= 3 * cyr))
 
 
-def majority(parts: list[tuple[str, str]]) -> str:
-    en = sum(len(t.split()) for t, lang in parts if lang == "en")
-    ru = sum(len(t.split()) for t, lang in parts if lang != "en")
+def majority(parts: list[tuple]) -> str:
+    en = sum(len(p[0].split()) for p in parts if p[1] == "en")
+    ru = sum(len(p[0].split()) for p in parts if p[1] != "en")
     return "en" if en > ru else "ru"
 
 
@@ -384,7 +414,7 @@ class Session:
         self.size = 0
         self.consumed = 0
         self.streamed = 0
-        self.parts: list[tuple[str, str]] = []
+        self.parts: list[tuple[str, str, float]] = []  # текст, язык, пауза после
         self.tried_at = 0
         self.spec: tuple[int, str, str, float] | None = None
         self.spec_at = 0
@@ -504,7 +534,7 @@ class Engine:
         """
         limit = int(MAX_FEED_SEC * SR)
         keep = int(KEEP_TAIL_SEC * SR)
-        parts: list[tuple[str, str]] = []
+        parts: list[tuple[str, str, float]] = []
         pos = 0
         while audio.size - pos > limit:
             found = find_pause(audio[pos:pos + limit + keep], True)
@@ -512,12 +542,12 @@ class Engine:
             cut = max(cut, WIN)
             text, got = self.rec_piece(audio[pos:pos + cut], lang)
             if text:
-                parts.append((text, got))
+                parts.append((text, got, found[1] if found is not None else 0.0))
             pos += cut
         text, got = self.rec_piece(audio[pos:], lang)
         if text:
-            parts.append((text, got))
-        return join_parts(t for t, _ in parts), majority(parts)
+            parts.append((text, got, 0.0))
+        return join_parts((t, g) for t, _, g in parts), majority(parts)
 
     def _has_work(self) -> bool:
         s = self.session
@@ -566,7 +596,7 @@ class Engine:
                 inner = find_pause(audio[:limit + int(KEEP_TAIL_SEC * SR)], True)
                 lo = int(MIN_PIECE_SEC * SR)
                 cut, pause = inner if inner is not None else (lo + quietest(audio[lo:limit]), 0.0)
-            elif cut is None and pending > 2 * limit:
+            elif cut is None and pending > FORCE_CUT_SEC * SR:
                 lo = int(MIN_PIECE_SEC * SR)
                 cut, pause = lo + quietest(audio[lo:limit]), 0.0
             # Пауза у самого начала даёт огрызок в полсекунды (живой замер:
@@ -585,8 +615,8 @@ class Engine:
                     s.interim = ""
                     s.interim_at = 0
                     if text:
-                        s.parts.append((text, lang))
-                    joined = join_parts(t for t, _ in s.parts)
+                        s.parts.append((text, lang, pause))
+                    joined = join_parts((t, g) for t, _, g in s.parts)
                 log(f"на ходу: {cut / SR:.1f} с (пауза {pause:.1f} с, {lang}), "
                     f"осталось {(total - start - cut) / SR:.1f} с")
                 # Уже разобранное - окну: расшифровка в ходе речи и счёт слов.
@@ -607,7 +637,7 @@ class Engine:
                     s.spec = (total, text, lang, loud)
                     s.interim = text
                     s.interim_at = total
-                    joined = join_parts(t for t, _ in s.parts)
+                    joined = join_parts((t, g) for t, _, g in s.parts)
                 else:
                     return
             self._emit_partial(s, joined, text)
@@ -627,7 +657,7 @@ class Engine:
                 s.interim = text
                 s.interim_at = total
                 s.interim_next = time.time() + cost * INTERIM_COST_RATIO
-                joined = join_parts(t for t, _ in s.parts)
+                joined = join_parts((t, g) for t, _, g in s.parts)
             self._emit_partial(s, joined, text)
 
     def _emit_partial(self, s: Session, final: str, interim: str) -> None:
@@ -649,7 +679,7 @@ class Engine:
         if spec is not None and spec[0] <= total and is_quiet(after_spec, spec[3]):
             spec_hit = True
             if spec[1]:
-                parts.append((spec[1], spec[2]))
+                parts.append((spec[1], spec[2], 0.0))
         elif tail.size >= SR // 20:
             text, lang = self.rec_piece(tail, s.lang)
             # Хвост из пары слов определителю не судим (меньше трёх слов) -
@@ -660,8 +690,8 @@ class Engine:
                 if en_text:
                     text, lang = en_text, "en"
             if text:
-                parts.append((text, lang))
-        emit({"id": s.id, "text": join_parts(t for t, _ in parts),
+                parts.append((text, lang, 0.0))
+        emit({"id": s.id, "text": join_parts((t, g) for t, _, g in parts),
               "lang": majority(parts), "sec": round(time.time() - s.finish_t0, 3),
               "audio_sec": round(total / SR, 2), "streamed_sec": round(s.streamed / SR, 2),
               "tail_sec": 0.0 if spec_hit else round((total - start) / SR, 2),

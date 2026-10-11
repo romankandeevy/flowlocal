@@ -23,3 +23,5 @@ notes/
 
 # macOS
 .DS_Store
+
+mac/.build/

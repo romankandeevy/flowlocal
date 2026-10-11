@@ -444,6 +444,12 @@ final class AppState: ObservableObject {
 
     /// Распознанное - в текст диктовки: чистка, словарь, отделка стиля.
     func process(_ raw: String, style: TextStyle) -> String {
+        // «Переписка» - для одной короткой реплики. Длиннее одного предложения
+        // это уже связный текст: заглавные и точки как в обычном стиле.
+        if style == .chat {
+            let full = TextCleaner.clean(raw, cleanup(for: .standard))
+            if TextStyle.sentenceCount(full) > 1 { return Vocabulary.apply(full, terms: vocabulary) }
+        }
         let clean = TextCleaner.clean(raw, cleanup(for: style))
         return style.finish(Vocabulary.apply(clean, terms: vocabulary))
     }

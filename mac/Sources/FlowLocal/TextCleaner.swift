@@ -155,6 +155,9 @@ enum TextCleaner {
         }
     }
 
+    private static let commaBefore: Set<String> = [
+        "что", "чтобы", "потому", "поэтому", "но", "однако", "зато", "который", "которая", "которые",
+        "если", "когда", "пока", "хотя", "как", "где", "куда", "откуда", "почему", "зачем", "чем", "а"]
     private static let sentenceEnd: Set<String> = [".", "!", "?", "…"]
     private static let noSpaceBefore: Set<String> = [",", ".", "!", "?", "…", ":", ";", ")", "»", "%"]
     private static let noSpaceAfter: Set<String> = ["(", "«"]
@@ -255,6 +258,15 @@ enum TextCleaner {
             // остаётся: «Я думаю, ну, что» → «Я думаю, что».
             if let nextIdx, tokens[nextIdx].text == "," {
                 commas.insert(nextIdx)
+                // «Я, значит, тут» → «Я тут»: запятая после одного слова в
+                // начале оборота была только из-за вставки. Перед «что»,
+                // «потому» и им подобными запятая нужна и так.
+                if pos >= 2, let prevComma = Optional(live[pos - 1]), tokens[prevComma].text == ",",
+                   tokens[live[pos - 2]].isWord, pos < 3 || !tokens[live[pos - 3]].isWord,
+                   let after = live.first(where: { $0 > nextIdx }), tokens[after].isWord,
+                   !commaBefore.contains(tokens[after].lower) {
+                    commas.insert(prevComma)
+                }
             }
             changed = true
             live = tokens.indices.filter { !tokens[$0].removed }
@@ -296,6 +308,8 @@ enum TextCleaner {
                     if sentenceEnd.contains(l.text) || l.text == "?" || l.text == "!" {
                         if t.text == "," || t.text == ";" || t.text == ":" { continue }
                         if l.text == t.text { continue }
+                        // «Понял?.» - после «?» и «!» точка лишняя.
+                        if t.text == "." { continue }
                         // «.?» - оставляем сильнейший.
                         if l.text == "." { out.removeLast() }
                     } else if l.text == "," || l.text == ";" || l.text == ":" {
@@ -339,7 +353,18 @@ enum TextCleaner {
         ("Hub Satings", "Hub Settings"), ("Habsetings", "Hub Settings"), ("Hub Setings", "Hub Settings"),
         ("клудкод", "Claude Code"), ("клод код", "Claude Code"), ("клоткод", "Claude Code"),
         ("Snaphat", "Snapchat"), ("Снапчат", "Snapchat"),
-        ("гит-хап", "GitHub"), ("гитхаб", "GitHub"), ("гит хаб", "GitHub"),
+        ("Flow Loce", "Flow Local"), ("Flow Locl", "Flow Local"), ("Flo Loco", "Flow Local"),
+        ("Flow Loco", "Flow Local"), ("Flo Locl", "Flow Local"),
+        ("флокал", "Flow Local"), ("флоу локал", "Flow Local"),
+        ("Gitchap Ages", "GitHub Pages"), ("Geatchap Pace", "GitHub Pages"), ("Gitchap Pages", "GitHub Pages"),
+        ("гидхаб пейджис", "GitHub Pages"), ("гитхаб пейджес", "GitHub Pages"),
+        ("Claud Code", "Claude Code"), ("Лод Код", "Claude Code"), ("Lod Code", "Claude Code"),
+        ("pul recvest", "pull request"), ("пулю ревест", "pull request"), ("пул ревест", "pull request"),
+        ("пулл реквест", "pull request"), ("пулреквест", "pull request"),
+        ("клод койот", "Claude Code"), ("клад коут", "Claude Code"), ("клод коут", "Claude Code"),
+        ("мейн бренч", "main branch"), ("мэйн бранч", "main branch"),
+        ("гидхаб", "GitHub"), ("гит-хап", "GitHub"), ("верцель", "Vercel"), ("версель", "Vercel"),
+        ("супабейс", "Supabase"), ("супа бейс", "Supabase"), ("пул реквест", "pull request"), ("гитхаб", "GitHub"), ("гит хаб", "GitHub"),
         ("Ритми", "README"), ("ридми", "README"),
         ("вейп-кодер", "вайб-кодер"), ("вейп-кодинг", "вайб-кодинг"),
         ("motion disiна", "motion design"), ("Моушн дизайн", "motion design"),
