@@ -14,7 +14,7 @@ struct AppCommands: Commands {
         // Приложение не документное: «Новое» в «Файле» ни к чему.
         CommandGroup(replacing: .newItem) {}
 
-        // «Настройки…» ⌘, - модуль Flow в Hub Settings.
+        // «Настройки…» ⌘, - раздел «Настройки» главного окна.
         CommandGroup(replacing: .appSettings) {
             Button("Настройки…", action: actions.openSettings)
                 .keyboardShortcut(",")

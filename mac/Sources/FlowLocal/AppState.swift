@@ -17,10 +17,10 @@ enum BackendState: Equatable {
     case failed(String)
 }
 
-/// Разделы главного окна - пункты сайдбара. Настроек в окне нет: они в
-/// Hub Settings, ⌘, открывает его.
+/// Разделы главного окна - пункты сайдбара. Настройки - последний пункт,
+/// ⌘, открывает его.
 enum Tab: String, CaseIterable, Identifiable {
-    case home, history, stats, style, dictionary
+    case home, history, stats, style, dictionary, settings
 
     var id: String { rawValue }
     var title: String {
@@ -30,6 +30,7 @@ enum Tab: String, CaseIterable, Identifiable {
         case .stats: return "Обзор"
         case .style: return "Стиль"
         case .dictionary: return "Словарь"
+        case .settings: return "Настройки"
         }
     }
 
@@ -40,6 +41,7 @@ enum Tab: String, CaseIterable, Identifiable {
         case .stats: return "chart.bar"
         case .style: return "textformat"
         case .dictionary: return "character.book.closed"
+        case .settings: return "gearshape"
         }
     }
 
@@ -302,8 +304,8 @@ final class AppState: ObservableObject {
     @Published var playing: UUID?
     @Published var rerecognizing: Set<UUID> = []
 
-    // Настройки. Меняют их в Hub Settings: он пишет эти же ключи UserDefaults
-    // и зовёт HubSync, а тот ставит новые значения сюда.
+    // Настройки. Меняют их в разделе «Настройки» (SettingsView); Hub Settings
+    // пишет те же ключи UserDefaults и зовёт HubSync, а тот ставит новые значения сюда.
     @Published var insertAutomatically: Bool {
         didSet { UserDefaults.standard.set(insertAutomatically, forKey: "insertAutomatically") }
     }

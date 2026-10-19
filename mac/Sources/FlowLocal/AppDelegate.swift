@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         state.$showInDock.dropFirst().sink { [weak self] _ in
             DispatchQueue.main.async { self?.applyDockPolicy() }
         }.store(in: &bag)
-        // Сочетания меняют в Hub Settings - перерегистрируем.
+        // Сочетания поменяли (в настройках или в Hub Settings) - перерегистрируем.
         state.$hotkey.dropFirst().map { _ in () }.merge(with: state.$toggleHotkey.dropFirst().map { _ in () })
             .sink { [weak self] in
                 DispatchQueue.main.async { self?.controller.bindHotkeys() }
@@ -107,7 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             openLog: { NSWorkspace.shared.open(Log.fileURL) },
             retrySetup: { [weak self] in self?.controller.startBackend() },
             openRecordings: { NSWorkspace.shared.open(AudioStore.dir) },
-            openSettings: { HubSync.openSettings() },
+            openSettings: { [weak self] in self?.openSettings() },
+            setLaunchAtLogin: { [weak self] on in self?.setLaunchAtLogin(on) },
+            bindHotkeys: { [weak self] in self?.controller.bindHotkeys() },
+            unbindHotkeys: { [weak self] in self?.controller.unbindHotkeys() },
             showMain: { SceneBridge.showMain() },
             showTutorial: { [weak self] in self?.showTutorial() },
             find: { [weak self] in
@@ -131,7 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Без значка в Доке приложение живёт в строке меню. Оба сразу спрятать
-    /// нельзя - иначе до окна не добраться: это правило держит HubSync.
+    /// нельзя - иначе до окна не добраться: это правило держит SettingsView.
     private func applyDockPolicy() {
         NSApp.setActivationPolicy(state.showInDock ? .regular : .accessory)
         if !state.showInDock {
@@ -208,7 +211,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleDictation() { controller.toggleDictation() }
     @objc private func openMain() { SceneBridge.showMain() }
-    @objc private func openSettings() { HubSync.openSettings() }
+    @objc private func openSettings() {
+        state.tab = .settings
+        SceneBridge.showMain()
+    }
     @objc private func openTutorial() { showTutorial() }
 
     private func updateStatusIcon(_ phase: Phase) {

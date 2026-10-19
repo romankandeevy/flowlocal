@@ -13,8 +13,12 @@ struct AppActions {
     /// Ещё раз завести окружение распознавания (не скачалось - нет сети).
     var retrySetup: () -> Void = {}
     var openRecordings: () -> Void = {}
-    /// Настройки - в Hub Settings.
+    /// ⌘, и шестерёнка в сайдбаре: раздел «Настройки».
     var openSettings: () -> Void = {}
+    var setLaunchAtLogin: (Bool) -> Void = { _ in }
+    /// Пока ждём новое сочетание, свои сочетания не слушаем: иначе они бы и сработали.
+    var bindHotkeys: () -> Void = {}
+    var unbindHotkeys: () -> Void = {}
     var showMain: () -> Void = {}
     var showTutorial: () -> Void = {}
     var find: () -> Void = {}
@@ -53,6 +57,7 @@ struct MainView: View {
                     case .stats: StatsView()
                     case .style: StyleView()
                     case .dictionary: DictionaryView()
+                    case .settings: SettingsView(actions: actions)
                     }
                 }
                 .id(state.tab)

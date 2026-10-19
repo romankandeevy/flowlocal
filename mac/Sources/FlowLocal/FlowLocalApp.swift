@@ -1,8 +1,8 @@
 import SwiftUI
 
 // Точка входа: одно окно без заголовка - «светофоры» лежат на сайдбаре.
-// Своих настроек у Flow нет: они в Hub Settings, ⌘, открывает его на
-// модуле Flow (HubSync).
+// Настройки - раздел этого же окна, ⌘, открывает его. Hub Settings
+// по-прежнему может менять те же ключи (HubSync).
 @main
 struct FlowLocalApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate

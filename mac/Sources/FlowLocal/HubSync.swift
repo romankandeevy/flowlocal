@@ -1,7 +1,8 @@
 import AppKit
 
-// Настройки Flow живут в Hub Settings (apps/hub-settings): своего окна настроек у Flow нет. Хаб меняет
-// их прямо в UserDefaults Flow и присылает распределённое уведомление "com.roman.suite.flow.settings".
+// Настройки Flow правят в разделе «Настройки» окна (SettingsView). Hub Settings (Мак-приложения/hub-settings)
+// остаётся вторым способом: он меняет те же ключи в UserDefaults Flow и присылает распределённое
+// уведомление "com.roman.suite.flow.settings".
 // Здесь Flow перечитывает их на лету, без перезапуска: свойства AppState меняются со всеми реакциями.
 // Если Flow поправил настройку сам (вход в систему не включился), он отвечает
 // уведомлением "….changed", и хаб показывает то, что есть на самом деле.
@@ -9,7 +10,6 @@ import AppKit
 enum HubSync {
     static let notification = Notification.Name("com.roman.suite.flow.settings")
     private static let changed = Notification.Name("com.roman.suite.flow.settings.changed")
-    private static let hubBundleID = "com.roman.hub-settings"
     private static var observer: NSObjectProtocol?
     private static weak var state: AppState?
     private static var setLaunchAtLogin: (Bool) -> Void = { _ in }
@@ -41,24 +41,6 @@ enum HubSync {
         UserDefaults.standard.synchronize()
         DistributedNotificationCenter.default().postNotificationName(changed, object: nil, userInfo: nil,
                                                                      deliverImmediately: true)
-    }
-
-    /// ⌘, и «Настройки…»: открыть Hub Settings сразу на модуле Flow.
-    static func openSettings() {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: hubBundleID) else {
-            let alert = NSAlert()
-            alert.messageText = "Hub Settings не установлен"
-            alert.informativeText = "Настройки Flow Local теперь в приложении Hub Settings. Установите его: apps/hub-settings, ./build.sh install."
-            alert.runModal()
-            return
-        }
-        // Не запущен - откроется на последнем модуле из своих настроек; запущен - переключится по уведомлению.
-        let domain = hubBundleID as CFString
-        CFPreferencesSetAppValue("selection" as CFString, "flow" as CFString, domain)
-        CFPreferencesAppSynchronize(domain)
-        DistributedNotificationCenter.default().postNotificationName(
-            Notification.Name("com.roman.suite.hub.show"), object: "flow", userInfo: nil, deliverImmediately: true)
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 }
 
